@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Team {
+  id              String    @id @default(cuid())
+  teamName        String    @unique @db.VarChar(100)
+  teamDoctor      String?   @db.VarChar(50)
+  headCoach       String?   @db.VarChar(50)
+  teamLeader      String?   @db.VarChar(50)
+  coachPhone      String?   @db.VarChar(20)
+  leaderPhone     String?   @db.VarChar(20)
+  homeJerseyColor String    @db.VarChar(20)
+  awayJerseyColor String    @db.VarChar(20)
+  teamLogo        String?   @db.Text
+  homeJersey      String?   @db.Text
+  awayJersey      String?   @db.Text
+  players         Player[]
+  homeMatches     Match[]   @relation("HomeTeam")
+  awayMatches     Match[]   @relation("AwayTeam")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([teamName])
+}
+
+model Player {
+  id            String  @id @default(cuid())
+  name          String  @db.VarChar(50)
+  studentId     String  @unique @db.VarChar(20)
+  jerseyNumber  String  @db.VarChar(10)
+  photo         String? @db.Text
+  teamId        String
+  team          Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([teamId])
+  @@index([studentId])
+}
+
+model Match {
+  id              String   @id @default(cuid())
+  homeTeamId      String
+  awayTeamId      String
+  homeTeam        Team     @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Cascade)
+  awayTeam        Team     @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Cascade)
+  homeScore       Int      @default(0)
+  awayScore       Int      @default(0)
+  matchDate       DateTime
+  location        String   @db.VarChar(100)
+  status          String   @db.VarChar(20) @default("scheduled")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@index([matchDate])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique @db.VarChar(50)
+  password  String   @db.VarChar(255)
+  role      String   @db.VarChar(20) @default("user")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([username])
+}

@@ -29,9 +29,9 @@ async function createApp() {
     origin: [
       'http://localhost:3000',
       'http://localhost:8080',
-      'https://example.com',
-      'https://api.example.com',
-      'https://my-project.vercel.app'
+      'https://sztufa.xyz',
+      'https://api.sztufa.xyz',
+      'https://sztufa-server.vercel.app'
     ].filter(Boolean),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,

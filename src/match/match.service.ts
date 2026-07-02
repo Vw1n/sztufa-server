@@ -37,20 +37,23 @@ export class MatchService {
           playerId: e.playerId || null,
           playerName: e.playerName || null,
           jerseyNumber: e.jerseyNumber || null,
+          subPlayerId: e.subPlayerId || null,
+          subPlayerName: e.subPlayerName || null,
+          subJerseyNumber: e.subJerseyNumber || null,
         })),
       });
     }
 
     // 自动同步进球记录到 Goal 表以向下兼容展示端
-    const goalEvents = events ? events.filter(e => e.eventType === 'goal') : [];
+    const goalEvents = events ? events.filter(e => e.eventType === 'goal' || e.eventType === 'penalty' || e.eventType === 'own_goal') : [];
     if (goalEvents.length > 0) {
       await this.prisma.goal.createMany({
         data: goalEvents.map((g) => ({
           matchId: match.id,
-          playerName: g.playerName || '',
+          playerName: g.eventType === 'own_goal' ? `${g.playerName} (乌龙)` : g.eventType === 'penalty' ? `${g.playerName} (点球)` : g.playerName || '',
           jerseyNumber: g.jerseyNumber || '',
           goalTime: g.eventTime,
-          teamType: g.teamType,
+          teamType: g.eventType === 'own_goal' ? (g.teamType === 'home' ? 'away' : 'home') : g.teamType,
           playerId: g.playerId || null,
         })),
       });
@@ -152,21 +155,24 @@ export class MatchService {
           playerId: e.playerId || null,
           playerName: e.playerName || null,
           jerseyNumber: e.jerseyNumber || null,
+          subPlayerId: e.subPlayerId || null,
+          subPlayerName: e.subPlayerName || null,
+          subJerseyNumber: e.subJerseyNumber || null,
         })),
       });
     }
 
     // 同步进球数据到 Goal 表（向下兼容展示端）
     await this.prisma.goal.deleteMany({ where: { matchId: id } });
-    const goalEvents = events ? events.filter(e => e.eventType === 'goal') : [];
+    const goalEvents = events ? events.filter(e => e.eventType === 'goal' || e.eventType === 'penalty' || e.eventType === 'own_goal') : [];
     if (goalEvents.length > 0) {
       await this.prisma.goal.createMany({
         data: goalEvents.map((g) => ({
           matchId: id,
-          playerName: g.playerName || '',
+          playerName: g.eventType === 'own_goal' ? `${g.playerName} (乌龙)` : g.eventType === 'penalty' ? `${g.playerName} (点球)` : g.playerName || '',
           jerseyNumber: g.jerseyNumber || '',
           goalTime: g.eventTime,
-          teamType: g.teamType,
+          teamType: g.eventType === 'own_goal' ? (g.teamType === 'home' ? 'away' : 'home') : g.teamType,
           playerId: g.playerId || null,
         })),
       });

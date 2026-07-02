@@ -38,7 +38,8 @@ model Player {
   teamId        String
   team          Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   goals         Goal[]
-  events        MatchEvent[]
+  events        MatchEvent[] @relation("EventPlayer")
+  subEvents     MatchEvent[] @relation("EventSubPlayer")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -84,21 +85,26 @@ model Goal {
 }
 
 model MatchEvent {
-  id           String   @id @default(cuid())
-  matchId      String
-  match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  eventTime    String
-  eventType    String
-  playerId     String?
-  player       Player?  @relation(fields: [playerId], references: [id])
-  playerName   String?
-  jerseyNumber String?
-  description  String
-  teamType     String
-  createdAt    DateTime @default(now())
+  id              String   @id @default(cuid())
+  matchId         String
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  eventTime       String
+  eventType       String
+  playerId        String?
+  player          Player?  @relation("EventPlayer", fields: [playerId], references: [id])
+  playerName      String?
+  jerseyNumber    String?
+  subPlayerId     String?
+  subPlayer       Player?  @relation("EventSubPlayer", fields: [subPlayerId], references: [id])
+  subPlayerName   String?
+  subJerseyNumber String?
+  description     String
+  teamType        String
+  createdAt       DateTime @default(now())
 
   @@index([matchId])
   @@index([playerId])
+  @@index([subPlayerId])
 }
 
 model News {

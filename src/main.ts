@@ -28,13 +28,14 @@ async function createApp() {
   app.enableCors({
     origin: [
       'http://localhost:3000',
+      'http://127.0.0.1:3000',
       'http://localhost:8080',
       'https://sztufa.xyz',
       'https://api.sztufa.xyz',
       'https://admin.sztufa.xyz',
       'https://sztufa-server.vercel.app'
     ].filter(Boolean),
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,
   });
 

@@ -5,6 +5,7 @@ import { TeamModule } from './team/team.module';
 import { PlayerModule } from './player/player.module';
 import { MatchModule } from './match/match.module';
 import { ImportModule } from './import/import.module';
+import { UploadModule } from './upload/upload.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { ImportModule } from './import/import.module';
     PlayerModule,
     MatchModule,
     ImportModule,
+    UploadModule,
   ],
 })
 export class AppModule {}

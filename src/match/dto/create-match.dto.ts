@@ -32,4 +32,12 @@ export class CreateMatchDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @ApiProperty({ description: '进球列表', required: false })
+  @IsOptional()
+  goals?: any[];
+
+  @ApiProperty({ description: '事件列表', required: false })
+  @IsOptional()
+  events?: any[];
 }

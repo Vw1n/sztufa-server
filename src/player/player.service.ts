@@ -15,6 +15,25 @@ export class PlayerService {
       throw new NotFoundException('球队不存在');
     }
 
+    // 检查学号是否已存在
+    const existingPlayer = await this.prisma.player.findUnique({
+      where: { studentId: createPlayerDto.studentId },
+    });
+
+    if (existingPlayer) {
+      // 如果已存在，则更新球员信息
+      return this.prisma.player.update({
+        where: { studentId: createPlayerDto.studentId },
+        data: {
+          name: createPlayerDto.name,
+          jerseyNumber: createPlayerDto.jerseyNumber,
+          teamId: createPlayerDto.teamId,
+          photo: createPlayerDto.photo || existingPlayer.photo || undefined,
+        },
+        include: { team: true },
+      });
+    }
+
     return this.prisma.player.create({
       data: createPlayerDto,
       include: { team: true },

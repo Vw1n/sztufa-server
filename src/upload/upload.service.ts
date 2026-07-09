@@ -23,12 +23,14 @@ export class UploadService {
     const fileKey = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.webp`;
 
     // 2. 上传至 Cloudflare R2 存储桶
-    await this.s3Client.send(new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME,
-      Key: fileKey,
-      Body: compressedBuffer,
-      ContentType: 'image/webp',
-    }));
+    await this.s3Client.send(
+      new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET_NAME,
+        Key: fileKey,
+        Body: compressedBuffer,
+        ContentType: 'image/webp',
+      }),
+    );
 
     // 3. 返回公开的 CDN 访问链接
     return `${process.env.R2_PUBLIC_URL}/${fileKey}`;

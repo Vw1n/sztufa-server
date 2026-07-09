@@ -16,4 +16,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   role?: string;
+
+  @ApiProperty({ description: '所辖球队ID', example: 'cuid...', required: false })
+  @IsOptional()
+  @IsString()
+  teamId?: string;
 }

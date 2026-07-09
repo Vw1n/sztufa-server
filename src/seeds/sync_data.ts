@@ -114,4 +114,6 @@ async function main() {
   console.log('同步成功！');
 }
 
-main().catch(console.error).finally(() => prisma.$disconnect());
+main()
+  .catch(console.error)
+  .finally(() => prisma.$disconnect());

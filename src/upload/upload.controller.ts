@@ -1,4 +1,11 @@
-import { Controller, Post, UseInterceptors, UploadedFile, UseGuards, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  UseInterceptors,
+  UploadedFile,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { UploadService } from './upload.service';
@@ -30,7 +37,7 @@ export class UploadController {
     if (!file) {
       throw new BadRequestException('请选择要上传的文件');
     }
-    
+
     // 校验文件类型是否为图片
     if (!file.mimetype.startsWith('image/')) {
       throw new BadRequestException('只能上传图片文件');

@@ -13,7 +13,7 @@ export class AuthService {
   ) {}
 
   async register(createUserDto: CreateUserDto) {
-    const { username, password, role } = createUserDto;
+    const { username, password, role, teamId } = createUserDto;
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await this.prisma.user.create({
@@ -21,11 +21,13 @@ export class AuthService {
         username,
         password: hashedPassword,
         role: role || 'user',
+        teamId: teamId || null,
       },
       select: {
         id: true,
         username: true,
         role: true,
+        teamId: true,
         createdAt: true,
       },
     });
@@ -48,6 +50,7 @@ export class AuthService {
         id: user.id,
         username: user.username,
         role: user.role,
+        teamId: user.teamId,
       },
       token,
     };
@@ -56,8 +59,56 @@ export class AuthService {
   async validateUser(payload: any) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, username: true, role: true },
+      select: { id: true, username: true, role: true, teamId: true },
     });
     return user;
+  }
+
+  async getAllUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        teamId: true,
+        createdAt: true,
+      },
+      orderBy: { username: 'asc' },
+    });
+  }
+
+  async updateUserRole(id: string, role: string, teamId: string | null) {
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        role,
+        teamId: teamId || null,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        teamId: true,
+      },
+    });
+  }
+
+  async deleteUser(id: string) {
+    return this.prisma.user.delete({
+      where: { id },
+    });
+  }
+
+  async resetPassword(id: string, newPassword: string) {
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    return this.prisma.user.update({
+      where: { id },
+      data: { password: hashedPassword },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+      },
+    });
   }
 }

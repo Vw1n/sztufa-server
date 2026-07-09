@@ -23,6 +23,7 @@ model Team {
   players         Player[]
   homeMatches     Match[]   @relation("HomeTeam")
   awayMatches     Match[]   @relation("AwayTeam")
+  users           User[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -30,18 +31,24 @@ model Team {
 }
 
 model Player {
-  id            String  @id @default(cuid())
-  name          String
-  studentId     String  @unique
-  jerseyNumber  String
-  photo         String?
-  teamId        String
-  team          Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  goals         Goal[]
-  events        MatchEvent[] @relation("EventPlayer")
-  subEvents     MatchEvent[] @relation("EventSubPlayer")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  String  @id @default(cuid())
+  name                String
+  studentId           String  @unique
+  jerseyNumber        String
+  photo               String?
+  status              String  @default("active")
+  yellowCards         Int     @default(0)
+  redCards            Int     @default(0)
+  suspendedAtMatchId  String?
+  teamId              String
+  team                Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  goals               Goal[]
+  events              MatchEvent[] @relation("EventPlayer")
+  subEvents           MatchEvent[] @relation("EventSubPlayer")
+  assistEvents        MatchEvent[] @relation("EventAssistPlayer")
+  mvpMatches          Match[]      @relation("MatchMvpPlayer")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([teamId])
   @@index([studentId])
@@ -60,12 +67,81 @@ model Match {
   status          String        @default("scheduled")
   goals           Goal[]
   events          MatchEvent[]
+  seasonId        String?
+  season          Season?       @relation(fields: [seasonId], references: [id])
+  mvpPlayerId     String?
+  mvpPlayer       Player?       @relation("MatchMvpPlayer", fields: [mvpPlayerId], references: [id])
+  mvpPlayerName   String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([homeTeamId])
   @@index([awayTeamId])
   @@index([matchDate])
+  @@index([seasonId])
+  @@index([mvpPlayerId])
+}
+
+model Goal {
+  id           String   @id @default(cuid())
+  matchId      String
+  match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId     String?
+  player       Player?  @relation(fields: [playerId], references: [id])
+  playerName   String
+  jerseyNumber String
+  goalTime     String
+  teamType     String
+  createdAt    DateTime @default(now())
+
+  @@index([matchId])
+  @@index([playerId])
+}
+
+model MatchEvent {
+  id                 String   @id @default(cuid())
+  matchId            String
+  match              Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  eventTime          String
+  eventType          String
+  playerId           String?
+  player             Player?  @relation("EventPlayer", fields: [playerId], references: [id])
+  playerName         String?
+  jerseyNumber       String?
+  subPlayerId        String?
+  subPlayer          Player?  @relation("EventSubPlayer", fields: [subPlayerId], references: [id])
+  subPlayerName      String?
+  subJerseyNumber    String?
+  assistPlayerId     String?
+  assistPlayer       Player?  @relation("EventAssistPlayer", fields: [assistPlayerId], references: [id])
+  assistPlayerName   String?
+  assistJerseyNumber String?
+  description        String
+  teamType           String
+  createdAt          DateTime @default(now())
+
+  @@index([matchId])
+  @@index([playerId])
+  @@index([subPlayerId])
+  @@index([assistPlayerId])
+}
+
+model News {
+  id           String   @id @default(cuid())
+  title        String
+  category     String
+  content      String
+  coverImage   String?
+  isPinned     Boolean  @default(false)
+  viewCount    Int      @default(0)
+  published    Boolean  @default(true)
+  publishedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+  @@index([published])
+  @@index([publishedAt])
 }
 
 model Goal {
@@ -130,8 +206,31 @@ model User {
   username  String   @unique
   password  String
   role      String   @default("user")
+  teamId    String?
+  team      Team?    @relation(fields: [teamId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([username])
+  @@index([teamId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  username  String
+  action    String
+  details   String
+  createdAt DateTime @default(now())
+
+  @@index([username])
+  @@index([createdAt])
+}
+
+model Season {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  status    String   @default("active") // active, archived
+  matches   Match[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

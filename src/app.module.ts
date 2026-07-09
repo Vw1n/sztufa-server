@@ -6,6 +6,9 @@ import { PlayerModule } from './player/player.module';
 import { MatchModule } from './match/match.module';
 import { ImportModule } from './import/import.module';
 import { UploadModule } from './upload/upload.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { BackupModule } from './backup/backup.module';
+import { SeasonModule } from './season/season.module';
 
 @Module({
   imports: [
@@ -16,6 +19,9 @@ import { UploadModule } from './upload/upload.module';
     MatchModule,
     ImportModule,
     UploadModule,
+    AuditLogModule,
+    BackupModule,
+    SeasonModule,
   ],
 })
 export class AppModule {}

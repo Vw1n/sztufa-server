@@ -5,11 +5,17 @@
 本项目是一个基于 **NestJS + TypeScript + PostgreSQL** 的校园足球信息管理平台后端服务，为校园足球赛事提供完整的数字化管理解决方案。
 
 主要功能模块：
-- **用户认证** - JWT 令牌认证，支持用户注册和登录
-- **球队管理** - 球队信息的增删改查
-- **球员管理** - 球员信息管理，支持关联球队
+- **用户认证** - JWT 令牌认证，配置支持 ConfigService 异步验签与过期时间
+- **图片上传** - 接入 Cloudflare R2，使用 sharp 库对图片进行 WebP 格式压缩并上传
+- **球队管理** - 球队信息的增删改查及 Logo 地址关联
+- **球员管理与停赛重置** - 球员数据管理，支持基于比赛场次自动判定并恢复被禁赛（`suspended`）球员的状态为可用（`active`）。
+- **赛季归档与管理 [NEW]** - 独立的赛季系统。支持赛季多端切换，一键归档旧赛季并开启新赛季，触发事务自动重置所有球员在新赛季的黄红牌数与可用状态。
+- **荣誉与助攻数据统计 [NEW]** - 比分录入支持助攻球员（`assist`）绑定，比赛基本信息中支持评选该场最佳球员（MVP），同时支持球员个人跨赛季生涯统计聚合 API。
 - **比赛管理** - 比赛日程、结果记录和统计
 - **数据导入** - 支持从 JSON 文件批量导入数据
+- **赛事关键事件流** - 支持进球（普通/点球/乌龙）、换人（双下拉列表）、红黄牌等事件的时序数据存取
+- **操作审计日志** - 记录管理员关键行为，提高数据透明度与安全性
+- **数据安全备份与还原** - 一键推送到 Cloudflare R2 云端及高一致性事务级整库覆盖还原
 
 ## 技术栈
 
@@ -20,6 +26,7 @@
 | 数据库 | PostgreSQL | ^16.x |
 | ORM | Prisma | ^5.7.0 |
 | 认证 | JWT | ^10.2.0 |
+| 云存储 | Cloudflare R2 | ^3.1076.0 |
 | API 文档 | Swagger | ^7.1.17 |
 
 ## 快速开始
@@ -50,7 +57,7 @@ PORT=3001
 ### 运行数据库迁移
 
 ```bash
-npx prisma migrate dev
+npx prisma db push
 ```
 
 ### 启动开发服务器
@@ -67,7 +74,7 @@ npm run start:dev
 docker-compose up -d
 ```
 
-Docker Compose 将自动创建数据库容器和应用容器，无需手动配置数据库。
+Docker Compose 将自动创建数据库容器 and 应用容器，无需手动配置数据库。
 
 ## API 文档
 
@@ -105,10 +112,18 @@ src/
 │   ├── import.controller.ts
 │   ├── import.service.ts
 │   └── import.module.ts
+├── audit-log/      # 操作审计模块 [NEW]
+│   ├── audit-log.controller.ts
+│   ├── audit-log.service.ts
+│   └── audit-log.module.ts
+├── backup/         # 数据备份与还原模块 [NEW]
+│   ├── backup.controller.ts
+│   ├── backup.service.ts
+│   └── backup.module.ts
 ├── prisma/         # Prisma 服务配置
 │   └── prisma.service.ts
 ├── app.module.ts   # 主模块
-└── main.ts         # 应用入口
+│   └── main.ts     # 应用入口
 ```
 
 ## API 端点
@@ -149,6 +164,20 @@ src/
 | GET | `/api/v1/matches/:id` | 获取单个比赛详情 |
 | PATCH | `/api/v1/matches/:id` | 更新比赛信息 |
 | DELETE | `/api/v1/matches/:id` | 删除比赛 |
+
+### 审计日志接口 [NEW]
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | `/api/v1/audit-logs` | 获取操作审计日志分页列表 |
+
+### 备份管理接口 [NEW]
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | `/api/v1/backups/create` | 手动创建数据库备份并上传 R2 |
+| GET | `/api/v1/backups/list` | 获取云端 R2 中的备份文件列表 |
+| POST | `/api/v1/backups/restore` | 根据指定的 Key 还原数据库 |
 
 ### 数据导入接口
 

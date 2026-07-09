@@ -40,4 +40,14 @@ export class CreateMatchDto {
   @ApiProperty({ description: '事件列表', required: false })
   @IsOptional()
   events?: any[];
+
+  @ApiProperty({ description: '全场最佳球员ID', required: false })
+  @IsOptional()
+  @IsString()
+  mvpPlayerId?: string;
+
+  @ApiProperty({ description: '全场最佳球员姓名', required: false })
+  @IsOptional()
+  @IsString()
+  mvpPlayerName?: string;
 }

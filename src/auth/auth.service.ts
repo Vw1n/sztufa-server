@@ -63,4 +63,39 @@ export class AuthService {
     });
     return user;
   }
+
+  async getAllUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        teamId: true,
+        createdAt: true,
+      },
+      orderBy: { username: 'asc' },
+    });
+  }
+
+  async updateUserRole(id: string, role: string, teamId: string | null) {
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        role,
+        teamId: teamId || null,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        teamId: true,
+      },
+    });
+  }
+
+  async deleteUser(id: string) {
+    return this.prisma.user.delete({
+      where: { id },
+    });
+  }
 }

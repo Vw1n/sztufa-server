@@ -19,7 +19,9 @@ export class AuditLogController {
   findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('username') username?: string,
+    @Query('action') action?: string,
   ) {
-    return this.auditLogService.findAll(page, limit);
+    return this.auditLogService.findAll(page, limit, username, action);
   }
 }

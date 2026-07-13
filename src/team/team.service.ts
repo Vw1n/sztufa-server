@@ -18,10 +18,10 @@ export class TeamService {
     });
 
     await this.auditLogService.log(
-      username,
-      'CREATE_TEAM',
-      `创建了新球队: "${team.teamName}" (主教练: ${team.headCoach || '无'}, 队长: ${team.teamLeader || '无'})`,
-    );
+       username,
+       'CREATE_TEAM',
+       `创建球队: "${team.teamName}"`,
+     );
 
     return team;
   }
@@ -68,36 +68,36 @@ export class TeamService {
 
     const diffs: string[] = [];
     if (updateTeamDto.teamName !== undefined && updateTeamDto.teamName !== team.teamName) {
-      diffs.push(`队名: "${team.teamName}" -> "${updateTeamDto.teamName}"`);
+      diffs.push(`队名: ${team.teamName}->${updateTeamDto.teamName}`);
     }
     if (updateTeamDto.teamLogo !== undefined && updateTeamDto.teamLogo !== team.teamLogo) {
-      diffs.push(`队徽已更新`);
+      diffs.push(`更新队徽`);
     }
     if (updateTeamDto.headCoach !== undefined && updateTeamDto.headCoach !== team.headCoach) {
-      diffs.push(`主教练: "${team.headCoach || '无'}" -> "${updateTeamDto.headCoach || '无'}"`);
+      diffs.push(`主教练: ${team.headCoach || '无'}->${updateTeamDto.headCoach || '无'}`);
     }
     if (updateTeamDto.coachPhone !== undefined && updateTeamDto.coachPhone !== team.coachPhone) {
-      diffs.push(`教练电话: "${team.coachPhone || '无'}" -> "${updateTeamDto.coachPhone || '无'}"`);
+      diffs.push(`教练电话: ${team.coachPhone || '无'}->${updateTeamDto.coachPhone || '无'}`);
     }
     if (updateTeamDto.teamLeader !== undefined && updateTeamDto.teamLeader !== team.teamLeader) {
-      diffs.push(`队长: "${team.teamLeader || '无'}" -> "${updateTeamDto.teamLeader || '无'}"`);
+      diffs.push(`队长: ${team.teamLeader || '无'}->${updateTeamDto.teamLeader || '无'}`);
     }
     if (updateTeamDto.leaderPhone !== undefined && updateTeamDto.leaderPhone !== team.leaderPhone) {
-      diffs.push(`队长电话: "${team.leaderPhone || '无'}" -> "${updateTeamDto.leaderPhone || '无'}"`);
+      diffs.push(`队长电话: ${team.leaderPhone || '无'}->${updateTeamDto.leaderPhone || '无'}`);
     }
     if (updateTeamDto.teamDoctor !== undefined && updateTeamDto.teamDoctor !== team.teamDoctor) {
-      diffs.push(`队医: "${team.teamDoctor || '无'}" -> "${updateTeamDto.teamDoctor || '无'}"`);
+      diffs.push(`队医: ${team.teamDoctor || '无'}->${updateTeamDto.teamDoctor || '无'}`);
     }
     if (updateTeamDto.homeJerseyColor !== undefined && updateTeamDto.homeJerseyColor !== team.homeJerseyColor) {
-      diffs.push(`主场球衣: "${team.homeJerseyColor || '无'}" -> "${updateTeamDto.homeJerseyColor || '无'}"`);
+      diffs.push(`主场球衣: ${team.homeJerseyColor || '无'}->${updateTeamDto.homeJerseyColor || '无'}`);
     }
     if (updateTeamDto.awayJerseyColor !== undefined && updateTeamDto.awayJerseyColor !== team.awayJerseyColor) {
-      diffs.push(`客场球衣: "${team.awayJerseyColor || '无'}" -> "${updateTeamDto.awayJerseyColor || '无'}"`);
+      diffs.push(`客场球衣: ${team.awayJerseyColor || '无'}->${updateTeamDto.awayJerseyColor || '无'}`);
     }
 
     const details = diffs.length > 0
-      ? `修改了球队 "${team.teamName}" 的信息: ${diffs.join(', ')}`
-      : `保存了球队 "${team.teamName}" 的信息(未做改动)`;
+      ? `修改球队 "${team.teamName}" 信息: ${diffs.join(', ')}`
+      : `保存球队 "${team.teamName}" 信息(未改动)`;
 
     await this.auditLogService.log(username, 'UPDATE_TEAM', details);
 
@@ -139,7 +139,7 @@ export class TeamService {
     await this.auditLogService.log(
       username,
       'DELETE_TEAM',
-      `删除了球队 "${team.teamName}"，并级联软删除了该队名下的 ${teamPlayers.length} 名在队球员。`,
+      `删除球队: "${team.teamName}" (级联删除球员 ${teamPlayers.length} 人)`,
     );
 
     return deletedTeam;

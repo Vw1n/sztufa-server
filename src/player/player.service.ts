@@ -73,7 +73,7 @@ export class PlayerService {
       await this.auditLogService.log(
         username,
         'UPDATE_PLAYER',
-        `因导入/创建查重，覆盖更新了球员信息: ${createPlayerDto.name} (学号: ${createPlayerDto.studentId})`,
+        `导入/关联球员: "${createPlayerDto.name}" (学号: ${createPlayerDto.studentId})`,
       );
 
       return updatedPlayer;
@@ -108,7 +108,7 @@ export class PlayerService {
     await this.auditLogService.log(
       username,
       'CREATE_PLAYER',
-      `创建了新球员: ${createPlayerDto.name} (学号: ${createPlayerDto.studentId})`,
+      `新增球员: "${createPlayerDto.name}" (学号: ${createPlayerDto.studentId})`,
     );
 
     return newPlayer;
@@ -200,26 +200,26 @@ export class PlayerService {
 
     const diffs: string[] = [];
     if (updatePlayerDto.name !== undefined && updatePlayerDto.name !== player.name) {
-      diffs.push(`姓名: "${player.name}" -> "${updatePlayerDto.name}"`);
+      diffs.push(`姓名: ${player.name}->${updatePlayerDto.name}`);
     }
     if (updatePlayerDto.jerseyNumber !== undefined && updatePlayerDto.jerseyNumber !== player.jerseyNumber) {
-      diffs.push(`号码: "${player.jerseyNumber}" -> "${updatePlayerDto.jerseyNumber}"`);
+      diffs.push(`号码: ${player.jerseyNumber}->${updatePlayerDto.jerseyNumber}`);
     }
     if (updatePlayerDto.studentId !== undefined && updatePlayerDto.studentId !== player.studentId) {
-      diffs.push(`学号: "${player.studentId}" -> "${updatePlayerDto.studentId}"`);
+      diffs.push(`学号: ${player.studentId}->${updatePlayerDto.studentId}`);
     }
     if (updatePlayerDto.status !== undefined && updatePlayerDto.status !== player.status) {
-      diffs.push(`状态: "${player.status}" -> "${updatePlayerDto.status}"`);
+      diffs.push(`状态: ${player.status}->${updatePlayerDto.status}`);
     }
     if (updatePlayerDto.teamId !== undefined && updatePlayerDto.teamId !== player.teamId) {
       const oldTeam = await this.prisma.team.findUnique({ where: { id: player.teamId || '' } });
       const newTeam = await this.prisma.team.findUnique({ where: { id: updatePlayerDto.teamId || '' } });
-      diffs.push(`归属球队: "${oldTeam?.teamName || '无'}" -> "${newTeam?.teamName || '无'}"`);
+      diffs.push(`球队: ${oldTeam?.teamName || '无'}->${newTeam?.teamName || '无'}`);
     }
 
     const details = diffs.length > 0
-      ? `更新了球员 "${player.name}" (学号: ${player.studentId}) 的信息: ${diffs.join(', ')}`
-      : `更新了球员 "${player.name}" (学号: ${player.studentId}) 的信息 (未做实际改动)`;
+      ? `修改球员 "${player.name}" 信息: ${diffs.join(', ')}`
+      : `保存球员 "${player.name}" 信息(未改动)`;
 
     await this.auditLogService.log(
       username,
@@ -255,7 +255,7 @@ export class PlayerService {
     await this.auditLogService.log(
       username,
       'DELETE_PLAYER',
-      `删除了球员: ${player.name} (学号: ${player.studentId})`,
+      `删除球员: "${player.name}" (学号: ${player.studentId})`,
     );
 
     return result;

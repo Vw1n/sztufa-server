@@ -37,7 +37,7 @@ export class AuthService {
     await this.auditLogService.log(
       'system',
       'USER_REGISTER',
-      `新用户 "${username}" 注册成功，初始角色为: ${user.role}`,
+      `新建账号: "${username}" (角色: ${user.role})`,
     );
 
     const token = this.jwtService.sign({ userId: user.id, role: user.role });
@@ -111,17 +111,17 @@ export class AuthService {
 
     const diffs: string[] = [];
     if (userBefore.role !== role) {
-      diffs.push(`角色: "${userBefore.role}" -> "${role}"`);
+      diffs.push(`角色: ${userBefore.role}->${role}`);
     }
     if (userBefore.teamId !== teamId) {
       const oldTeamName = userBefore.team?.teamName || '无';
       const newTeamName = updatedUser.team?.teamName || '无';
-      diffs.push(`绑定球队: "${oldTeamName}" -> "${newTeamName}"`);
+      diffs.push(`绑定球队: ${oldTeamName}->${newTeamName}`);
     }
 
     const details = diffs.length > 0
-      ? `修改了用户 "${updatedUser.username}" 的权限设置: ${diffs.join(', ')}`
-      : `保存了用户 "${updatedUser.username}" 的权限设置(未做改动)`;
+      ? `修改用户 "${updatedUser.username}" 权限: ${diffs.join(', ')}`
+      : `保存用户 "${updatedUser.username}" 权限(未改动)`;
 
     await this.auditLogService.log(operatorUsername, 'UPDATE_USER_ROLE', details);
 
@@ -138,7 +138,7 @@ export class AuthService {
     await this.auditLogService.log(
       operatorUsername,
       'DELETE_USER',
-      `删除了用户账号: "${user.username}" (原角色: ${user.role})`,
+      `删除账号: "${user.username}"`,
     );
 
     return deletedUser;
@@ -161,7 +161,7 @@ export class AuthService {
     await this.auditLogService.log(
       operatorUsername,
       'RESET_USER_PASSWORD',
-      `重置了用户 "${user.username}" 的登录密码`,
+      `重置用户 "${user.username}" 密码`,
     );
 
     return updatedUser;

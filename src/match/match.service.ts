@@ -147,7 +147,7 @@ export class MatchService {
     await this.auditLogService.log(
       username,
       'CREATE_MATCH',
-      `录入了比赛比分与事件: ${homeTeam.teamName} vs ${awayTeam.teamName} (比分: ${createMatchDto.homeScore}:${createMatchDto.awayScore})`,
+      `录入比赛: "${homeTeam.teamName} vs ${awayTeam.teamName}" (比分: ${createMatchDto.homeScore}:${createMatchDto.awayScore})`,
     );
 
     const result = await this.prisma.match.findUnique({
@@ -360,34 +360,32 @@ export class MatchService {
     // 记录审计日志
     const diffs: string[] = [];
     if (updateMatchDto.homeScore !== undefined && updateMatchDto.homeScore !== match.homeScore) {
-      diffs.push(`主队比分: ${match.homeScore} -> ${updateMatchDto.homeScore}`);
+      diffs.push(`主队比分: ${match.homeScore}->${updateMatchDto.homeScore}`);
     }
     if (updateMatchDto.awayScore !== undefined && updateMatchDto.awayScore !== match.awayScore) {
-      diffs.push(`客队比分: ${match.awayScore} -> ${updateMatchDto.awayScore}`);
+      diffs.push(`客队比分: ${match.awayScore}->${updateMatchDto.awayScore}`);
     }
     if (updateMatchDto.location !== undefined && updateMatchDto.location !== match.location) {
-      diffs.push(`地点: "${match.location || '未定'}" -> "${updateMatchDto.location || '未定'}"`);
+      diffs.push(`地点: ${match.location || '未定'}->${updateMatchDto.location || '未定'}`);
     }
     if (updateMatchDto.matchDate !== undefined && new Date(updateMatchDto.matchDate).getTime() !== new Date(match.matchDate).getTime()) {
-      diffs.push(`比赛时间已更新`);
+      diffs.push(`更新时间`);
     }
     if (updateMatchDto.status !== undefined && updateMatchDto.status !== match.status) {
-      diffs.push(`状态: "${match.status}" -> "${updateMatchDto.status}"`);
+      diffs.push(`状态: ${match.status}->${updateMatchDto.status}`);
     }
     if (events !== undefined) {
-      const oldEventsCount = match.events?.length || 0;
-      const newEventsCount = events.length;
-      diffs.push(`比赛事件: 已重置并录入 ${newEventsCount} 个事件(原为 ${oldEventsCount} 个)`);
+      diffs.push(`更新事件(${events.length}个)`);
     }
     if (lineups !== undefined) {
-      diffs.push(`阵容配置已更新`);
+      diffs.push(`更新阵容`);
     }
 
     const homeTeamName = match.homeTeam?.teamName || '';
     const awayTeamName = match.awayTeam?.teamName || '';
     const details = diffs.length > 0
-      ? `修改了比赛 "${homeTeamName} vs ${awayTeamName}" 的信息: ${diffs.join(', ')}`
-      : `保存了比赛 "${homeTeamName} vs ${awayTeamName}" 的信息 (未做实际改动)`;
+      ? `修改比赛 "${homeTeamName} vs ${awayTeamName}" 比分/信息: ${diffs.join(', ')}`
+      : `保存比赛 "${homeTeamName} vs ${awayTeamName}" 信息(未改动)`;
 
     await this.auditLogService.log(
       username,
@@ -449,7 +447,7 @@ export class MatchService {
     await this.auditLogService.log(
       username,
       'DELETE_MATCH',
-      `删除了比赛: ${match.homeTeam.teamName} vs ${match.awayTeam.teamName} (比分: ${match.homeScore}:${match.awayScore})`,
+      `删除比赛: "${match.homeTeam.teamName} vs ${match.awayTeam.teamName}"`,
     );
 
     return deletedMatch;

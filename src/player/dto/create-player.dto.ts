@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, IsNumber } from 'class-validator';
 
 export class CreatePlayerDto {
   @ApiProperty({ description: '球员姓名', example: '张三' })
@@ -22,4 +22,19 @@ export class CreatePlayerDto {
   @ApiProperty({ description: '所属球队ID' })
   @IsString()
   teamId: string;
+
+  @ApiProperty({ description: '球员状态', required: false, example: 'active' })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiProperty({ description: '黄牌数', required: false, example: 0 })
+  @IsOptional()
+  @IsNumber()
+  yellowCards?: number;
+
+  @ApiProperty({ description: '红牌数', required: false, example: 0 })
+  @IsOptional()
+  @IsNumber()
+  redCards?: number;
 }

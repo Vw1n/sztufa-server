@@ -194,6 +194,9 @@ export class MatchService {
       where.OR = [{ homeTeamId: teamId }, { awayTeamId: teamId }];
     }
 
+    const whereStats = { ...where };
+    delete whereStats.status;
+
     const [data, total, allMatchesForStats] = await Promise.all([
       this.prisma.match.findMany({
         skip,
@@ -204,7 +207,7 @@ export class MatchService {
       }),
       this.prisma.match.count({ where }),
       this.prisma.match.findMany({
-        where,
+        where: whereStats,
         select: { status: true }
       }),
     ]);

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
@@ -93,6 +93,9 @@ export class AuthService {
 
   async updateUserRole(id: string, role: string, teamId: string | null, operatorUsername: string = 'admin') {
     const userBefore = await this.prisma.user.findUnique({ where: { id }, include: { team: true } });
+    if (!userBefore) {
+      throw new NotFoundException('该用户账号不存在');
+    }
     
     const updatedUser = await this.prisma.user.update({
       where: { id },
@@ -130,6 +133,9 @@ export class AuthService {
 
   async deleteUser(id: string, operatorUsername: string = 'admin') {
     const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('该用户账号不存在');
+    }
     
     const deletedUser = await this.prisma.user.delete({
       where: { id },
@@ -146,6 +152,9 @@ export class AuthService {
 
   async resetPassword(id: string, newPassword: string, operatorUsername: string = 'admin') {
     const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('该用户账号不存在');
+    }
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     
     const updatedUser = await this.prisma.user.update({

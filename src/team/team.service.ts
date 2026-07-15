@@ -133,23 +133,25 @@ export class TeamService {
       where: { teamId: id, deletedAt: null }
     });
 
-    for (const player of teamPlayers) {
-      await this.prisma.player.update({
-        where: { id: player.id },
+    const deletedTeam = await this.prisma.$transaction(async (tx) => {
+      for (const player of teamPlayers) {
+        await tx.player.update({
+          where: { id: player.id },
+          data: {
+            deletedAt: new Date(),
+            studentId: `${player.studentId}_deleted_${timestamp}`
+          }
+        });
+      }
+
+      // 2. 软删除该球队并释放唯一队名约束
+      return tx.team.update({
+        where: { id },
         data: {
           deletedAt: new Date(),
-          studentId: `${player.studentId}_deleted_${timestamp}`
+          teamName: `${team.teamName}_deleted_${timestamp}`
         }
       });
-    }
-
-    // 2. 软删除该球队并释放唯一队名约束
-    const deletedTeam = await this.prisma.team.update({
-      where: { id },
-      data: {
-        deletedAt: new Date(),
-        teamName: `${team.teamName}_deleted_${timestamp}`
-      }
     });
 
     await this.auditLogService.log(
@@ -162,8 +164,11 @@ export class TeamService {
   }
 
   async searchByName(name: string) {
+    if (!name || name.trim() === '') {
+      return [];
+    }
     return this.prisma.team.findMany({
-      where: { teamName: { contains: name }, deletedAt: null },
+      where: { teamName: { contains: name.trim() }, deletedAt: null },
       include: { players: { where: { deletedAt: null } } },
     });
   }

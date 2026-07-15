@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, MinLength } from 'class-validator';
+import { IsString, IsOptional, MinLength, IsEnum } from 'class-validator';
 
 export class CreateUserDto {
   @ApiProperty({ description: '用户名', example: 'admin' })
@@ -15,6 +15,7 @@ export class CreateUserDto {
   @ApiProperty({ description: '角色', example: 'admin', required: false })
   @IsOptional()
   @IsString()
+  @IsEnum(['super_admin', 'coach', 'match_scorer', 'user'], { message: '角色必须是 super_admin, coach, match_scorer 或 user' })
   role?: string;
 
   @ApiProperty({ description: '所辖球队ID', example: 'cuid...', required: false })

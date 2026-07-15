@@ -265,8 +265,11 @@ export class PlayerService {
   }
 
   async searchByName(name: string) {
+    if (!name || name.trim() === '') {
+      return [];
+    }
     return this.prisma.player.findMany({
-      where: { name: { contains: name }, deletedAt: null },
+      where: { name: { contains: name.trim() }, deletedAt: null },
       include: { team: true },
     });
   }

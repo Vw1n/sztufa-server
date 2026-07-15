@@ -61,13 +61,13 @@ export class SeasonService {
         where: { deletedAt: null }
       });
 
-      for (const player of activePlayers) {
-        await tx.seasonTeamPlayer.create({
-          data: {
+      if (activePlayers.length > 0) {
+        await tx.seasonTeamPlayer.createMany({
+          data: activePlayers.map((player) => ({
             seasonId: newSeason.id,
             teamId: player.teamId,
-            playerId: player.id
-          }
+            playerId: player.id,
+          })),
         });
       }
 

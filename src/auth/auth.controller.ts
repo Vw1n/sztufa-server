@@ -3,6 +3,8 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { Roles } from './roles.decorator';
@@ -12,8 +14,11 @@ import { Roles } from './roles.decorator';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
   @Post('register')
-  @ApiOperation({ summary: '用户注册' })
+  @ApiOperation({ summary: '用户注册（仅超级管理员）' })
   async register(@Body() createUserDto: CreateUserDto) {
     return this.authService.register(createUserDto);
   }
@@ -40,12 +45,11 @@ export class AuthController {
   @ApiOperation({ summary: '修改用户角色和绑定球队（仅超级管理员）' })
   async updateRole(
     @Param('id') id: string,
-    @Body('role') role: string,
-    @Body('teamId') teamId: string | null,
+    @Body() updateUserRoleDto: UpdateUserRoleDto,
     @Req() req: any,
   ) {
     const operatorUsername = req.user?.username || 'admin';
-    return this.authService.updateUserRole(id, role, teamId, operatorUsername);
+    return this.authService.updateUserRole(id, updateUserRoleDto.role, updateUserRoleDto.teamId, operatorUsername);
   }
 
   @ApiBearerAuth()
@@ -65,10 +69,10 @@ export class AuthController {
   @ApiOperation({ summary: '重置用户密码（仅超级管理员）' })
   async resetPassword(
     @Param('id') id: string,
-    @Body('password') password: string,
+    @Body() resetPasswordDto: ResetPasswordDto,
     @Req() req: any,
   ) {
     const operatorUsername = req.user?.username || 'admin';
-    return this.authService.resetPassword(id, password, operatorUsername);
+    return this.authService.resetPassword(id, resetPasswordDto.password, operatorUsername);
   }
 }

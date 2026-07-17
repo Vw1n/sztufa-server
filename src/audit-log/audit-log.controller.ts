@@ -13,7 +13,6 @@ export class AuditLogController {
   constructor(private readonly auditLogService: AuditLogService) {}
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @Get()
   @ApiOperation({ summary: '获取审计日志列表（仅限管理员）' })
   findAll(

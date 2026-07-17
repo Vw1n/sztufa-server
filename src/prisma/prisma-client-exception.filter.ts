@@ -16,6 +16,7 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
           if (t === 'teamName') return '球队名称';
           if (t === 'studentId') return '学号';
           if (t === 'jerseyNumber') return '球衣号码';
+          if (t === 'username') return '用户名';
           return t;
         }).join(', ');
         

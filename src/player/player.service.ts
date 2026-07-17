@@ -25,9 +25,15 @@ export class PlayerService {
       throw new NotFoundException('球队不存在');
     }
 
-    // 检查学号是否已存在
-    const existingPlayer = await this.prisma.player.findUnique({
-      where: { studentId: createPlayerDto.studentId },
+    // 检查学号是否已存在（包括可能已被软删除重命名学号的历史球员记录）
+    const existingPlayer = await this.prisma.player.findFirst({
+      where: {
+        OR: [
+          { studentId: createPlayerDto.studentId },
+          { studentId: { startsWith: `${createPlayerDto.studentId}_deleted_` } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (existingPlayer) {
@@ -39,11 +45,12 @@ export class PlayerService {
         }
       }
 
-      // 如果已存在，则更新/恢复球员信息
+      // 如果已存在，则根据主键 ID 更新/恢复球员信息，并写回正常学号
       const updatedPlayer = await this.prisma.player.update({
-        where: { studentId: createPlayerDto.studentId },
+        where: { id: existingPlayer.id },
         data: {
           name: createPlayerDto.name,
+          studentId: createPlayerDto.studentId, // 恢复其真实的学号
           jerseyNumber: createPlayerDto.jerseyNumber,
           teamId: createPlayerDto.teamId,
           photo: createPlayerDto.photo || existingPlayer.photo || undefined,

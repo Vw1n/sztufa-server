@@ -29,9 +29,12 @@ export class BackupService {
     const backupData = {
       version: '1.0',
       timestamp: Date.now(),
+      seasons: await this.prisma.season.findMany(),
       teams: await this.prisma.team.findMany(),
       players: await this.prisma.player.findMany(),
       matches: await this.prisma.match.findMany(),
+      seasonTeamPlayers: await this.prisma.seasonTeamPlayer.findMany(),
+      matchLineups: await this.prisma.matchLineup.findMany(),
       goals: await this.prisma.goal.findMany(),
       matchEvents: await this.prisma.matchEvent.findMany(),
       news: await this.prisma.news.findMany(),
@@ -125,22 +128,60 @@ export class BackupService {
 
       // 2. 清理表并重构数据
       await this.prisma.$transaction(async (tx) => {
-        // 先删除有外键引用的记录
+        // 临存现有用户与球队的关联，防级联 SetNull 后教练的绑定失效
+        const userTeamAssociations = await tx.user.findMany({
+          where: { teamId: { not: null } },
+          select: { id: true, teamId: true },
+        });
+
+        // 先删除引用表的关联数据，防级联删除和残留外键冲突
+        await tx.matchLineup.deleteMany();
+        await tx.seasonTeamPlayer.deleteMany();
         await tx.goal.deleteMany();
         await tx.matchEvent.deleteMany();
         await tx.player.deleteMany();
         await tx.match.deleteMany();
         await tx.team.deleteMany();
         await tx.news.deleteMany();
+        await tx.season.deleteMany();
 
         // 恢复数据
-        if (data.teams.length > 0) {
-          await tx.team.createMany({ data: data.teams });
+        if (data.seasons && data.seasons.length > 0) {
+          const seasons = data.seasons.map((s: any) => ({
+            ...s,
+            createdAt: s.createdAt ? new Date(s.createdAt) : undefined,
+            updatedAt: s.updatedAt ? new Date(s.updatedAt) : undefined,
+          }));
+          await tx.season.createMany({ data: seasons });
         }
-        if (data.players.length > 0) {
-          await tx.player.createMany({ data: data.players });
+        if (data.teams && data.teams.length > 0) {
+          const teams = data.teams.map((t: any) => ({
+            ...t,
+            createdAt: t.createdAt ? new Date(t.createdAt) : undefined,
+            updatedAt: t.updatedAt ? new Date(t.updatedAt) : undefined,
+          }));
+          await tx.team.createMany({ data: teams });
+
+          // 重新写回教练与球队的绑定
+          const restoredTeamIds = new Set(data.teams.map((t: any) => t.id));
+          for (const assoc of userTeamAssociations) {
+            if (assoc.teamId && restoredTeamIds.has(assoc.teamId)) {
+              await tx.user.update({
+                where: { id: assoc.id },
+                data: { teamId: assoc.teamId },
+              });
+            }
+          }
         }
-        if (data.matches.length > 0) {
+        if (data.players && data.players.length > 0) {
+          const players = data.players.map((p: any) => ({
+            ...p,
+            createdAt: p.createdAt ? new Date(p.createdAt) : undefined,
+            updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
+          }));
+          await tx.player.createMany({ data: players });
+        }
+        if (data.matches && data.matches.length > 0) {
           // 由于 Prisma model 中的 DateTime 字段需要将 JSON String 转换为 Date 对象
           const matches = data.matches.map((m: any) => ({
             ...m,
@@ -149,6 +190,16 @@ export class BackupService {
             updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
           }));
           await tx.match.createMany({ data: matches });
+        }
+        if (data.seasonTeamPlayers && data.seasonTeamPlayers.length > 0) {
+          const seasonTeamPlayers = data.seasonTeamPlayers.map((stp: any) => ({
+            ...stp,
+            createdAt: stp.createdAt ? new Date(stp.createdAt) : undefined,
+          }));
+          await tx.seasonTeamPlayer.createMany({ data: seasonTeamPlayers });
+        }
+        if (data.matchLineups && data.matchLineups.length > 0) {
+          await tx.matchLineup.createMany({ data: data.matchLineups });
         }
         if (data.goals && data.goals.length > 0) {
           const goals = data.goals.map((g: any) => ({

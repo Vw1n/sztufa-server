@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsInt, IsOptional, IsDateString, IsArray, ValidateNested, IsIn } from 'class-validator';
+import { IsString, IsInt, IsOptional, IsDateString, IsArray, ValidateNested, IsIn, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateMatchDto {
@@ -14,11 +14,13 @@ export class CreateMatchDto {
   @ApiProperty({ description: '主队比分', example: 2, required: false })
   @IsOptional()
   @IsInt()
+  @Min(0, { message: '主队比分不能为负数' })
   homeScore?: number;
 
   @ApiProperty({ description: '客队比分', example: 1, required: false })
   @IsOptional()
   @IsInt()
+  @Min(0, { message: '客队比分不能为负数' })
   awayScore?: number;
 
   @ApiProperty({ description: '比赛日期时间', example: '2024-01-15T14:00:00' })

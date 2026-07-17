@@ -12,6 +12,10 @@ export class MatchService {
   ) {}
 
   async create(createMatchDto: CreateMatchDto, username: string) {
+    if (createMatchDto.homeTeamId === createMatchDto.awayTeamId) {
+      throw new BadRequestException('主队和客队不能是同一支球队');
+    }
+
     const [homeTeam, awayTeam] = await Promise.all([
       this.prisma.team.findUnique({ where: { id: createMatchDto.homeTeamId } }),
       this.prisma.team.findUnique({ where: { id: createMatchDto.awayTeamId } }),
@@ -240,6 +244,12 @@ export class MatchService {
     });
     if (!match) {
       throw new NotFoundException('比赛不存在');
+    }
+
+    const finalHomeTeamId = updateMatchDto.homeTeamId || match.homeTeamId;
+    const finalAwayTeamId = updateMatchDto.awayTeamId || match.awayTeamId;
+    if (finalHomeTeamId === finalAwayTeamId) {
+      throw new BadRequestException('主队和客队不能是同一支球队');
     }
 
     if (updateMatchDto.homeTeamId) {
@@ -525,6 +535,7 @@ export class MatchService {
         match: {
           ...seasonWhere,
           status: { in: ['finished', 'ongoing'] },
+          deletedAt: null,
         },
       },
       include: {
@@ -567,6 +578,7 @@ export class MatchService {
             status: 'finished',
             matchDate: { gt: latestTriggerMatch.matchDate },
             OR: [{ homeTeamId: player.teamId }, { awayTeamId: player.teamId }],
+            deletedAt: null,
           },
           orderBy: { matchDate: 'asc' },
         });

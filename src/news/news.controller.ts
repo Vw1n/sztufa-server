@@ -27,7 +27,7 @@ export class NewsController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('super_admin', 'recorder')
+  @Roles('super_admin', 'match_scorer')
   @Post()
   @ApiOperation({ summary: '创建活动资讯' })
   create(@Body() createNewsDto: CreateNewsDto, @Req() req: any) {
@@ -53,7 +53,7 @@ export class NewsController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('super_admin', 'recorder')
+  @Roles('super_admin', 'match_scorer')
   @Patch(':id')
   @ApiOperation({ summary: '更新活动资讯' })
   update(@Param('id') id: string, @Body() updateNewsDto: UpdateNewsDto, @Req() req: any) {
@@ -63,7 +63,7 @@ export class NewsController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('super_admin', 'recorder')
+  @Roles('super_admin', 'match_scorer')
   @Delete(':id')
   @ApiOperation({ summary: '删除活动资讯' })
   remove(@Param('id') id: string, @Req() req: any) {

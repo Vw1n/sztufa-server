@@ -48,8 +48,8 @@ export class BackupController {
     const authHeader = req.headers['authorization'];
     const expectedToken = `Bearer ${process.env.CRON_SECRET}`;
 
-    // 如果配置了 CRON_SECRET 则强制进行 Token 比对校验安全性
-    if (process.env.CRON_SECRET && authHeader !== expectedToken) {
+    // 默认拒绝模式：必须配置 CRON_SECRET 且 Token 完全匹配才允许执行备份，防止未授权的数据导出漏洞
+    if (!process.env.CRON_SECRET || authHeader !== expectedToken) {
       throw new ForbiddenException('未授权的定时备份请求');
     }
 

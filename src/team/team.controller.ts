@@ -16,6 +16,7 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { TeamService } from './team.service';
 import { CreateTeamDto } from './dto/create-team.dto';
+import { CreateTeamWithPlayersDto } from './dto/create-team-with-players.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -25,6 +26,16 @@ import { Roles } from '../auth/roles.decorator';
 @ApiTags('球队')
 export class TeamController {
   constructor(private readonly teamService: TeamService) {}
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('with-players')
+  @ApiOperation({ summary: '在单个事务中创建球队及全部球员' })
+  createWithPlayers(@Body() dto: CreateTeamWithPlayersDto, @Req() req: any) {
+    const username = req.user?.username || 'admin';
+    return this.teamService.createWithPlayers(dto, username);
+  }
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

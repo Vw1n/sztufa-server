@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
+import { CreateTeamWithPlayersDto } from './dto/create-team-with-players.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
@@ -31,6 +32,111 @@ export class TeamService {
      );
 
     return team;
+  }
+
+  async createWithPlayers(dto: CreateTeamWithPlayersDto, username: string = 'admin') {
+    const { players = [], ...teamData } = dto;
+    const normalizedPlayers = players.map((player) => ({
+      ...player,
+      name: player.name.trim(),
+      studentId: player.studentId.trim(),
+      jerseyNumber: player.jerseyNumber.trim(),
+    }));
+
+    const studentIds = new Set<string>();
+    const jerseyNumbers = new Set<string>();
+    for (const player of normalizedPlayers) {
+      if (!player.name || !player.studentId || !player.jerseyNumber) {
+        throw new BadRequestException('球员姓名、学号和球衣号码不能为空');
+      }
+      if (studentIds.has(player.studentId)) {
+        throw new ConflictException(`球员学号重复: ${player.studentId}`);
+      }
+      if (jerseyNumbers.has(player.jerseyNumber)) {
+        throw new ConflictException(`球队内球衣号码重复: ${player.jerseyNumber}`);
+      }
+      studentIds.add(player.studentId);
+      jerseyNumbers.add(player.jerseyNumber);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const existingTeam = await tx.team.findFirst({
+        where: { teamName: teamData.teamName, deletedAt: null },
+      });
+      if (existingTeam) {
+        throw new ConflictException('该球队名称已存在，请使用其他名称');
+      }
+
+      const team = await tx.team.create({ data: teamData });
+      const activeSeasons = await tx.season.findMany({
+        where: { status: 'active' },
+        select: { id: true },
+      });
+
+      for (const player of normalizedPlayers) {
+        const existingPlayer = await tx.player.findFirst({
+          where: {
+            OR: [
+              { studentId: player.studentId },
+              { studentId: { startsWith: `${player.studentId}_deleted_` } },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (existingPlayer?.deletedAt === null) {
+          throw new ConflictException(`学号 ${player.studentId} 已被其他在籍球员使用`);
+        }
+
+        const savedPlayer = existingPlayer
+          ? await tx.player.update({
+              where: { id: existingPlayer.id },
+              data: {
+                ...player,
+                photo: player.photo || existingPlayer.photo || null,
+                teamId: team.id,
+                deletedAt: null,
+              },
+            })
+          : await tx.player.create({
+              data: {
+                ...player,
+                photo: player.photo || null,
+                teamId: team.id,
+              },
+            });
+
+        for (const season of activeSeasons) {
+          await tx.seasonTeamPlayer.upsert({
+            where: {
+              seasonId_playerId: {
+                seasonId: season.id,
+                playerId: savedPlayer.id,
+              },
+            },
+            create: {
+              seasonId: season.id,
+              teamId: team.id,
+              playerId: savedPlayer.id,
+            },
+            update: { teamId: team.id },
+          });
+        }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          username,
+          action: 'CREATE_TEAM',
+          details: `创建球队: "${team.teamName}" (球员 ${normalizedPlayers.length} 人)`,
+        },
+      });
+
+      return tx.team.findUnique({
+        where: { id: team.id },
+        include: { players: { where: { deletedAt: null } } },
+      });
+    }, { timeout: 30000 });
   }
 
   async findAll(page: number = 1, limit: number = 10, seasonId?: string, gender?: string) {

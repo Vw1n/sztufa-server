@@ -35,13 +35,17 @@ export class TeamService {
   }
 
   async createWithPlayers(dto: CreateTeamWithPlayersDto, username: string = 'admin') {
-    const { players = [], ...teamData } = dto;
+    const { players = [], seasonId, ...teamData } = dto;
     const normalizedPlayers = players.map((player) => ({
       ...player,
       name: player.name.trim(),
       studentId: player.studentId.trim(),
       jerseyNumber: player.jerseyNumber.trim(),
     }));
+
+    if (normalizedPlayers.length === 0) {
+      throw new BadRequestException('请至少添加一名球员');
+    }
 
     const studentIds = new Set<string>();
     const jerseyNumbers = new Set<string>();
@@ -60,6 +64,24 @@ export class TeamService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const targetSeason = await tx.season.findUnique({
+        where: { id: seasonId },
+        select: { id: true, name: true, status: true },
+      });
+      if (!targetSeason || targetSeason.status !== 'active') {
+        throw new BadRequestException('所选赛季不存在或已不是活跃赛季');
+      }
+
+      const seasonGender = targetSeason.name.includes('女')
+        ? 'FEMALE'
+        : targetSeason.name.includes('男')
+          ? 'MALE'
+          : null;
+      const teamGender = teamData.gender || 'MALE';
+      if (seasonGender && seasonGender !== teamGender) {
+        throw new BadRequestException('球队组别与所选赛季不匹配');
+      }
+
       const existingTeam = await tx.team.findFirst({
         where: { teamName: teamData.teamName, deletedAt: null },
       });
@@ -68,10 +90,6 @@ export class TeamService {
       }
 
       const team = await tx.team.create({ data: teamData });
-      const activeSeasons = await tx.season.findMany({
-        where: { status: 'active' },
-        select: { id: true },
-      });
 
       for (const player of normalizedPlayers) {
         const existingPlayer = await tx.player.findFirst({
@@ -106,29 +124,27 @@ export class TeamService {
               },
             });
 
-        for (const season of activeSeasons) {
-          await tx.seasonTeamPlayer.upsert({
-            where: {
-              seasonId_playerId: {
-                seasonId: season.id,
-                playerId: savedPlayer.id,
-              },
-            },
-            create: {
-              seasonId: season.id,
-              teamId: team.id,
+        await tx.seasonTeamPlayer.upsert({
+          where: {
+            seasonId_playerId: {
+              seasonId: targetSeason.id,
               playerId: savedPlayer.id,
             },
-            update: { teamId: team.id },
-          });
-        }
+          },
+          create: {
+            seasonId: targetSeason.id,
+            teamId: team.id,
+            playerId: savedPlayer.id,
+          },
+          update: { teamId: team.id },
+        });
       }
 
       await tx.auditLog.create({
         data: {
           username,
           action: 'CREATE_TEAM',
-          details: `创建球队: "${team.teamName}" (球员 ${normalizedPlayers.length} 人)`,
+          details: `创建球队: "${team.teamName}" (赛季 ${targetSeason.name}，球员 ${normalizedPlayers.length} 人)`,
         },
       });
 

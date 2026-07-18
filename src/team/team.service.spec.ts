@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { describe, expect, it, jest } from '@jest/globals';
 import { TeamService } from './team.service';
 
@@ -10,7 +10,7 @@ describe('TeamService.createWithPlayers', () => {
         create: jest.fn(),
         findUnique: jest.fn(),
       },
-      season: { findMany: jest.fn() },
+      season: { findUnique: jest.fn() },
       player: {
         findFirst: jest.fn(),
         create: jest.fn(),
@@ -37,6 +37,7 @@ describe('TeamService.createWithPlayers', () => {
     homeJerseyColor: '蓝色',
     awayJerseyColor: '白色',
     teamLogo: 'https://images.example/team.webp',
+    seasonId: 'season-1',
     players: [
       {
         name: ' 张三 ',
@@ -47,13 +48,13 @@ describe('TeamService.createWithPlayers', () => {
     ],
   };
 
-  it('creates the team, players, active-season roster and audit log in one transaction', async () => {
+  it('creates the team, players, selected-season roster and audit log in one transaction', async () => {
     const { service, prisma, tx, auditLogService } = createService();
     const savedTeam = { id: 'team-1', teamName: '测试队', players: [{ id: 'player-1' }] };
 
     tx.team.findFirst.mockResolvedValue(null);
+    tx.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026校长杯男子组', status: 'active' });
     tx.team.create.mockResolvedValue({ id: 'team-1', teamName: '测试队' });
-    tx.season.findMany.mockResolvedValue([{ id: 'season-1' }]);
     tx.player.findFirst.mockResolvedValue(null);
     tx.player.create.mockResolvedValue({ id: 'player-1', teamId: 'team-1' });
     tx.seasonTeamPlayer.upsert.mockResolvedValue({});
@@ -105,8 +106,8 @@ describe('TeamService.createWithPlayers', () => {
     const { service, tx } = createService();
 
     tx.team.findFirst.mockResolvedValue(null);
+    tx.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026校长杯男子组', status: 'active' });
     tx.team.create.mockResolvedValue({ id: 'team-1', teamName: '测试队' });
-    tx.season.findMany.mockResolvedValue([]);
     tx.player.findFirst.mockResolvedValue({
       id: 'existing-player',
       studentId: '20260001',
@@ -118,5 +119,28 @@ describe('TeamService.createWithPlayers', () => {
     );
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.team.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty player list before starting the transaction', async () => {
+    const { service, prisma } = createService();
+
+    await expect(
+      service.createWithPlayers({ ...dto, players: [] }, 'admin'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a team whose gender does not match the selected season', async () => {
+    const { service, tx } = createService();
+    tx.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2026校长杯女子组',
+      status: 'active',
+    });
+
+    await expect(service.createWithPlayers(dto, 'admin')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(tx.team.create).not.toHaveBeenCalled();
   });
 });

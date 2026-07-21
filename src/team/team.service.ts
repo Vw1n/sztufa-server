@@ -170,11 +170,11 @@ export class TeamService {
     const studentIds = new Set<string>();
     const jerseyNumbers = new Set<string>();
     for (const player of players) {
-      if (!player.name?.trim() || !player.studentId?.trim() || !player.jerseyNumber?.trim()) {
+      const sId = String(player.studentId ?? '').trim();
+      const jNum = String(player.jerseyNumber ?? '').trim();
+      if (!player.name?.trim() || !sId || jNum === '') {
         throw new BadRequestException('球员姓名、学号和球衣号码不能为空');
       }
-      const sId = player.studentId.trim();
-      const jNum = player.jerseyNumber.trim();
       if (studentIds.has(sId)) {
         throw new ConflictException(`球员学号重复: ${sId}`);
       }

@@ -72,8 +72,10 @@ export class TeamRosterService {
     return rosterRecords
       .map((record) => record.player)
       .sort((left, right) => {
-        const leftNumber = parseInt(left.jerseyNumber, 10) || 999;
-        const rightNumber = parseInt(right.jerseyNumber, 10) || 999;
+        const leftParsed = parseInt(left.jerseyNumber, 10);
+        const rightParsed = parseInt(right.jerseyNumber, 10);
+        const leftNumber = isNaN(leftParsed) ? 999 : leftParsed;
+        const rightNumber = isNaN(rightParsed) ? 999 : rightParsed;
         return leftNumber - rightNumber;
       });
   }

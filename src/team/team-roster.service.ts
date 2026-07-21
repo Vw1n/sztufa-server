@@ -69,8 +69,19 @@ export class TeamRosterService {
       include: { player: true },
     });
 
-    return rosterRecords
-      .map((record) => record.player)
+    let players = rosterRecords.map((record) => record.player);
+
+    // 兜底逻辑：若当季名册记录为空，则自动获取球队下所有在籍球员，保证球员信息可被读取
+    if (players.length === 0) {
+      players = await this.prisma.player.findMany({
+        where: {
+          teamId,
+          deletedAt: null,
+        },
+      });
+    }
+
+    return players
       .sort((left, right) => {
         const leftParsed = parseInt(left.jerseyNumber, 10);
         const rightParsed = parseInt(right.jerseyNumber, 10);

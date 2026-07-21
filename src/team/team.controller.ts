@@ -88,7 +88,7 @@ export class TeamController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('super_admin')
+  @Roles('super_admin', 'coach')
   @Patch(':id/with-players')
   @ApiOperation({ summary: '在单个事务中更新球队信息及球员名单' })
   updateWithPlayers(

@@ -17,6 +17,7 @@ async function main() {
   const saltRounds = 10;
   const scorerPasswordHash = await bcrypt.hash('scorer123', saltRounds);
   const coachPasswordHash = await bcrypt.hash('coach123', saltRounds);
+  const editorPasswordHash = await bcrypt.hash('editor123', saltRounds);
 
   // 1. 创建或覆盖更新 赛事记录员
   await prisma.user.upsert({
@@ -51,6 +52,23 @@ async function main() {
     },
   });
   console.log(`教练/领队账号创建/更新成功: coach / coach123 (已绑定球队: ${team.teamName})`);
+
+  // 3. 创建或覆盖更新 新闻录入员
+  await prisma.user.upsert({
+    where: { username: 'editor' },
+    update: {
+      password: editorPasswordHash,
+      role: 'news_editor',
+      teamId: null,
+    },
+    create: {
+      username: 'editor',
+      password: editorPasswordHash,
+      role: 'news_editor',
+      teamId: null,
+    },
+  });
+  console.log('新闻录入员账号创建/更新成功: editor / editor123');
 }
 
 main()

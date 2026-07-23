@@ -7,6 +7,10 @@ import { PlayerCardSyncService } from './player-card-sync.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { MatchQueryService } from './match-query.service';
 import { MatchDataWriterService } from './match-data-writer.service';
+import {
+  calculateMatchOutcome,
+  resolveMatchOutcome,
+} from './match-outcome';
 
 @Injectable()
 export class MatchService {
@@ -47,11 +51,26 @@ export class MatchService {
     }
 
     const { goals, events, lineups, seasonId: passedSeasonId, ...matchData } = createMatchDto;
+    const outcome = events
+      ? calculateMatchOutcome(events)
+      : resolveMatchOutcome(matchData.homeScore || 0, matchData.awayScore || 0);
+    const winnerTeamId =
+      outcome.winnerTeamType === 'home'
+        ? createMatchDto.homeTeamId
+        : outcome.winnerTeamType === 'away'
+          ? createMatchDto.awayTeamId
+          : null;
 
     const { match, validLineups } = await this.prisma.$transaction(async (tx) => {
       const createdMatch = await tx.match.create({
         data: {
           ...matchData,
+          homeScore: outcome.homeScore,
+          awayScore: outcome.awayScore,
+          homePenaltyScore: outcome.homePenaltyScore,
+          awayPenaltyScore: outcome.awayPenaltyScore,
+          winnerTeamId,
+          decidedBy: outcome.decidedBy,
           seasonId,
         },
         include: { homeTeam: true, awayTeam: true },
@@ -86,7 +105,7 @@ export class MatchService {
     await this.auditLogService.log(
       username,
       'CREATE_MATCH',
-      `录入比赛: "${homeTeam.teamName} vs ${awayTeam.teamName}" (比分: ${createMatchDto.homeScore}:${createMatchDto.awayScore})`,
+      `录入比赛: "${homeTeam.teamName} vs ${awayTeam.teamName}" (比分: ${outcome.homeScore}:${outcome.awayScore})`,
     );
 
     const result = await this.matchQuery.findDetails(match.id);
@@ -161,11 +180,33 @@ export class MatchService {
     }
 
     const { goals, events, lineups, ...matchData } = updateMatchDto;
+    const outcome = events
+      ? calculateMatchOutcome(events)
+      : resolveMatchOutcome(
+          updateMatchDto.homeScore ?? match.homeScore,
+          updateMatchDto.awayScore ?? match.awayScore,
+          match.homePenaltyScore,
+          match.awayPenaltyScore,
+        );
+    const winnerTeamId =
+      outcome.winnerTeamType === 'home'
+        ? finalHomeTeamId
+        : outcome.winnerTeamType === 'away'
+          ? finalAwayTeamId
+          : null;
 
     const updatedMatch = await this.prisma.$transaction(async (tx) => {
       await tx.match.update({
         where: { id },
-        data: matchData,
+        data: {
+          ...matchData,
+          homeScore: outcome.homeScore,
+          awayScore: outcome.awayScore,
+          homePenaltyScore: outcome.homePenaltyScore,
+          awayPenaltyScore: outcome.awayPenaltyScore,
+          winnerTeamId,
+          decidedBy: outcome.decidedBy,
+        },
       });
 
       if (lineups !== undefined) {

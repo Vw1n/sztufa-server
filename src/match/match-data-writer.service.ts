@@ -1,8 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { MatchLineupDto } from './dto/create-match.dto';
+import {
+  MatchEventPhase,
+  MatchEventType,
+  MatchLineupDto,
+} from './dto/create-match.dto';
 
 type MatchEventInput = Record<string, any>;
 type GoalInput = Record<string, any>;
+
+const isShootoutEvent = (eventType: string): boolean =>
+  eventType === MatchEventType.PenaltyShootoutGoal ||
+  eventType === MatchEventType.PenaltyShootoutMiss;
 
 @Injectable()
 export class MatchDataWriterService {
@@ -60,11 +68,23 @@ export class MatchDataWriterService {
 
   async writeEvents(tx: any, matchId: string, events: MatchEventInput[]) {
     if (events.length === 0) return;
+    const shootoutOrders = events
+      .filter((event) => isShootoutEvent(event.eventType))
+      .map((event) => event.shootoutOrder);
+    if (new Set(shootoutOrders).size !== shootoutOrders.length) {
+      throw new BadRequestException('点球大战罚球顺序不能重复');
+    }
+
     await tx.matchEvent.createMany({
       data: events.map((event) => ({
         matchId,
         eventTime: event.eventTime,
         eventType: event.eventType,
+        phase: isShootoutEvent(event.eventType)
+          ? MatchEventPhase.Shootout
+          : event.phase || MatchEventPhase.Regular,
+        shootoutRound: isShootoutEvent(event.eventType) ? event.shootoutRound : null,
+        shootoutOrder: isShootoutEvent(event.eventType) ? event.shootoutOrder : null,
         description: event.description,
         teamType: event.teamType,
         playerId: event.playerId || null,

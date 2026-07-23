@@ -72,6 +72,10 @@ model Match {
   awayTeam        Team          @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Cascade)
   homeScore       Int           @default(0)
   awayScore       Int           @default(0)
+  homePenaltyScore Int?
+  awayPenaltyScore Int?
+  winnerTeamId    String?
+  decidedBy       String?
   matchDate       DateTime
   location        String
   status          String        @default("scheduled")
@@ -122,6 +126,9 @@ model MatchEvent {
   match              Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
   eventTime          String
   eventType          String
+  phase              String   @default("REGULAR")
+  shootoutRound      Int?
+  shootoutOrder      Int?
   playerId           String?
   player             Player?  @relation("EventPlayer", fields: [playerId], references: [id])
   playerName         String?
@@ -143,6 +150,7 @@ model MatchEvent {
   @@index([subPlayerId])
   @@index([assistPlayerId])
   @@index([matchId, eventTime])
+  @@index([matchId, phase, shootoutOrder])
 }
 
 model News {

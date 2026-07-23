@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, UseGuards, Request, Param, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Request, Param, Patch, Delete } from '@nestjs/common';
 import { SeasonService } from './season.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -74,6 +74,26 @@ export class SeasonController {
   ) {
     const username = req.user?.username || 'admin';
     return this.seasonService.updateSeasonStatus(id, status, username);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Patch(':id')
+  async renameSeason(
+    @Param('id') id: string,
+    @Body('name') name: string,
+    @Request() req: any
+  ) {
+    const username = req.user?.username || 'admin';
+    return this.seasonService.renameSeason(id, name, username);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Delete(':id')
+  async deleteSeason(@Param('id') id: string, @Request() req: any) {
+    const username = req.user?.username || 'admin';
+    return this.seasonService.deleteSeason(id, username);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

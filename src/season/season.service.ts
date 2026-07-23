@@ -404,5 +404,82 @@ export class SeasonService {
 
     return updatedSeason;
   }
+
+  async renameSeason(id: string, name: string, username: string) {
+    const trimmedName = name?.trim();
+    if (!trimmedName) {
+      throw new BadRequestException('赛季名称不能为空');
+    }
+
+    const season = await this.prisma.season.findUnique({ where: { id } });
+    if (!season) {
+      throw new BadRequestException('赛季不存在');
+    }
+
+    const duplicate = await this.prisma.season.findFirst({
+      where: { name: trimmedName, id: { not: id } },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new BadRequestException(`赛季名称 "${trimmedName}" 已存在`);
+    }
+
+    const updatedSeason = await this.prisma.season.update({
+      where: { id },
+      data: { name: trimmedName },
+    });
+
+    await this.auditLogService.log(
+      username,
+      'RENAME_SEASON',
+      `将赛季 "${season.name}" 重命名为 "${trimmedName}"`,
+    );
+
+    return updatedSeason;
+  }
+
+  async deleteSeason(id: string, username: string) {
+    const season = await this.prisma.season.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            matches: true,
+            teamPlayers: true,
+            groupTeams: true,
+          },
+        },
+      },
+    });
+    if (!season) {
+      throw new BadRequestException('赛季不存在');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // MatchLineup、Goal 和 MatchEvent 会随比赛级联删除；
+      // SeasonTeamPlayer 和 SeasonGroupTeam 会随赛季级联删除。
+      await tx.match.deleteMany({ where: { seasonId: id } });
+      await tx.season.delete({ where: { id } });
+    });
+
+    await this.auditLogService.log(
+      username,
+      'DELETE_SEASON',
+      `删除赛季 "${season.name}"，同时删除 ${season._count.matches} 场比赛、${season._count.teamPlayers} 条赛季名单和 ${season._count.groupTeams} 条分组记录`,
+    );
+
+    return {
+      success: true,
+      deleted: {
+        id: season.id,
+        name: season.name,
+        matches: season._count.matches,
+        teamPlayers: season._count.teamPlayers,
+        groupTeams: season._count.groupTeams,
+      },
+    };
+  }
 }
 

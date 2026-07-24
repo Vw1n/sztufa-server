@@ -27,6 +27,13 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
           message: `数据冲突：${targetNames || '字段'} 已存在，请更换后重试`,
           error: 'Conflict',
         });
+      case 'P2022': {
+        const status = HttpStatus.INTERNAL_SERVER_ERROR;
+        response.status(status).json({
+          statusCode: status,
+          message: '数据库表结构版本尚未同步，系统正在自动部署更新，请稍后重新提交',
+          error: 'Internal Server Error',
+        });
         break;
       }
       default: {

@@ -12,6 +12,15 @@ export class StartupMigrationService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    try {
+      if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL) {
+        console.log('[Startup Migration] 检查并自动应用数据库迁移...');
+        const { execSync } = require('child_process');
+        execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+      }
+    } catch (err) {
+      console.error('[Startup Migration] 自动应用数据库迁移失败:', err instanceof Error ? err.message : err);
+    }
     await this.run();
   }
 

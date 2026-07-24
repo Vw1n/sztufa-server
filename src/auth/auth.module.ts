@@ -16,7 +16,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
         const expiresIn = configService.get<string>('JWT_EXPIRES_IN', '7d');
 
         return {
-          secret: configService.getOrThrow<string>('JWT_SECRET'),
+          secret: configService.get<string>('JWT_SECRET', 'local-development-secret-change-me'),
           signOptions: { expiresIn: expiresIn as SignOptions['expiresIn'] },
         };
       },

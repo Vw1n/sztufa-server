@@ -46,30 +46,62 @@ export class MatchQueryService {
     const whereStats = { ...where };
     delete whereStats.status;
 
-    const [data, total, allMatchesForStats] = await Promise.all([
-      this.prisma.match.findMany({
-        skip,
-        take: limitNum,
-        where,
-        include: matchDetails,
-        orderBy: { matchDate: 'desc' },
-      }),
-      this.prisma.match.count({ where }),
-      this.prisma.match.findMany({ where: whereStats, select: { status: true } }),
-    ]);
+    try {
+      const [data, total, allMatchesForStats] = await Promise.all([
+        this.prisma.match.findMany({
+          skip,
+          take: limitNum,
+          where,
+          include: matchDetails,
+          orderBy: { matchDate: 'desc' },
+        }),
+        this.prisma.match.count({ where }),
+        this.prisma.match.findMany({ where: whereStats, select: { status: true } }),
+      ]);
 
-    return {
-      data,
-      total,
-      page: pageNum,
-      limit: limitNum,
-      stats: {
-        total: allMatchesForStats.length,
-        completed: allMatchesForStats.filter((match) => match.status === 'finished').length,
-        scheduled: allMatchesForStats.filter((match) => match.status === 'scheduled').length,
-        ongoing: allMatchesForStats.filter((match) => match.status === 'ongoing').length,
-      },
-    };
+      return {
+        data,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        stats: {
+          total: allMatchesForStats.length,
+          completed: allMatchesForStats.filter((match) => match.status === 'finished').length,
+          scheduled: allMatchesForStats.filter((match) => match.status === 'scheduled').length,
+          ongoing: allMatchesForStats.filter((match) => match.status === 'ongoing').length,
+        },
+      };
+    } catch (error) {
+      console.error('[MatchQueryService.findAll Error]', error);
+      try {
+        const [data, total] = await Promise.all([
+          this.prisma.match.findMany({
+            skip,
+            take: limitNum,
+            where,
+            include: { homeTeam: true, awayTeam: true },
+            orderBy: { matchDate: 'desc' },
+          }),
+          this.prisma.match.count({ where }),
+        ]);
+        return {
+          data: data.map((m) => ({ ...m, goals: [], events: [], lineups: [] })),
+          total,
+          page: pageNum,
+          limit: limitNum,
+          stats: { total, completed: 0, scheduled: 0, ongoing: 0 },
+        };
+      } catch (fallbackErr) {
+        console.error('[MatchQueryService.findAll Fallback Error]', fallbackErr);
+        return {
+          data: [],
+          total: 0,
+          page: pageNum,
+          limit: limitNum,
+          stats: { total: 0, completed: 0, scheduled: 0, ongoing: 0 },
+        };
+      }
+    }
   }
 
   async findOne(id: string) {

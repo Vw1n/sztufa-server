@@ -21,7 +21,12 @@ describe('SeasonStatisticsService', () => {
     const leagueCalculator = new LeagueStandingsCalculator();
     const cupCalculator = new CupStandingsCalculator(prisma);
     const playerStatsCalculator = new PlayerStatisticsCalculator(prisma);
-    return new SeasonStatisticsService(prisma, leagueCalculator, cupCalculator, playerStatsCalculator);
+    return new SeasonStatisticsService(
+      prisma,
+      leagueCalculator,
+      cupCalculator,
+      playerStatsCalculator,
+    );
   };
 
   it('保持联赛积分榜和球员统计的计算规则', async () => {
@@ -31,39 +36,41 @@ describe('SeasonStatisticsService', () => {
       name: '2026校长杯男子组',
       type: 'LEAGUE',
     });
-    prisma.match.findMany.mockResolvedValue([{
-      homeTeamId: 'home',
-      awayTeamId: 'away',
-      homeScore: 2,
-      awayScore: 1,
-      stage: 'LEAGUE',
-      goals: [
-        {
-          playerId: 'player-1',
-          playerName: '前锋 (点球)',
-          jerseyNumber: '9',
-          teamType: 'home',
-        },
-        {
-          playerId: null,
-          playerName: '后卫 (乌龙)',
-          jerseyNumber: '4',
-          teamType: 'away',
-        },
-      ],
-      events: [
-        {
-          playerId: 'player-2',
-          playerName: '后卫',
-          jerseyNumber: '4',
-          teamType: 'away',
-          eventType: 'yellow_card',
-          assistPlayerId: 'player-1',
-          assistPlayerName: '前锋',
-          assistJerseyNumber: '9',
-        },
-      ],
-    }]);
+    prisma.match.findMany.mockResolvedValue([
+      {
+        homeTeamId: 'home',
+        awayTeamId: 'away',
+        homeScore: 2,
+        awayScore: 1,
+        stage: 'LEAGUE',
+        goals: [
+          {
+            playerId: 'player-1',
+            playerName: '前锋 (点球)',
+            jerseyNumber: '9',
+            teamType: 'home',
+          },
+          {
+            playerId: null,
+            playerName: '后卫 (乌龙)',
+            jerseyNumber: '4',
+            teamType: 'away',
+          },
+        ],
+        events: [
+          {
+            playerId: 'player-2',
+            playerName: '后卫',
+            jerseyNumber: '4',
+            teamType: 'away',
+            eventType: 'yellow_card',
+            assistPlayerId: 'player-1',
+            assistPlayerName: '前锋',
+            assistJerseyNumber: '9',
+          },
+        ],
+      },
+    ]);
     const home = { id: 'home', teamName: '主队', teamLogo: 'home.png', gender: 'MALE' };
     const away = { id: 'away', teamName: '客队', teamLogo: 'away.png', gender: 'MALE' };
     prisma.seasonTeamPlayer.findMany.mockResolvedValue([
@@ -104,16 +111,18 @@ describe('SeasonStatisticsService', () => {
       name: '2026女子组',
       type: 'CUP',
     });
-    prisma.match.findMany.mockResolvedValue([{
-      homeTeamId: 'a',
-      awayTeamId: 'b',
-      homeScore: 0,
-      awayScore: 0,
-      stage: 'GROUP',
-      groupName: 'A',
-      goals: [],
-      events: [],
-    }]);
+    prisma.match.findMany.mockResolvedValue([
+      {
+        homeTeamId: 'a',
+        awayTeamId: 'b',
+        homeScore: 0,
+        awayScore: 0,
+        stage: 'GROUP',
+        groupName: 'A',
+        goals: [],
+        events: [],
+      },
+    ]);
     prisma.seasonTeamPlayer.findMany.mockResolvedValue([]);
     prisma.seasonGroupTeam.findMany.mockResolvedValue([
       { teamId: 'a', groupName: 'A', team: teamA },
@@ -125,19 +134,21 @@ describe('SeasonStatisticsService', () => {
 
     await createService(prisma).computeAndCache('cup-1');
 
-    expect(prisma.season.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        standingsCache: {
-          type: 'CUP',
-          groups: {
-            A: [
-              expect.objectContaining({ teamId: 'a', drawn: 1, points: 1 }),
-              expect.objectContaining({ teamId: 'b', drawn: 1, points: 1 }),
-            ],
+    expect(prisma.season.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          standingsCache: {
+            type: 'CUP',
+            groups: {
+              A: [
+                expect.objectContaining({ teamId: 'a', drawn: 1, points: 1 }),
+                expect.objectContaining({ teamId: 'b', drawn: 1, points: 1 }),
+              ],
+            },
           },
-        },
+        }),
       }),
-    }));
+    );
   });
 
   it('赛季不存在时不写入缓存', async () => {

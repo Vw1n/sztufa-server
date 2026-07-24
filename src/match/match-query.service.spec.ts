@@ -12,10 +12,7 @@ describe('MatchQueryService', () => {
         findMany: jest
           .fn<() => Promise<any[]>>()
           .mockResolvedValueOnce([{ id: 'match-1' }])
-          .mockResolvedValueOnce([
-            { status: 'finished' },
-            { status: 'scheduled' },
-          ]),
+          .mockResolvedValueOnce([{ status: 'finished' }, { status: 'scheduled' }]),
         count: jest.fn<() => Promise<number>>().mockResolvedValue(1),
       },
     };

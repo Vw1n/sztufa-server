@@ -2,6 +2,9 @@
   "name": "sztu-fa-backend",
   "version": "1.0.0",
   "description": "校园足球信息管理平台后端服务",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -11,7 +14,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "lint": "eslint \"src/**/*.ts\" --fix",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:check": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "prisma:init": "prisma init",
     "prisma:generate": "prisma generate",

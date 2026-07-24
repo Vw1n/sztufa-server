@@ -47,7 +47,16 @@ export class MatchController {
     @Query('groupName') groupName?: string,
     @Query('knockoutRound') knockoutRound?: string,
   ) {
-    return this.matchService.findAll(page, limit, teamId, seasonId, status, stage, groupName, knockoutRound);
+    return this.matchService.findAll(
+      page,
+      limit,
+      teamId,
+      seasonId,
+      status,
+      stage,
+      groupName,
+      knockoutRound,
+    );
   }
 
   @Get(':id')

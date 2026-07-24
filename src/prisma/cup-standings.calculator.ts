@@ -18,41 +18,45 @@ export class CupStandingsCalculator {
     });
     const groups = new Map<string, Map<string, TeamStanding>>();
 
-    groupTeams.forEach(groupTeam => {
+    groupTeams.forEach((groupTeam) => {
       if (!groupTeam.team || groupTeam.team.gender !== seasonGender) return;
       if (!groups.has(groupTeam.groupName)) groups.set(groupTeam.groupName, new Map());
-      groups.get(groupTeam.groupName)!.set(
-        groupTeam.teamId,
-        this.createStanding(
+      groups
+        .get(groupTeam.groupName)!
+        .set(
           groupTeam.teamId,
-          groupTeam.team.teamName,
-          groupTeam.team.teamLogo || '',
-        ),
-      );
-    });
-
-    matches.filter(match => match.stage === 'GROUP').forEach(match => {
-      const groupName = match.groupName || 'A';
-      if (!groups.has(groupName)) groups.set(groupName, new Map());
-      const groupStandings = groups.get(groupName)!;
-
-      const ensureTeam = (teamId: string) => {
-        if (groupStandings.has(teamId)) return;
-        const team = databaseTeams.get(teamId);
-        if (!team || team.gender !== seasonGender) return;
-        groupStandings.set(
-          teamId,
-          this.createStanding(teamId, team.teamName || '未知球队', team.teamLogo || ''),
+          this.createStanding(
+            groupTeam.teamId,
+            groupTeam.team.teamName,
+            groupTeam.team.teamLogo || '',
+          ),
         );
-      };
-      ensureTeam(match.homeTeamId);
-      ensureTeam(match.awayTeamId);
-      this.applyMatchResult(
-        groupStandings.get(match.homeTeamId),
-        groupStandings.get(match.awayTeamId),
-        match,
-      );
     });
+
+    matches
+      .filter((match) => match.stage === 'GROUP')
+      .forEach((match) => {
+        const groupName = match.groupName || 'A';
+        if (!groups.has(groupName)) groups.set(groupName, new Map());
+        const groupStandings = groups.get(groupName)!;
+
+        const ensureTeam = (teamId: string) => {
+          if (groupStandings.has(teamId)) return;
+          const team = databaseTeams.get(teamId);
+          if (!team || team.gender !== seasonGender) return;
+          groupStandings.set(
+            teamId,
+            this.createStanding(teamId, team.teamName || '未知球队', team.teamLogo || ''),
+          );
+        };
+        ensureTeam(match.homeTeamId);
+        ensureTeam(match.awayTeamId);
+        this.applyMatchResult(
+          groupStandings.get(match.homeTeamId),
+          groupStandings.get(match.awayTeamId),
+          match,
+        );
+      });
 
     const groupResults: Record<string, TeamStanding[]> = {};
     groups.forEach((groupStandings, groupName) => {
@@ -77,7 +81,11 @@ export class CupStandingsCalculator {
     };
   }
 
-  private applyMatchResult(home: TeamStanding | undefined, away: TeamStanding | undefined, match: any) {
+  private applyMatchResult(
+    home: TeamStanding | undefined,
+    away: TeamStanding | undefined,
+    match: any,
+  ) {
     if (!home || !away) return;
     home.played += 1;
     away.played += 1;

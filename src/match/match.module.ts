@@ -7,12 +7,7 @@ import { MatchDataWriterService } from './match-data-writer.service';
 
 @Module({
   controllers: [MatchController],
-  providers: [
-    MatchService,
-    MatchQueryService,
-    MatchDataWriterService,
-    PlayerCardSyncService,
-  ],
+  providers: [MatchService, MatchQueryService, MatchDataWriterService, PlayerCardSyncService],
   exports: [PlayerCardSyncService],
 })
 export class MatchModule {}

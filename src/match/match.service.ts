@@ -7,10 +7,7 @@ import { PlayerCardSyncService } from './player-card-sync.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { MatchQueryService } from './match-query.service';
 import { MatchDataWriterService } from './match-data-writer.service';
-import {
-  calculateMatchOutcome,
-  resolveMatchOutcome,
-} from './match-outcome';
+import { calculateMatchOutcome, resolveMatchOutcome } from './match-outcome';
 
 @Injectable()
 export class MatchService {
@@ -50,7 +47,8 @@ export class MatchService {
       seasonId = activeSeason ? activeSeason.id : undefined;
     }
 
-    const { goals, events, lineups, seasonId: passedSeasonId, ...matchData } = createMatchDto;
+    const { goals, events, lineups, ...matchData } = createMatchDto;
+    delete (matchData as any).seasonId;
     const outcome = events
       ? calculateMatchOutcome(events)
       : resolveMatchOutcome(matchData.homeScore || 0, matchData.awayScore || 0);
@@ -61,7 +59,7 @@ export class MatchService {
           ? createMatchDto.awayTeamId
           : null;
 
-    const { match, validLineups } = await this.prisma.$transaction(async (tx) => {
+    const { match } = await this.prisma.$transaction(async (tx) => {
       const createdMatch = await tx.match.create({
         data: {
           ...matchData,

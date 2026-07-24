@@ -107,7 +107,7 @@ export class SeasonService {
   async getSeasonStandings(id: string) {
     const season = await this.prisma.season.findUnique({
       where: { id },
-      select: { standingsCache: true }
+      select: { standingsCache: true },
     });
     if (!season) {
       throw new BadRequestException('赛季不存在');
@@ -118,7 +118,7 @@ export class SeasonService {
   async getSeasonStats(id: string) {
     const season = await this.prisma.season.findUnique({
       where: { id },
-      select: { statsCache: true }
+      select: { statsCache: true },
     });
     if (!season) {
       throw new BadRequestException('赛季不存在');
@@ -130,25 +130,29 @@ export class SeasonService {
     return this.prisma.seasonGroupTeam.findMany({
       where: { seasonId },
       include: { team: true },
-      orderBy: { groupName: 'asc' }
+      orderBy: { groupName: 'asc' },
     });
   }
 
-  async updateSeasonGroups(seasonId: string, groups: { teamId: string; groupName: string }[], username: string) {
+  async updateSeasonGroups(
+    seasonId: string,
+    groups: { teamId: string; groupName: string }[],
+    username: string,
+  ) {
     await this.prisma.$transaction(async (tx) => {
       // 1. 删除已有的分组映射
       await tx.seasonGroupTeam.deleteMany({
-        where: { seasonId }
+        where: { seasonId },
       });
 
       // 2. 写入新的分组映射
       if (groups && groups.length > 0) {
         await tx.seasonGroupTeam.createMany({
-          data: groups.map(g => ({
+          data: groups.map((g) => ({
             seasonId,
             teamId: g.teamId,
-            groupName: g.groupName
-          }))
+            groupName: g.groupName,
+          })),
         });
       }
     });
@@ -164,7 +168,7 @@ export class SeasonService {
     await this.auditLogService.log(
       username,
       'UPDATE_SEASON_GROUPS',
-      `更新了赛季 ID 为 ${seasonId} 的小组赛分组配置，共分配 ${groups.length} 支球队。`
+      `更新了赛季 ID 为 ${seasonId} 的小组赛分组配置，共分配 ${groups.length} 支球队。`,
     );
 
     return { success: true };
@@ -172,7 +176,7 @@ export class SeasonService {
 
   async generateKnockoutMatches(seasonId: string, username: string) {
     const season = await this.prisma.season.findUnique({
-      where: { id: seasonId }
+      where: { id: seasonId },
     });
     if (!season || season.type !== 'CUP') {
       throw new BadRequestException('该赛季不是杯赛，无法生成淘汰赛对阵');
@@ -180,14 +184,16 @@ export class SeasonService {
 
     const standingsCache = season.standingsCache as any;
     if (!standingsCache || !standingsCache.groups) {
-      throw new BadRequestException('未找到小组赛积分缓存，请先进行小组赛或录入小组赛比赛结果以更新积分榜');
+      throw new BadRequestException(
+        '未找到小组赛积分缓存，请先进行小组赛或录入小组赛比赛结果以更新积分榜',
+      );
     }
 
     const groups = standingsCache.groups;
     const groupNames = Object.keys(groups).sort();
 
     let round = '';
-    let matchPairs: { index: number; homeTeamId: string; awayTeamId: string }[] = [];
+    const matchPairs: { index: number; homeTeamId: string; awayTeamId: string }[] = [];
 
     const getTeamId = (groupName: string, rank: number): string | null => {
       const list = groups[groupName];
@@ -210,7 +216,7 @@ export class SeasonService {
         { index: 7, homeG: 'F', homeR: 1, awayG: 'E', awayR: 2 },
         { index: 8, homeG: 'H', homeR: 1, awayG: 'G', awayR: 2 },
       ];
-      pairings.forEach(p => {
+      pairings.forEach((p) => {
         const home = getTeamId(p.homeG, p.homeR);
         const away = getTeamId(p.awayG, p.awayR);
         if (home && away) {
@@ -226,7 +232,7 @@ export class SeasonService {
         { index: 3, homeG: 'B', homeR: 1, awayG: 'A', awayR: 2 },
         { index: 4, homeG: 'D', homeR: 1, awayG: 'C', awayR: 2 },
       ];
-      pairings.forEach(p => {
+      pairings.forEach((p) => {
         const home = getTeamId(p.homeG, p.homeR);
         const away = getTeamId(p.awayG, p.awayR);
         if (home && away) {
@@ -240,7 +246,7 @@ export class SeasonService {
         { index: 1, homeG: 'A', homeR: 1, awayG: 'B', awayR: 2 },
         { index: 2, homeG: 'B', homeR: 1, awayG: 'A', awayR: 2 },
       ];
-      pairings.forEach(p => {
+      pairings.forEach((p) => {
         const home = getTeamId(p.homeG, p.homeR);
         const away = getTeamId(p.awayG, p.awayR);
         if (home && away) {
@@ -248,7 +254,9 @@ export class SeasonService {
         }
       });
     } else {
-      throw new BadRequestException(`不支持的小组数量 (${groupNames.length} 个小组)，请手动在对阵图或比赛管理中录入对阵球队`);
+      throw new BadRequestException(
+        `不支持的小组数量 (${groupNames.length} 个小组)，请手动在对阵图或比赛管理中录入对阵球队`,
+      );
     }
 
     if (matchPairs.length === 0) {
@@ -267,8 +275,8 @@ export class SeasonService {
             stage: 'KNOCKOUT',
             knockoutRound: round,
             knockoutMatchIndex: pair.index,
-            deletedAt: null
-          }
+            deletedAt: null,
+          },
         });
 
         if (existingMatch) {
@@ -277,8 +285,8 @@ export class SeasonService {
             where: { id: existingMatch.id },
             data: {
               homeTeamId: pair.homeTeamId,
-              awayTeamId: pair.awayTeamId
-            }
+              awayTeamId: pair.awayTeamId,
+            },
           });
           countUpdated++;
         } else {
@@ -293,8 +301,8 @@ export class SeasonService {
               knockoutMatchIndex: pair.index,
               matchDate: new Date(),
               location: '待定',
-              status: 'scheduled'
-            }
+              status: 'scheduled',
+            },
           });
           countCreated++;
         }
@@ -304,7 +312,7 @@ export class SeasonService {
     await this.auditLogService.log(
       username,
       'GENERATE_KNOCKOUT_MATCHES',
-      `为赛季 ${seasonId} 一键生成/更新了首轮淘汰赛对局（轮次: ${round}），新建了 ${countCreated} 场比赛，更新了 ${countUpdated} 场比赛。`
+      `为赛季 ${seasonId} 一键生成/更新了首轮淘汰赛对局（轮次: ${round}），新建了 ${countCreated} 场比赛，更新了 ${countUpdated} 场比赛。`,
     );
 
     return { success: true, round, countCreated, countUpdated };
@@ -384,7 +392,7 @@ export class SeasonService {
     }
 
     const season = await this.prisma.season.findUnique({
-      where: { id }
+      where: { id },
     });
     if (!season) {
       throw new BadRequestException('赛季不存在');
@@ -392,7 +400,7 @@ export class SeasonService {
 
     const updatedSeason = await this.prisma.season.update({
       where: { id },
-      data: { status }
+      data: { status },
     });
 
     // 记录审计日志
@@ -482,4 +490,3 @@ export class SeasonService {
     };
   }
 }
-

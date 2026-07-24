@@ -1,8 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  MatchEventPhase,
-  MatchEventType,
-} from './dto/create-match.dto';
+import { MatchEventPhase, MatchEventType } from './dto/create-match.dto';
 
 type MatchEventLike = {
   eventType: string;
@@ -19,14 +16,8 @@ export interface MatchOutcome {
   decidedBy: 'REGULAR' | 'EXTRA_TIME' | 'PENALTIES' | null;
 }
 
-const scoreRegularEvent = (
-  event: MatchEventLike,
-  score: { home: number; away: number },
-) => {
-  if (
-    event.eventType === MatchEventType.Goal ||
-    event.eventType === MatchEventType.Penalty
-  ) {
+const scoreRegularEvent = (event: MatchEventLike, score: { home: number; away: number }) => {
+  if (event.eventType === MatchEventType.Goal || event.eventType === MatchEventType.Penalty) {
     if (event.teamType === 'home') score.home += 1;
     if (event.teamType === 'away') score.away += 1;
   }
@@ -76,8 +67,7 @@ export const resolveMatchOutcome = (
           : homePenaltyScore > awayPenaltyScore
             ? 'home'
             : 'away',
-      decidedBy:
-        homePenaltyScore === awayPenaltyScore ? null : 'PENALTIES',
+      decidedBy: homePenaltyScore === awayPenaltyScore ? null : 'PENALTIES',
     };
   }
 
@@ -91,9 +81,7 @@ export const resolveMatchOutcome = (
   };
 };
 
-export const calculateMatchOutcome = (
-  events: MatchEventLike[],
-): MatchOutcome => {
+export const calculateMatchOutcome = (events: MatchEventLike[]): MatchOutcome => {
   const regularScore = { home: 0, away: 0 };
   const penaltyScore = { home: 0, away: 0 };
   let hasShootout = false;
@@ -115,10 +103,7 @@ export const calculateMatchOutcome = (
     }
   }
 
-  if (
-    hasShootout &&
-    regularScore.home !== regularScore.away
-  ) {
+  if (hasShootout && regularScore.home !== regularScore.away) {
     throw new BadRequestException('常规/加时比分未打平时不能录入点球大战');
   }
 

@@ -26,17 +26,17 @@ describe('TeamQueryService', () => {
       limit: 20,
     });
 
-    expect(prisma.team.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      skip: 20,
-      take: 20,
-      where: expect.objectContaining({
-        deletedAt: null,
-        gender: 'MALE',
-        OR: expect.arrayContaining([
-          { seasonPlayers: { some: { seasonId: 'season-1' } } },
-        ]),
+    expect(prisma.team.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 20,
+        take: 20,
+        where: expect.objectContaining({
+          deletedAt: null,
+          gender: 'MALE',
+          OR: expect.arrayContaining([{ seasonPlayers: { some: { seasonId: 'season-1' } } }]),
+        }),
       }),
-    }));
+    );
   });
 
   it('keeps the not-found behavior for deleted teams', async () => {
@@ -53,8 +53,10 @@ describe('TeamQueryService', () => {
 
     prisma.team.findMany.mockResolvedValue([{ id: 'team-1' }]);
     await service.searchByName(' 测试 ');
-    expect(prisma.team.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { teamName: { contains: '测试' }, deletedAt: null },
-    }));
+    expect(prisma.team.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { teamName: { contains: '测试' }, deletedAt: null },
+      }),
+    );
   });
 });

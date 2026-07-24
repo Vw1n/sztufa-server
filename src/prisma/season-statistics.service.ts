@@ -20,9 +20,8 @@ export class SeasonStatisticsService {
       if (!season) return { success: false, error: '赛季不存在' };
 
       const seasonType = season.type || 'LEAGUE';
-      const seasonGender = season.name.includes('女') || season.name.includes('女子')
-        ? 'FEMALE'
-        : 'MALE';
+      const seasonGender =
+        season.name.includes('女') || season.name.includes('女子') ? 'FEMALE' : 'MALE';
 
       const matches = await this.prisma.match.findMany({
         where: { seasonId, deletedAt: null, status: 'finished' },
@@ -35,11 +34,11 @@ export class SeasonStatisticsService {
       });
 
       const teamsMap = new Map<string, { id: string; teamName: string; teamLogo: string }>();
-      seasonPlayers.forEach(seasonPlayer => {
+      seasonPlayers.forEach((seasonPlayer) => {
         if (
-          seasonPlayer.team
-          && !teamsMap.has(seasonPlayer.teamId)
-          && seasonPlayer.team.gender === seasonGender
+          seasonPlayer.team &&
+          !teamsMap.has(seasonPlayer.teamId) &&
+          seasonPlayer.team.gender === seasonGender
         ) {
           teamsMap.set(seasonPlayer.teamId, {
             id: seasonPlayer.teamId,
@@ -50,9 +49,9 @@ export class SeasonStatisticsService {
       });
 
       const allTeams = await this.prisma.team.findMany();
-      const databaseTeams = new Map(allTeams.map(team => [team.id, team]));
+      const databaseTeams = new Map(allTeams.map((team) => [team.id, team]));
 
-      matches.forEach(match => {
+      matches.forEach((match) => {
         const addTeamIfValid = (teamId: string) => {
           if (teamsMap.has(teamId)) return;
           const team = databaseTeams.get(teamId);
@@ -69,9 +68,10 @@ export class SeasonStatisticsService {
       });
 
       // 使用对应的计算器计算积分榜
-      const standings = seasonType === 'CUP'
-        ? await this.cupCalculator.calculate(seasonId, seasonGender, matches, databaseTeams)
-        : this.leagueCalculator.calculate(matches, teamsMap);
+      const standings =
+        seasonType === 'CUP'
+          ? await this.cupCalculator.calculate(seasonId, seasonGender, matches, databaseTeams)
+          : this.leagueCalculator.calculate(matches, teamsMap);
 
       // 计算球员统计
       const stats = await this.playerStatsCalculator.calculate(matches, databaseTeams);
@@ -84,11 +84,16 @@ export class SeasonStatisticsService {
           statsCache: stats as unknown as Prisma.InputJsonValue,
         },
       });
-      console.log(`[Cache Update] Standings & stats pre-computed successfully for season ${seasonId}`);
+      console.log(
+        `[Cache Update] Standings & stats pre-computed successfully for season ${seasonId}`,
+      );
       return { success: true };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[Cache Update] Failed to compute/cache standings for season ${seasonId}:`, error);
+      console.error(
+        `[Cache Update] Failed to compute/cache standings for season ${seasonId}:`,
+        error,
+      );
       return { success: false, error: errorMsg };
     }
   }

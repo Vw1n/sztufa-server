@@ -58,7 +58,13 @@ export class AuthController {
   ) {
     const operatorUsername = req.user?.username || 'admin';
     const operatorId = req.user?.id;
-    return this.authService.updateUserRole(id, updateUserRoleDto.role, updateUserRoleDto.teamId, operatorUsername, operatorId);
+    return this.authService.updateUserRole(
+      id,
+      updateUserRoleDto.role,
+      updateUserRoleDto.teamId,
+      operatorUsername,
+      operatorId,
+    );
   }
 
   @ApiBearerAuth()

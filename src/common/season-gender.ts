@@ -10,10 +10,7 @@ export function getSeasonGender(seasonName: string): TeamGender | null {
   return null;
 }
 
-export function isTeamGenderCompatibleWithSeason(
-  seasonName: string,
-  teamGender: string,
-): boolean {
+export function isTeamGenderCompatibleWithSeason(seasonName: string, teamGender: string): boolean {
   const seasonGender = getSeasonGender(seasonName);
   return seasonGender === null || seasonGender === teamGender;
 }

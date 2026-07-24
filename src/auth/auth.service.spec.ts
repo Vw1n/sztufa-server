@@ -3,12 +3,11 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 
 describe('AuthService', () => {
   let service: AuthService;
   let prismaService: PrismaService;
-  let jwtService: JwtService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -47,7 +46,6 @@ describe('AuthService', () => {
 
     service = module.get<AuthService>(AuthService);
     prismaService = module.get<PrismaService>(PrismaService);
-    jwtService = module.get<JwtService>(JwtService);
   });
 
   it('should be defined', () => {
@@ -142,9 +140,7 @@ describe('AuthService', () => {
       const mockUser = { id: '1', username: 'admin', role: 'super_admin' };
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
-      await expect(
-        service.deleteUser('1', 'admin', '1'),
-      ).rejects.toThrow('不能删除自己的账号');
+      await expect(service.deleteUser('1', 'admin', '1')).rejects.toThrow('不能删除自己的账号');
     });
 
     it('should allow deleting other users', async () => {
@@ -163,9 +159,9 @@ describe('AuthService', () => {
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prismaService.user.count as jest.Mock).mockResolvedValue(1);
 
-      await expect(
-        service.deleteUser('1', 'other-admin', '2'),
-      ).rejects.toThrow('不能删除最后一个超级管理员');
+      await expect(service.deleteUser('1', 'other-admin', '2')).rejects.toThrow(
+        '不能删除最后一个超级管理员',
+      );
     });
 
     it('should allow deleting super admin when there are others', async () => {
@@ -184,9 +180,9 @@ describe('AuthService', () => {
       const mockUser = { id: '1', username: 'admin', role: 'super_admin', team: null };
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
-      await expect(
-        service.updateUserRole('1', 'user', null, 'admin', '1'),
-      ).rejects.toThrow('不能降级自己的账号');
+      await expect(service.updateUserRole('1', 'user', null, 'admin', '1')).rejects.toThrow(
+        '不能降级自己的账号',
+      );
     });
 
     it('should allow changing own teamId without role change', async () => {
@@ -206,9 +202,9 @@ describe('AuthService', () => {
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prismaService.user.count as jest.Mock).mockResolvedValue(1);
 
-      await expect(
-        service.updateUserRole('1', 'user', null, 'other-admin', '2'),
-      ).rejects.toThrow('不能降级最后一个超级管理员');
+      await expect(service.updateUserRole('1', 'user', null, 'other-admin', '2')).rejects.toThrow(
+        '不能降级最后一个超级管理员',
+      );
     });
   });
 });

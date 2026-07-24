@@ -31,12 +31,14 @@ export class AuditLogService {
     for (const log of rawLogs) {
       const logTime = new Date(log.createdAt).getTime();
       const groupTime = currentGroup ? new Date(currentGroup.createdAt).getTime() : 0;
-      
+
       // 合并条件：同一操作人、同一操作类型，且时间间隔在 5 分钟以内
-      if (currentGroup && 
-          currentGroup.username === log.username && 
-          currentGroup.action === log.action &&
-          Math.abs(groupTime - logTime) <= 5 * 60 * 1000) {
+      if (
+        currentGroup &&
+        currentGroup.username === log.username &&
+        currentGroup.action === log.action &&
+        Math.abs(groupTime - logTime) <= 5 * 60 * 1000
+      ) {
         currentGroup.items.push(log);
       } else {
         if (currentGroup) {
@@ -44,7 +46,7 @@ export class AuditLogService {
         }
         currentGroup = {
           ...log,
-          items: [log]
+          items: [log],
         };
       }
     }
@@ -52,7 +54,7 @@ export class AuditLogService {
       merged.push(currentGroup);
     }
 
-    return merged.map(group => {
+    return merged.map((group) => {
       if (group.items.length === 1) {
         return {
           id: group.id,
@@ -60,14 +62,17 @@ export class AuditLogService {
           username: group.username,
           action: group.action,
           details: group.details,
-          subLogs: []
+          subLogs: [],
         };
       }
 
       // 提取被操作的名字（球队名、球员名、用户名等）并去重
-      const names = group.items.map(item => this.extractName(item.details)).filter(Boolean);
+      const names = group.items.map((item) => this.extractName(item.details)).filter(Boolean);
       const uniqueNames = Array.from(new Set(names));
-      const displayNames = uniqueNames.slice(0, 2).map(n => `"${n}"`).join('、');
+      const displayNames = uniqueNames
+        .slice(0, 2)
+        .map((n) => `"${n}"`)
+        .join('、');
       const suffix = uniqueNames.length > 2 ? '等' : '';
       const count = group.items.length;
 
@@ -113,11 +118,11 @@ export class AuditLogService {
         username: group.username,
         action: group.action,
         details,
-        subLogs: group.items.map(item => ({
+        subLogs: group.items.map((item) => ({
           id: item.id,
           createdAt: item.createdAt,
-          details: item.details
-        }))
+          details: item.details,
+        })),
       };
     });
   }
@@ -129,7 +134,7 @@ export class AuditLogService {
 
     // 默认不加载 USER_LOGIN 这种无修改操作的日志
     const where: any = {
-      action: { not: 'USER_LOGIN' }
+      action: { not: 'USER_LOGIN' },
     };
 
     if (username && username.trim() !== '') {
@@ -143,7 +148,9 @@ export class AuditLogService {
       } else if (action === 'TEAM_ACTIONS') {
         where.action = { in: ['CREATE_TEAM', 'UPDATE_TEAM', 'DELETE_TEAM'] };
       } else if (action === 'USER_ACTIONS') {
-        where.action = { in: ['USER_REGISTER', 'UPDATE_USER_ROLE', 'DELETE_USER', 'RESET_USER_PASSWORD'] };
+        where.action = {
+          in: ['USER_REGISTER', 'UPDATE_USER_ROLE', 'DELETE_USER', 'RESET_USER_PASSWORD'],
+        };
       } else if (action === 'BACKUP_ACTIONS') {
         where.action = { in: ['CREATE_BACKUP', 'RESTORE_BACKUP'] };
       } else {

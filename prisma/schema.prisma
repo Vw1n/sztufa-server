@@ -184,6 +184,7 @@ model User {
   role      String   @default("user")
   teamId    String?
   team      Team?    @relation(fields: [teamId], references: [id])
+  seasonDeletionApprovals SeasonDeletionApproval[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -212,8 +213,22 @@ model Season {
   statsCache     Json?
   teamPlayers    SeasonTeamPlayer[]
   groupTeams     SeasonGroupTeam[]
+  deletionApprovals SeasonDeletionApproval[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model SeasonDeletionApproval {
+  id         String   @id @default(cuid())
+  seasonId   String
+  approverId String
+  season     Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  approver   User     @relation(fields: [approverId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([seasonId, approverId])
+  @@index([seasonId])
+  @@index([approverId])
 }
 
 model SeasonTeamPlayer {

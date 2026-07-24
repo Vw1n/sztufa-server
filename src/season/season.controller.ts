@@ -96,7 +96,7 @@ export class SeasonController {
   @Delete(':id')
   async deleteSeason(@Param('id') id: string, @Request() req: any) {
     const username = req.user?.username || 'admin';
-    return this.seasonService.deleteSeason(id, username);
+    return this.seasonService.approveSeasonDeletion(id, req.user?.id, username);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

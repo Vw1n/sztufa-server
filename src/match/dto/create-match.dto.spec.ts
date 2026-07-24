@@ -1,10 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import {
-  CreateMatchDto,
-  MatchEventPhase,
-  MatchEventType,
-} from './create-match.dto';
+import { CreateMatchDto, MatchEventPhase, MatchEventType } from './create-match.dto';
 
 const baseMatch = {
   homeTeamId: 'home-team',

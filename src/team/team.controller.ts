@@ -79,10 +79,7 @@ export class TeamController {
 
   @Get(':id/players')
   @ApiOperation({ summary: '获取球队在特定赛季的球员名册' })
-  getTeamRoster(
-    @Param('id') id: string,
-    @Query('seasonId') seasonId?: string,
-  ) {
+  getTeamRoster(@Param('id') id: string, @Query('seasonId') seasonId?: string) {
     return this.teamRosterService.getTeamRoster(id, seasonId);
   }
 

@@ -23,11 +23,7 @@ export class NewsService {
       },
     });
 
-    await this.auditLogService.log(
-      username,
-      'CREATE_NEWS',
-      `创建活动资讯: "${news.title}"`,
-    );
+    await this.auditLogService.log(username, 'CREATE_NEWS', `创建活动资讯: "${news.title}"`);
 
     return news;
   }
@@ -76,11 +72,7 @@ export class NewsService {
       data: updateNewsDto,
     });
 
-    await this.auditLogService.log(
-      username,
-      'UPDATE_NEWS',
-      `修改活动资讯 "${news.title}" 详情`,
-    );
+    await this.auditLogService.log(username, 'UPDATE_NEWS', `修改活动资讯 "${news.title}" 详情`);
 
     return updatedNews;
   }
@@ -96,11 +88,7 @@ export class NewsService {
       data: { deletedAt: new Date() },
     });
 
-    await this.auditLogService.log(
-      username,
-      'DELETE_NEWS',
-      `删除活动资讯: "${news.title}"`,
-    );
+    await this.auditLogService.log(username, 'DELETE_NEWS', `删除活动资讯: "${news.title}"`);
 
     return deletedNews;
   }

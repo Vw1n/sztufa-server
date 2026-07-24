@@ -16,19 +16,24 @@ export interface TeamStanding {
 
 @Injectable()
 export class LeagueStandingsCalculator {
-  calculate(matches: any[], teams: Map<string, { id: string; teamName: string; teamLogo: string }>): TeamStanding[] {
+  calculate(
+    matches: any[],
+    teams: Map<string, { id: string; teamName: string; teamLogo: string }>,
+  ): TeamStanding[] {
     const standings = new Map<string, TeamStanding>();
-    teams.forEach(team => {
+    teams.forEach((team) => {
       standings.set(team.id, this.createStanding(team.id, team.teamName, team.teamLogo));
     });
 
     matches
-      .filter(match => match.stage === 'LEAGUE' || !match.stage)
-      .forEach(match => this.applyMatchResult(
-        standings.get(match.homeTeamId),
-        standings.get(match.awayTeamId),
-        match,
-      ));
+      .filter((match) => match.stage === 'LEAGUE' || !match.stage)
+      .forEach((match) =>
+        this.applyMatchResult(
+          standings.get(match.homeTeamId),
+          standings.get(match.awayTeamId),
+          match,
+        ),
+      );
 
     return Array.from(standings.values()).sort(this.compareStandings);
   }
@@ -49,7 +54,11 @@ export class LeagueStandingsCalculator {
     };
   }
 
-  private applyMatchResult(home: TeamStanding | undefined, away: TeamStanding | undefined, match: any) {
+  private applyMatchResult(
+    home: TeamStanding | undefined,
+    away: TeamStanding | undefined,
+    match: any,
+  ) {
     if (!home || !away) return;
     home.played += 1;
     away.played += 1;

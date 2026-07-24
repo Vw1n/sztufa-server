@@ -15,7 +15,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
           `[PrismaService] 数据库连接失败，正在重试... (剩余 ${retries} 次尝试)。错误: ${error.message || String(error)}`,
         );
         if (retries === 0) throw error;
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
   }

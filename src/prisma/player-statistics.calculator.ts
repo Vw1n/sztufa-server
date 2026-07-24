@@ -37,7 +37,7 @@ export class PlayerStatisticsCalculator {
     const assists = new Map<string, AssistStat>();
     const cards = new Map<string, CardStat>();
     const players = await this.prisma.player.findMany({ include: { team: true } });
-    const playersMap = new Map(players.map(player => [player.id, player]));
+    const playersMap = new Map(players.map((player) => [player.id, player]));
 
     const getPlayerTeamInfo = (
       playerId: string | null,
@@ -65,7 +65,7 @@ export class PlayerStatisticsCalculator {
       };
     };
 
-    matches.forEach(match => {
+    matches.forEach((match) => {
       match.goals.forEach((goal: any) => {
         let cleanName = goal.playerName;
         if (cleanName.endsWith(' (点球)')) {

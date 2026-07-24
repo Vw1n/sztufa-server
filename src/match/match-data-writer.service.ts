@@ -1,9 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import {
-  MatchEventPhase,
-  MatchEventType,
-  MatchLineupDto,
-} from './dto/create-match.dto';
+import { MatchEventPhase, MatchEventType, MatchLineupDto } from './dto/create-match.dto';
 
 type MatchEventInput = Record<string, any>;
 type GoalInput = Record<string, any>;

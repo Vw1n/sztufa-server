@@ -1,10 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { CreateTeamPlayerDto } from './create-team-player.dto';
 
 export class UpdateTeamPlayerItemDto extends CreateTeamPlayerDto {
-  @ApiProperty({ description: 'Existing player ID; omit only when creating a player', required: false })
+  @ApiProperty({
+    description: 'Existing player ID; omit only when creating a player',
+    required: false,
+  })
   @IsOptional()
   @IsString()
   id?: string;
@@ -72,7 +75,8 @@ export class UpdateTeamWithPlayersDto {
   gender?: string;
 
   @ApiProperty({
-    description: '球员操作列表: 新增的球员不带 id，更新的球员带 id，需删除的球员放在 deletePlayerIds',
+    description:
+      '球员操作列表: 新增的球员不带 id，更新的球员带 id，需删除的球员放在 deletePlayerIds',
     type: [UpdateTeamPlayerItemDto],
     required: false,
   })

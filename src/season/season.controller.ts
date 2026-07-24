@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Body, UseGuards, Request, Param, Patch, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  Param,
+  Patch,
+  Delete,
+} from '@nestjs/common';
 import { SeasonService } from './season.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -39,7 +49,7 @@ export class SeasonController {
   async updateSeasonGroups(
     @Param('id') id: string,
     @Body('groups') groups: { teamId: string; groupName: string }[],
-    @Request() req: any
+    @Request() req: any,
   ) {
     const username = req.user?.username || 'admin';
     return this.seasonService.updateSeasonGroups(id, groups, username);
@@ -48,10 +58,7 @@ export class SeasonController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')
   @Post(':id/generate-knockout')
-  async generateKnockoutMatches(
-    @Param('id') id: string,
-    @Request() req: any
-  ) {
+  async generateKnockoutMatches(@Param('id') id: string, @Request() req: any) {
     const username = req.user?.username || 'admin';
     return this.seasonService.generateKnockoutMatches(id, username);
   }
@@ -70,7 +77,7 @@ export class SeasonController {
   async updateSeasonStatus(
     @Param('id') id: string,
     @Body('status') status: string,
-    @Request() req: any
+    @Request() req: any,
   ) {
     const username = req.user?.username || 'admin';
     return this.seasonService.updateSeasonStatus(id, status, username);
@@ -79,11 +86,7 @@ export class SeasonController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')
   @Patch(':id')
-  async renameSeason(
-    @Param('id') id: string,
-    @Body('name') name: string,
-    @Request() req: any
-  ) {
+  async renameSeason(@Param('id') id: string, @Body('name') name: string, @Request() req: any) {
     const username = req.user?.username || 'admin';
     return this.seasonService.renameSeason(id, name, username);
   }

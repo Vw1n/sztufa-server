@@ -72,7 +72,9 @@ export class PlayerCardSyncService {
     });
 
     const yellowEvents = events.filter((e) => e.eventType === 'yellow_card');
-    const redEvents = events.filter((e) => e.eventType === 'red_card' || e.eventType === 'yellow_to_red');
+    const redEvents = events.filter(
+      (e) => e.eventType === 'red_card' || e.eventType === 'yellow_to_red',
+    );
     const yellows = yellowEvents.length;
     const reds = redEvents.length;
 

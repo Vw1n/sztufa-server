@@ -60,7 +60,11 @@ describe('TeamService.createWithPlayers', () => {
     const savedTeam = { id: 'team-1', teamName: '测试队', players: [{ id: 'player-1' }] };
 
     tx.team.findFirst.mockResolvedValue(null);
-    tx.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026校长杯男子组', status: 'active' });
+    tx.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2026校长杯男子组',
+      status: 'active',
+    });
     tx.team.create.mockResolvedValue({ id: 'team-1', teamName: '测试队' });
     tx.player.findFirst.mockResolvedValue(null);
     tx.player.create.mockResolvedValue({ id: 'player-1', teamId: 'team-1' });
@@ -97,10 +101,7 @@ describe('TeamService.createWithPlayers', () => {
     const { service, prisma } = createService();
     const duplicated = {
       ...dto,
-      players: [
-        dto.players[0],
-        { name: '李四', studentId: '20260002', jerseyNumber: ' 10 ' },
-      ],
+      players: [dto.players[0], { name: '李四', studentId: '20260002', jerseyNumber: ' 10 ' }],
     };
 
     await expect(service.createWithPlayers(duplicated, 'admin')).rejects.toBeInstanceOf(
@@ -113,7 +114,11 @@ describe('TeamService.createWithPlayers', () => {
     const { service, tx } = createService();
 
     tx.team.findFirst.mockResolvedValue(null);
-    tx.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026校长杯男子组', status: 'active' });
+    tx.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2026校长杯男子组',
+      status: 'active',
+    });
     tx.team.create.mockResolvedValue({ id: 'team-1', teamName: '测试队' });
     tx.player.findFirst.mockResolvedValue({
       id: 'existing-player',
@@ -121,9 +126,7 @@ describe('TeamService.createWithPlayers', () => {
       deletedAt: null,
     });
 
-    await expect(service.createWithPlayers(dto, 'admin')).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(service.createWithPlayers(dto, 'admin')).rejects.toBeInstanceOf(ConflictException);
     expect(tx.auditLog.create).not.toHaveBeenCalled();
     expect(tx.team.findUnique).not.toHaveBeenCalled();
   });
@@ -180,22 +183,34 @@ describe('TeamService.updateWithPlayers', () => {
     prisma.season.findMany.mockResolvedValue([]);
     tx.team.update.mockResolvedValue({ id: 'team-1' });
     tx.player.findUnique.mockResolvedValue({
-      id: 'player-1', teamId: 'team-1', studentId: 'old-id', photo: null,
-      yellowCards: 0, redCards: 0, deletedAt: null,
+      id: 'player-1',
+      teamId: 'team-1',
+      studentId: 'old-id',
+      photo: null,
+      yellowCards: 0,
+      redCards: 0,
+      deletedAt: null,
     });
     tx.player.findFirst.mockResolvedValue(null);
     tx.player.update.mockResolvedValue({ id: 'player-1' });
     tx.auditLog.create.mockResolvedValue({});
     tx.team.findUnique.mockResolvedValue({ id: 'team-1', players: [{ id: 'player-1' }] });
 
-    await service.updateWithPlayers('team-1', {
-      players: [{ id: 'player-1', name: 'Player', studentId: 'new-id', jerseyNumber: '10' }],
-    }, 'coach', { role: 'coach', teamId: 'team-1' });
+    await service.updateWithPlayers(
+      'team-1',
+      {
+        players: [{ id: 'player-1', name: 'Player', studentId: 'new-id', jerseyNumber: '10' }],
+      },
+      'coach',
+      { role: 'coach', teamId: 'team-1' },
+    );
 
-    expect(tx.player.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'player-1' },
-      data: expect.objectContaining({ studentId: 'new-id' }),
-    }));
+    expect(tx.player.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'player-1' },
+        data: expect.objectContaining({ studentId: 'new-id' }),
+      }),
+    );
     expect(tx.player.create).not.toHaveBeenCalled();
   });
 
@@ -203,12 +218,12 @@ describe('TeamService.updateWithPlayers', () => {
     const { service, prisma } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-2', teamName: 'Other', deletedAt: null });
 
-    await expect(service.updateWithPlayers(
-      'team-2',
-      { players: [] },
-      'coach',
-      { role: 'coach', teamId: 'team-1' },
-    )).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.updateWithPlayers('team-2', { players: [] }, 'coach', {
+        role: 'coach',
+        teamId: 'team-1',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

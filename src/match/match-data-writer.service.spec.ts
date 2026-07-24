@@ -6,9 +6,9 @@ describe('MatchDataWriterService', () => {
   it('deduplicates lineups and validates team ownership', async () => {
     const tx: any = {
       player: {
-        findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([
-          { id: 'player-1', name: 'Player', teamId: 'home-team' },
-        ]),
+        findMany: jest
+          .fn<() => Promise<any[]>>()
+          .mockResolvedValue([{ id: 'player-1', name: 'Player', teamId: 'home-team' }]),
       },
       matchLineup: { createMany: jest.fn() },
     };
@@ -27,9 +27,9 @@ describe('MatchDataWriterService', () => {
   it('rejects a player assigned to the wrong team', async () => {
     const tx: any = {
       player: {
-        findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([
-          { id: 'player-1', name: 'Player', teamId: 'away-team' },
-        ]),
+        findMany: jest
+          .fn<() => Promise<any[]>>()
+          .mockResolvedValue([{ id: 'player-1', name: 'Player', teamId: 'away-team' }]),
       },
       matchLineup: { createMany: jest.fn() },
     };

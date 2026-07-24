@@ -7,11 +7,7 @@ import { getSeasonGender } from '../common/season-gender';
 export class TeamRosterService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async validateTargetSeason(
-    tx: Prisma.TransactionClient,
-    seasonId: string,
-    teamGender: string,
-  ) {
+  async validateTargetSeason(tx: Prisma.TransactionClient, seasonId: string, teamGender: string) {
     const season = await tx.season.findUnique({
       where: { id: seasonId },
       select: { id: true, name: true, status: true },
@@ -78,13 +74,12 @@ export class TeamRosterService {
       });
     }
 
-    return players
-      .sort((left, right) => {
-        const leftParsed = parseInt(left.jerseyNumber, 10);
-        const rightParsed = parseInt(right.jerseyNumber, 10);
-        const leftNumber = isNaN(leftParsed) ? 999 : leftParsed;
-        const rightNumber = isNaN(rightParsed) ? 999 : rightParsed;
-        return leftNumber - rightNumber;
-      });
+    return players.sort((left, right) => {
+      const leftParsed = parseInt(left.jerseyNumber, 10);
+      const rightParsed = parseInt(right.jerseyNumber, 10);
+      const leftNumber = isNaN(leftParsed) ? 999 : leftParsed;
+      const rightNumber = isNaN(rightParsed) ? 999 : rightParsed;
+      return leftNumber - rightNumber;
+    });
   }
 }

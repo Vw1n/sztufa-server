@@ -78,7 +78,9 @@ export class PlayerService {
       if (existingPlayer.deletedAt === null) {
         if (userCtx && userCtx.role === 'coach') {
           if (existingPlayer.teamId !== userCtx.teamId) {
-            throw new ForbiddenException('该学号的球员已归属于其他球队，您没有权限修改其信息或将其划归至本队');
+            throw new ForbiddenException(
+              '该学号的球员已归属于其他球队，您没有权限修改其信息或将其划归至本队',
+            );
           }
         }
       }
@@ -196,7 +198,10 @@ export class PlayerService {
     if (updatePlayerDto.name !== undefined && updatePlayerDto.name !== player.name) {
       diffs.push(`姓名: ${player.name}->${updatePlayerDto.name}`);
     }
-    if (updatePlayerDto.jerseyNumber !== undefined && updatePlayerDto.jerseyNumber !== player.jerseyNumber) {
+    if (
+      updatePlayerDto.jerseyNumber !== undefined &&
+      updatePlayerDto.jerseyNumber !== player.jerseyNumber
+    ) {
       diffs.push(`号码: ${player.jerseyNumber}->${updatePlayerDto.jerseyNumber}`);
     }
     if (updatePlayerDto.studentId !== undefined && updatePlayerDto.studentId !== player.studentId) {
@@ -207,19 +212,18 @@ export class PlayerService {
     }
     if (updatePlayerDto.teamId !== undefined && updatePlayerDto.teamId !== player.teamId) {
       const oldTeam = await this.prisma.team.findUnique({ where: { id: player.teamId || '' } });
-      const newTeam = await this.prisma.team.findUnique({ where: { id: updatePlayerDto.teamId || '' } });
+      const newTeam = await this.prisma.team.findUnique({
+        where: { id: updatePlayerDto.teamId || '' },
+      });
       diffs.push(`球队: ${oldTeam?.teamName || '无'}->${newTeam?.teamName || '无'}`);
     }
 
-    const details = diffs.length > 0
-      ? `修改球员 "${player.name}" 信息: ${diffs.join(', ')}`
-      : `保存球员 "${player.name}" 信息(未改动)`;
+    const details =
+      diffs.length > 0
+        ? `修改球员 "${player.name}" 信息: ${diffs.join(', ')}`
+        : `保存球员 "${player.name}" 信息(未改动)`;
 
-    await this.auditLogService.log(
-      username,
-      'UPDATE_PLAYER',
-      details,
-    );
+    await this.auditLogService.log(username, 'UPDATE_PLAYER', details);
 
     return updatedPlayer;
   }
@@ -242,8 +246,8 @@ export class PlayerService {
       where: { id },
       data: {
         deletedAt: new Date(),
-        studentId: `${player.studentId}_deleted_${timestamp}`
-      }
+        studentId: `${player.studentId}_deleted_${timestamp}`,
+      },
     });
 
     await this.auditLogService.log(

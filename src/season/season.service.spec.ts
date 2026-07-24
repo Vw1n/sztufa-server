@@ -19,11 +19,7 @@ describe('SeasonService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new SeasonService(
-      prisma as any,
-      auditLogService as any,
-      seasonStatistics as any,
-    );
+    service = new SeasonService(prisma as any, auditLogService as any, seasonStatistics as any);
   });
 
   describe('renameSeason', () => {
@@ -40,9 +36,9 @@ describe('SeasonService', () => {
       });
       prisma.season.findFirst.mockResolvedValue({ id: 'season-2' });
 
-      await expect(
-        service.renameSeason('season-1', '已有赛季', 'admin'),
-      ).rejects.toThrow('赛季名称 "已有赛季" 已存在');
+      await expect(service.renameSeason('season-1', '已有赛季', 'admin')).rejects.toThrow(
+        '赛季名称 "已有赛季" 已存在',
+      );
     });
 
     it('renames the season and writes an audit log', async () => {
@@ -56,9 +52,10 @@ describe('SeasonService', () => {
         name: '新名称',
       });
 
-      await expect(
-        service.renameSeason('season-1', ' 新名称 ', 'admin'),
-      ).resolves.toEqual({ id: 'season-1', name: '新名称' });
+      await expect(service.renameSeason('season-1', ' 新名称 ', 'admin')).resolves.toEqual({
+        id: 'season-1',
+        name: '新名称',
+      });
       expect(prisma.season.update).toHaveBeenCalledWith({
         where: { id: 'season-1' },
         data: { name: '新名称' },

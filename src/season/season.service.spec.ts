@@ -24,12 +24,7 @@ describe('SeasonService', () => {
     knockoutService = new KnockoutGeneratorService(prisma as any, auditLogService as any);
     deletionService = new SeasonDeletionService(prisma as any, auditLogService as any);
 
-    service = new SeasonService(
-      lifecycleService,
-      groupService,
-      knockoutService,
-      deletionService,
-    );
+    service = new SeasonService(lifecycleService, groupService, knockoutService, deletionService);
   });
 
   describe('renameSeason', () => {

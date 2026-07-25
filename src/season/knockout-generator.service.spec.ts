@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import { KnockoutGeneratorService } from './knockout-generator.service';
 
 describe('KnockoutGeneratorService', () => {

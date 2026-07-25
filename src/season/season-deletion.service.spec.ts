@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import { SeasonDeletionService } from './season-deletion.service';
 
 describe('SeasonDeletionService', () => {
@@ -54,23 +53,23 @@ describe('SeasonDeletionService', () => {
   };
 
   it('缺少审批人 ID 时抛出 BadRequestException', async () => {
-    await expect(
-      service.approveSeasonDeletion('season-1', undefined, 'admin1'),
-    ).rejects.toThrow('无法识别审批人，请重新登录');
+    await expect(service.approveSeasonDeletion('season-1', undefined, 'admin1')).rejects.toThrow(
+      '无法识别审批人，请重新登录',
+    );
   });
 
   it('非超级管理员审批时抛出 BadRequestException', async () => {
     createTransaction([], 'user');
-    await expect(
-      service.approveSeasonDeletion('season-1', 'user-1', 'user1'),
-    ).rejects.toThrow('只有超级管理员可以审批删除赛季');
+    await expect(service.approveSeasonDeletion('season-1', 'user-1', 'user1')).rejects.toThrow(
+      '只有超级管理员可以审批删除赛季',
+    );
   });
 
   it('目标赛季不存在时抛出 BadRequestException', async () => {
     createTransaction([], 'super_admin', false);
-    await expect(
-      service.approveSeasonDeletion('season-1', 'admin-1', 'admin1'),
-    ).rejects.toThrow('赛季不存在');
+    await expect(service.approveSeasonDeletion('season-1', 'admin-1', 'admin1')).rejects.toThrow(
+      '赛季不存在',
+    );
   });
 
   it('1 个超级管理员审批时记录进度 (pending: true) 并且不删除赛季', async () => {

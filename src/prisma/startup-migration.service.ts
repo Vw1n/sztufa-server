@@ -31,6 +31,7 @@ export class StartupMigrationService implements OnModuleInit {
 
     try {
       await this.migrateSeasonRosters();
+      await this.ensureKnockoutMatches();
       await this.seedInitialNews();
       await this.precomputeSeasonCaches();
     } catch (error) {
@@ -70,6 +71,43 @@ export class StartupMigrationService implements OnModuleInit {
       }
     }
     console.log('[Startup Migration] SeasonTeamPlayer migration completed!');
+  }
+
+  private async ensureKnockoutMatches() {
+    try {
+      if (!this.prisma.match) return;
+      await this.prisma.match.updateMany({
+        where: {
+          OR: [
+            { knockoutRound: '3RD' },
+            { knockoutRound: '3RD_PLACE' },
+            { knockoutRound: 'THIRD_PLACE' },
+          ],
+        },
+        data: {
+          stage: 'KNOCKOUT',
+          knockoutRound: '3RD',
+          knockoutMatchIndex: 1,
+        },
+      });
+
+      const thirdPlaceMatches = await this.prisma.match.findMany({
+        where: {
+          homeTeam: { teamName: { contains: '人工智能' } },
+          awayTeam: { teamName: { contains: '新材料' } },
+        },
+      });
+      for (const m of thirdPlaceMatches) {
+        if (m.stage !== 'KNOCKOUT' || m.knockoutRound !== '3RD') {
+          await this.prisma.match.update({
+            where: { id: m.id },
+            data: { stage: 'KNOCKOUT', knockoutRound: '3RD', knockoutMatchIndex: 1 },
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Startup Migration] 修复三四名比赛标记失败:', err);
+    }
   }
 
   private async seedInitialNews() {

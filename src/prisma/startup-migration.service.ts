@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { execSync } from 'child_process';
 import { PrismaService } from './prisma.service';
 import { SeasonStatisticsService } from './season-statistics.service';
+import { findThirdPlaceMatch } from '../match/knockout-migration';
 
 @Injectable()
 export class StartupMigrationService implements OnModuleInit {
@@ -31,6 +32,7 @@ export class StartupMigrationService implements OnModuleInit {
 
     try {
       await this.migrateSeasonRosters();
+      await this.ensureKnockoutMatches();
       await this.seedInitialNews();
       await this.precomputeSeasonCaches();
     } catch (error) {
@@ -70,6 +72,52 @@ export class StartupMigrationService implements OnModuleInit {
       }
     }
     console.log('[Startup Migration] SeasonTeamPlayer migration completed!');
+  }
+
+  private async ensureKnockoutMatches() {
+    try {
+      if (!this.prisma.match) return;
+      await this.prisma.match.updateMany({
+        where: {
+          OR: [
+            { knockoutRound: '3RD' },
+            { knockoutRound: '3RD_PLACE' },
+            { knockoutRound: 'THIRD_PLACE' },
+          ],
+        },
+        data: {
+          stage: 'KNOCKOUT',
+          knockoutRound: '3RD',
+          knockoutMatchIndex: 1,
+        },
+      });
+
+      const cupSeasons = await this.prisma.season.findMany({
+        where: { type: 'CUP' },
+        select: { id: true },
+      });
+      for (const season of cupSeasons) {
+        const seasonMatches = await this.prisma.match.findMany({
+          where: { seasonId: season.id, deletedAt: null },
+          include: { events: true },
+          orderBy: { matchDate: 'asc' },
+        });
+        const thirdPlaceMatch = findThirdPlaceMatch(seasonMatches);
+        if (
+          thirdPlaceMatch &&
+          (thirdPlaceMatch.stage !== 'KNOCKOUT' ||
+            thirdPlaceMatch.knockoutRound !== '3RD' ||
+            thirdPlaceMatch.knockoutMatchIndex !== 1)
+        ) {
+          await this.prisma.match.update({
+            where: { id: thirdPlaceMatch.id },
+            data: { stage: 'KNOCKOUT', knockoutRound: '3RD', knockoutMatchIndex: 1 },
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Startup Migration] 修复三四名比赛标记失败:', err);
+    }
   }
 
   private async seedInitialNews() {

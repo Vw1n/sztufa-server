@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { SeasonService } from './season.service';
+import { SeasonLifecycleService } from './season-lifecycle.service';
+import { SeasonGroupService } from './season-group.service';
+import { KnockoutGeneratorService } from './knockout-generator.service';
+import { SeasonDeletionService } from './season-deletion.service';
 
 describe('SeasonService', () => {
   const prisma = {
@@ -8,10 +12,24 @@ describe('SeasonService', () => {
   };
   const auditLogService = { log: jest.fn() };
   let service: SeasonService;
+  let lifecycleService: SeasonLifecycleService;
+  let groupService: SeasonGroupService;
+  let knockoutService: KnockoutGeneratorService;
+  let deletionService: SeasonDeletionService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new SeasonService(prisma as any, auditLogService as any, {} as any);
+    lifecycleService = new SeasonLifecycleService(prisma as any, auditLogService as any);
+    groupService = new SeasonGroupService(prisma as any, auditLogService as any, {} as any);
+    knockoutService = new KnockoutGeneratorService(prisma as any, auditLogService as any);
+    deletionService = new SeasonDeletionService(prisma as any, auditLogService as any);
+
+    service = new SeasonService(
+      lifecycleService,
+      groupService,
+      knockoutService,
+      deletionService,
+    );
   });
 
   describe('renameSeason', () => {

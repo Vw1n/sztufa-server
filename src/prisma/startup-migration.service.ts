@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { execSync } from 'child_process';
 import { PrismaService } from './prisma.service';
 import { SeasonStatisticsService } from './season-statistics.service';
+import { findThirdPlaceMatch } from '../match/knockout-migration';
 
 @Injectable()
 export class StartupMigrationService implements OnModuleInit {
@@ -91,16 +92,25 @@ export class StartupMigrationService implements OnModuleInit {
         },
       });
 
-      const thirdPlaceMatches = await this.prisma.match.findMany({
-        where: {
-          homeTeam: { teamName: { contains: '人工智能' } },
-          awayTeam: { teamName: { contains: '新材料' } },
-        },
+      const cupSeasons = await this.prisma.season.findMany({
+        where: { type: 'CUP' },
+        select: { id: true },
       });
-      for (const m of thirdPlaceMatches) {
-        if (m.stage !== 'KNOCKOUT' || m.knockoutRound !== '3RD') {
+      for (const season of cupSeasons) {
+        const seasonMatches = await this.prisma.match.findMany({
+          where: { seasonId: season.id, deletedAt: null },
+          include: { events: true },
+          orderBy: { matchDate: 'asc' },
+        });
+        const thirdPlaceMatch = findThirdPlaceMatch(seasonMatches);
+        if (
+          thirdPlaceMatch &&
+          (thirdPlaceMatch.stage !== 'KNOCKOUT' ||
+            thirdPlaceMatch.knockoutRound !== '3RD' ||
+            thirdPlaceMatch.knockoutMatchIndex !== 1)
+        ) {
           await this.prisma.match.update({
-            where: { id: m.id },
+            where: { id: thirdPlaceMatch.id },
             data: { stage: 'KNOCKOUT', knockoutRound: '3RD', knockoutMatchIndex: 1 },
           });
         }

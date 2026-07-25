@@ -26,8 +26,7 @@ const getPenaltyScoreFromEvents = (
 ): { home: number; away: number } | null => {
   const shootoutEvents = events.filter(
     (event) =>
-      event.eventType === 'penalty_shootout_goal' ||
-      event.eventType === 'penalty_shootout_miss',
+      event.eventType === 'penalty_shootout_goal' || event.eventType === 'penalty_shootout_miss',
   );
   if (shootoutEvents.length === 0) return null;
 
@@ -43,13 +42,8 @@ const getPenaltyScoreFromEvents = (
   );
 };
 
-export const getKnockoutWinnerTeamId = (
-  match: KnockoutMigrationMatch,
-): string | null => {
-  if (
-    match.winnerTeamId === match.homeTeamId ||
-    match.winnerTeamId === match.awayTeamId
-  ) {
+export const getKnockoutWinnerTeamId = (match: KnockoutMigrationMatch): string | null => {
+  if (match.winnerTeamId === match.homeTeamId || match.winnerTeamId === match.awayTeamId) {
     return match.winnerTeamId;
   }
   if (match.homeScore > match.awayScore) return match.homeTeamId;
@@ -64,9 +58,7 @@ export const getKnockoutWinnerTeamId = (
       : getPenaltyScoreFromEvents(match.events);
 
   if (!penaltyScore || penaltyScore.home === penaltyScore.away) return null;
-  return penaltyScore.home > penaltyScore.away
-    ? match.homeTeamId
-    : match.awayTeamId;
+  return penaltyScore.home > penaltyScore.away ? match.homeTeamId : match.awayTeamId;
 };
 
 export const findThirdPlaceMatch = (
@@ -82,15 +74,10 @@ export const findThirdPlaceMatch = (
     )
     .sort(
       (first, second) =>
-        Number(first.knockoutMatchIndex || 0) -
-        Number(second.knockoutMatchIndex || 0),
+        Number(first.knockoutMatchIndex || 0) - Number(second.knockoutMatchIndex || 0),
     );
-  const semifinalOne = semifinals.find(
-    (match) => Number(match.knockoutMatchIndex) === 1,
-  );
-  const semifinalTwo = semifinals.find(
-    (match) => Number(match.knockoutMatchIndex) === 2,
-  );
+  const semifinalOne = semifinals.find((match) => Number(match.knockoutMatchIndex) === 1);
+  const semifinalTwo = semifinals.find((match) => Number(match.knockoutMatchIndex) === 2);
   if (!semifinalOne || !semifinalTwo) return null;
 
   const loserOf = (match: KnockoutMigrationMatch): string | null => {
@@ -103,10 +90,7 @@ export const findThirdPlaceMatch = (
   const secondLoser = loserOf(semifinalTwo);
   if (!firstLoser || !secondLoser) return null;
 
-  const semifinalEnd = Math.max(
-    semifinalOne.matchDate.getTime(),
-    semifinalTwo.matchDate.getTime(),
-  );
+  const semifinalEnd = Math.max(semifinalOne.matchDate.getTime(), semifinalTwo.matchDate.getTime());
   return (
     matches
       .filter(
@@ -116,14 +100,9 @@ export const findThirdPlaceMatch = (
           match.knockoutRound !== 'SF' &&
           match.knockoutRound !== 'F' &&
           match.matchDate.getTime() >= semifinalEnd &&
-          ((match.homeTeamId === firstLoser &&
-            match.awayTeamId === secondLoser) ||
-            (match.homeTeamId === secondLoser &&
-              match.awayTeamId === firstLoser)),
+          ((match.homeTeamId === firstLoser && match.awayTeamId === secondLoser) ||
+            (match.homeTeamId === secondLoser && match.awayTeamId === firstLoser)),
       )
-      .sort(
-        (first, second) =>
-          first.matchDate.getTime() - second.matchDate.getTime(),
-      )[0] || null
+      .sort((first, second) => first.matchDate.getTime() - second.matchDate.getTime())[0] || null
   );
 };

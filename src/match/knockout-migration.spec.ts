@@ -4,9 +4,7 @@ import {
   KnockoutMigrationMatch,
 } from './knockout-migration';
 
-const match = (
-  overrides: Partial<KnockoutMigrationMatch>,
-): KnockoutMigrationMatch => ({
+const match = (overrides: Partial<KnockoutMigrationMatch>): KnockoutMigrationMatch => ({
   id: 'match',
   homeTeamId: 'home',
   awayTeamId: 'away',

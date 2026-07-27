@@ -9,6 +9,8 @@ import { MatchQueryService } from './match-query.service';
 import { MatchDataWriterService } from './match-data-writer.service';
 import { calculateMatchOutcome, resolveMatchOutcome } from './match-outcome';
 
+import { PredictionService } from '../prediction/prediction.service';
+
 @Injectable()
 export class MatchService {
   constructor(
@@ -18,6 +20,7 @@ export class MatchService {
     private readonly seasonStatistics: SeasonStatisticsService,
     private readonly matchQuery: MatchQueryService,
     private readonly matchDataWriter: MatchDataWriterService,
+    private readonly predictionService: PredictionService,
   ) {}
 
   async create(createMatchDto: CreateMatchDto, username: string) {
@@ -85,6 +88,10 @@ export class MatchService {
         : [];
       await this.matchDataWriter.writeEvents(tx, createdMatch.id, events || []);
       await this.matchDataWriter.writeGoals(tx, createdMatch.id, events, goals);
+
+      if (createdMatch.status === 'finished') {
+        await this.predictionService.settleMatchPredictions(createdMatch.id, tx);
+      }
 
       return { match: createdMatch, validLineups: validatedLineups };
     });
@@ -225,7 +232,14 @@ export class MatchService {
         await this.matchDataWriter.replaceGoals(tx, id, events, goals);
       }
 
-      return tx.match.findUnique({ where: { id } });
+      const curMatch = await tx.match.findUnique({ where: { id } });
+      if (curMatch && curMatch.status === 'finished') {
+        await this.predictionService.settleMatchPredictions(id, tx);
+      } else if (curMatch && (curMatch.status === 'cancelled' || curMatch.status === 'void')) {
+        await this.predictionService.voidMatchPredictions(id, username, tx);
+      }
+
+      return curMatch;
     });
 
     if (!updatedMatch) {
@@ -333,10 +347,14 @@ export class MatchService {
     });
     suspendedPlayers.forEach((p) => affectedPlayerIds.add(p.id));
 
-    // 软删除比赛
-    const deletedMatch = await this.prisma.match.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    // 软删除比赛与作废竞猜在同一事务中处理
+    const deletedMatch = await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.match.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await this.predictionService.voidMatchPredictions(id, username, tx);
+      return deleted;
     });
 
     // 同步受影响球员的状态

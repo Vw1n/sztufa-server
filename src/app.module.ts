@@ -11,6 +11,7 @@ import { BackupModule } from './backup/backup.module';
 import { SeasonModule } from './season/season.module';
 import { NewsModule } from './news/news.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { PredictionModule } from './prediction/prediction.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PrismaModule } from './prisma/prisma.module';
     BackupModule,
     SeasonModule,
     NewsModule,
+    PredictionModule,
   ],
 })
 export class AppModule {}

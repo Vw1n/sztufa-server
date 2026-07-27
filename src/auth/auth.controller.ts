@@ -9,16 +9,25 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { Roles } from './roles.decorator';
 
+import { StudentRegisterDto } from './dto/student-register.dto';
+import { UpdateStudentIdDto } from './dto/update-student-id.dto';
+
 @Controller('api/v1/auth')
 @ApiTags('认证')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @Post('student-register')
+  @ApiOperation({ summary: '普通用户自主注册并绑定学号' })
+  async registerStudent(@Body() dto: StudentRegisterDto) {
+    return this.authService.registerStudent(dto);
+  }
+
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')
   @Post('register')
-  @ApiOperation({ summary: '用户注册（仅超级管理员）' })
+  @ApiOperation({ summary: '后台创建用户账号（仅超级管理员）' })
   async register(@Body() createUserDto: CreateUserDto) {
     return this.authService.register(createUserDto);
   }
@@ -90,5 +99,15 @@ export class AuthController {
   ) {
     const operatorUsername = req.user?.username || 'admin';
     return this.authService.resetPassword(id, resetPasswordDto.password, operatorUsername);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Patch('users/:id/student-id')
+  @ApiOperation({ summary: '修改用户绑定学号（仅超级管理员）' })
+  async updateStudentId(@Param('id') id: string, @Body() dto: UpdateStudentIdDto, @Req() req: any) {
+    const operatorUsername = req.user?.username || 'admin';
+    return this.authService.updateUserStudentId(id, dto.studentId, operatorUsername);
   }
 }

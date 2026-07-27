@@ -5,12 +5,13 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AuditLogService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async log(username: string, action: string, details: string) {
+  async log(username: string, action: string, details: string, txPrisma?: any) {
     // 过滤掉我们不需要写入的核心非修改日志，比如 USER_LOGIN 不再写入
     if (action === 'USER_LOGIN') {
       return null;
     }
-    return this.prisma.auditLog.create({
+    const db = txPrisma || this.prisma;
+    return db.auditLog.create({
       data: {
         username,
         action,

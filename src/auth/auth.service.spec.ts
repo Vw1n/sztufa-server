@@ -54,14 +54,28 @@ describe('AuthService', () => {
 
   describe('getCurrentUser (via validateUser)', () => {
     it('should return user when token is valid', async () => {
-      const mockUser = { id: '1', username: 'admin', role: 'super_admin', teamId: null };
+      const mockUser = {
+        id: '1',
+        username: 'admin',
+        studentId: null,
+        nickname: 'admin',
+        role: 'super_admin',
+        teamId: null,
+      };
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
       const result = await service.validateUser({ userId: '1' });
       expect(result).toEqual(mockUser);
       expect(prismaService.user.findUnique).toHaveBeenCalledWith({
         where: { id: '1' },
-        select: { id: true, username: true, role: true, teamId: true },
+        select: {
+          id: true,
+          username: true,
+          studentId: true,
+          nickname: true,
+          role: true,
+          teamId: true,
+        },
       });
     });
 
@@ -73,11 +87,38 @@ describe('AuthService', () => {
     });
   });
 
+  describe('registerStudent', () => {
+    it('should create student user successfully', async () => {
+      const mockUser = {
+        id: 's1',
+        username: 'student1',
+        studentId: '2023001122',
+        nickname: '学生一号',
+        role: 'user',
+        createdAt: new Date(),
+      };
+      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (prismaService.user.create as jest.Mock).mockResolvedValue(mockUser);
+
+      const result = await service.registerStudent({
+        username: 'student1',
+        studentId: '2023001122',
+        password: 'password123',
+        nickname: '学生一号',
+      });
+
+      expect(result.user.studentId).toBe('2023001122');
+      expect(result.token).toBe('test-token');
+    });
+  });
+
   describe('createUser (register)', () => {
     it('should create user with valid data', async () => {
       const mockUser = {
         id: '1',
         username: 'newuser',
+        studentId: '2023123456',
+        nickname: 'newuser',
         role: 'user',
         teamId: null,
         createdAt: new Date(),
@@ -86,6 +127,7 @@ describe('AuthService', () => {
 
       const result = await service.register({
         username: 'newuser',
+        studentId: '2023123456',
         password: 'password123',
         role: 'user',
       });
@@ -112,6 +154,7 @@ describe('AuthService', () => {
       const mockUser = {
         id: '1',
         username: 'user',
+        studentId: '2023123456',
         role: 'user',
         teamId: null,
         createdAt: new Date(),
@@ -120,6 +163,7 @@ describe('AuthService', () => {
 
       await service.register({
         username: 'user',
+        studentId: '2023123456',
         password: 'password123',
         role: 'user',
         teamId: 'some-team',

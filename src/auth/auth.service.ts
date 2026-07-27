@@ -3,11 +3,13 @@ import {
   UnauthorizedException,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import { CreateUserDto } from './dto/create-user.dto';
+import { StudentRegisterDto } from './dto/student-register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
@@ -19,9 +21,92 @@ export class AuthService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
+  async registerStudent(dto: StudentRegisterDto) {
+    const username = dto.username.trim();
+    const studentId = dto.studentId.trim();
+    const nickname = dto.nickname?.trim() || username;
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { username },
+    });
+    if (existingUser) {
+      throw new ConflictException('用户名已被注册');
+    }
+
+    const existingStudentId = await this.prisma.user.findUnique({
+      where: { studentId },
+    });
+    if (existingStudentId) {
+      throw new ConflictException('该学号已被其他账号绑定，请联系管理员核验');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const user = await this.prisma.user.create({
+      data: {
+        username,
+        password: hashedPassword,
+        role: 'user',
+        studentId,
+        nickname,
+      },
+      select: {
+        id: true,
+        username: true,
+        studentId: true,
+        nickname: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    await this.auditLogService.log(
+      'system',
+      'STUDENT_REGISTER',
+      `普通用户自主注册: "${user.username}" (学号: ${user.studentId})`,
+    );
+
+    const token = this.jwtService.sign({ userId: user.id, role: user.role });
+    return { user, token };
+  }
+
   async register(createUserDto: CreateUserDto) {
-    const { username, password, role } = createUserDto;
-    let { teamId } = createUserDto;
+    const { username, password, studentId, nickname } = createUserDto;
+    const role = createUserDto.role || 'user';
+    let teamId = createUserDto.teamId;
+
+    const trimmedUsername = username?.trim();
+    if (!trimmedUsername) {
+      throw new BadRequestException('用户名不能为空');
+    }
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { username: trimmedUsername },
+    });
+    if (existingUser) {
+      throw new ConflictException('用户名已被注册');
+    }
+
+    const trimmedStudentId = studentId?.trim() || null;
+    if (role === 'user') {
+      if (!trimmedStudentId) {
+        throw new BadRequestException('普通用户注册必须填写学号');
+      }
+      const existingStudentId = await this.prisma.user.findUnique({
+        where: { studentId: trimmedStudentId },
+      });
+      if (existingStudentId) {
+        throw new ConflictException('该学号已被其他账号绑定');
+      }
+    } else if (trimmedStudentId) {
+      const existingStudentId = await this.prisma.user.findUnique({
+        where: { studentId: trimmedStudentId },
+      });
+      if (existingStudentId) {
+        throw new ConflictException('该学号已被其他账号绑定');
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // P0-6: 校验球队绑定规则
@@ -41,14 +126,18 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
-        username,
+        username: trimmedUsername,
         password: hashedPassword,
-        role: role || 'user',
+        role,
+        studentId: trimmedStudentId,
+        nickname: nickname?.trim() || trimmedUsername,
         teamId: teamId || null,
       },
       select: {
         id: true,
         username: true,
+        studentId: true,
+        nickname: true,
         role: true,
         teamId: true,
         createdAt: true,
@@ -58,7 +147,7 @@ export class AuthService {
     await this.auditLogService.log(
       'system',
       'USER_REGISTER',
-      `新建账号: "${username}" (角色: ${user.role})`,
+      `新建账号: "${user.username}" (角色: ${user.role}, 学号: ${user.studentId || '无'})`,
     );
 
     const token = this.jwtService.sign({ userId: user.id, role: user.role });
@@ -80,6 +169,8 @@ export class AuthService {
       user: {
         id: user.id,
         username: user.username,
+        studentId: user.studentId,
+        nickname: user.nickname || user.username,
         role: user.role,
         teamId: user.teamId,
       },
@@ -90,7 +181,14 @@ export class AuthService {
   async validateUser(payload: any) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, username: true, role: true, teamId: true },
+      select: {
+        id: true,
+        username: true,
+        studentId: true,
+        nickname: true,
+        role: true,
+        teamId: true,
+      },
     });
     return user;
   }
@@ -100,12 +198,59 @@ export class AuthService {
       select: {
         id: true,
         username: true,
+        studentId: true,
+        nickname: true,
         role: true,
         teamId: true,
         createdAt: true,
       },
       orderBy: { username: 'asc' },
     });
+  }
+
+  async updateUserStudentId(
+    id: string,
+    studentId: string | null,
+    operatorUsername: string = 'admin',
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('该用户账号不存在');
+    }
+
+    const trimmed = studentId?.trim() || null;
+    if (user.role === 'user' && !trimmed) {
+      throw new BadRequestException('普通用户必须绑定学号');
+    }
+
+    if (trimmed) {
+      const existing = await this.prisma.user.findFirst({
+        where: { studentId: trimmed, NOT: { id } },
+      });
+      if (existing) {
+        throw new BadRequestException('该学号已被其他账号绑定');
+      }
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id },
+      data: { studentId: trimmed },
+      select: {
+        id: true,
+        username: true,
+        studentId: true,
+        nickname: true,
+        role: true,
+      },
+    });
+
+    await this.auditLogService.log(
+      operatorUsername,
+      'UPDATE_STUDENT_ID',
+      `修改用户 "${user.username}" 学号绑定: ${trimmed || '解绑'}`,
+    );
+
+    return updatedUser;
   }
 
   // P0-5: 检查是否是最后一个超级管理员

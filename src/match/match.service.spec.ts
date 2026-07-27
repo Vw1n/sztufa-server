@@ -62,6 +62,11 @@ describe('MatchService.update', () => {
       replaceGoals: jest.fn(),
     };
 
+    const predictionService: any = {
+      settleMatchPredictions: jest.fn(async () => ({ settledCount: 0 })),
+      voidMatchPredictions: jest.fn(async () => ({ voidedCount: 0 })),
+    };
+
     return {
       service: new MatchService(
         prisma,
@@ -70,12 +75,14 @@ describe('MatchService.update', () => {
         seasonStatistics,
         matchQuery,
         matchDataWriter,
+        predictionService,
       ),
       prisma,
       playerCardSyncService,
       seasonStatistics,
       matchQuery,
       matchDataWriter,
+      predictionService,
     };
   };
 
@@ -141,9 +148,19 @@ describe('MatchService.update', () => {
       'home-new',
       'away-new',
       expect.arrayContaining([
-        expect.objectContaining({ playerId: 'home-player', teamType: 'home' }),
-        expect.objectContaining({ playerId: 'away-player', teamType: 'away' }),
+        { playerId: 'home-player', teamType: 'home', lineupType: 'starting' },
+        { playerId: 'away-player', teamType: 'away', lineupType: 'starting' },
       ]),
+    );
+  });
+
+  it('rolls back transaction if prediction settlement fails during match update', async () => {
+    const { service, prisma, predictionService } = createService();
+    prisma.match.findUnique.mockResolvedValue(originalMatch);
+    predictionService.settleMatchPredictions.mockRejectedValue(new Error('Settlement DB Error'));
+
+    await expect(service.update('match-1', { status: 'finished' }, 'admin')).rejects.toThrow(
+      'Settlement DB Error',
     );
   });
 });

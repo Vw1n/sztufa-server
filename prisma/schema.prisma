@@ -92,6 +92,7 @@ model Match {
   knockoutRound   String?
   knockoutMatchIndex Int?
   deletedAt       DateTime?
+  predictions     Prediction[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -102,6 +103,40 @@ model Match {
   @@index([seasonId, stage, deletedAt])
   @@index([mvpPlayerId])
   @@index([deletedAt])
+}
+
+enum PredictionChoice {
+  HOME_WIN
+  DRAW
+  AWAY_WIN
+}
+
+enum PredictionStatus {
+  PENDING
+  CORRECT
+  WRONG
+  VOID
+}
+
+model Prediction {
+  id            String           @id @default(cuid())
+  userId        String
+  matchId       String
+  choice        PredictionChoice
+  status        PredictionStatus @default(PENDING)
+  awardedPoints Int              @default(0)
+  submittedAt   DateTime         @default(now())
+  settledAt     DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, matchId])
+  @@index([matchId, choice])
+  @@index([userId, status])
+  @@index([settledAt])
 }
 
 model Goal {
@@ -176,19 +211,22 @@ model News {
   @@index([deletedAt])
 }
 
-
 model User {
   id        String   @id @default(cuid())
   username  String   @unique
+  studentId String?  @unique
+  nickname  String?
   password  String
   role      String   @default("user")
   teamId    String?
   team      Team?    @relation(fields: [teamId], references: [id])
   seasonDeletionApprovals SeasonDeletionApproval[]
+  predictions Prediction[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([username])
+  @@index([studentId])
   @@index([teamId])
 }
 

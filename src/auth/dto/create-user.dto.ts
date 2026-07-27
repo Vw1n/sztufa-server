@@ -7,6 +7,16 @@ export class CreateUserDto {
   @MinLength(3)
   username: string;
 
+  @ApiProperty({ description: '学号', example: '2023123456', required: false })
+  @IsOptional()
+  @IsString()
+  studentId?: string;
+
+  @ApiProperty({ description: '昵称', example: '张三', required: false })
+  @IsOptional()
+  @IsString()
+  nickname?: string;
+
   @ApiProperty({ description: '密码', example: 'password123' })
   @IsString()
   @MinLength(6)

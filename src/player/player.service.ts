@@ -278,7 +278,13 @@ export class PlayerService {
       throw new NotFoundException('球员不存在');
     }
 
-    // 1. 获取所有的进球、红黄牌等事件
+    // 1. 获取该球员报名参加的所有赛季
+    const seasonPlayers = await this.prisma.seasonTeamPlayer.findMany({
+      where: { playerId: id },
+      include: { season: true },
+    });
+
+    // 2. 获取所有的进球、红黄牌等事件
     const events = await this.prisma.matchEvent.findMany({
       where: {
         OR: [{ playerId: id }, { assistPlayerId: id }],
@@ -295,7 +301,24 @@ export class PlayerService {
       },
     });
 
-    // 2. 统计每个赛季的数据
+    // 3. 计算出场数 (Player appearances) - 通过 MatchLineup 统计实际出场
+    const lineups = await this.prisma.matchLineup.findMany({
+      where: {
+        playerId: id,
+        match: {
+          status: 'finished',
+        },
+      },
+      include: {
+        match: {
+          include: {
+            season: true,
+          },
+        },
+      },
+    });
+
+    // 统计每个赛季的数据
     const seasonStats: Record<
       string,
       {
@@ -308,21 +331,33 @@ export class PlayerService {
       }
     > = {};
 
-    events.forEach((event) => {
-      const season = event.match?.season;
-      const seasonId = season?.id || 'unknown';
-      const seasonName = season?.name || '未知赛季';
-
-      if (!seasonStats[seasonId]) {
-        seasonStats[seasonId] = {
-          seasonId,
-          seasonName,
+    const ensureSeasonInit = (season?: { id: string; name: string } | null) => {
+      if (!season || !season.id) return;
+      if (!seasonStats[season.id]) {
+        seasonStats[season.id] = {
+          seasonId: season.id,
+          seasonName: season.name,
           goals: 0,
           assists: 0,
           yellowCards: 0,
           redCards: 0,
         };
       }
+    };
+
+    // 用报名赛季初始化
+    seasonPlayers.forEach((sp) => ensureSeasonInit(sp.season));
+
+    // 用出场记录关联的赛季初始化
+    lineups.forEach((lineup) => ensureSeasonInit(lineup.match?.season));
+
+    // 用事件关联的赛季初始化
+    events.forEach((event) => ensureSeasonInit(event.match?.season));
+
+    // 累计比赛事件统计
+    events.forEach((event) => {
+      const seasonId = event.match?.season?.id;
+      if (!seasonId || !seasonStats[seasonId]) return;
 
       const stats = seasonStats[seasonId];
 
@@ -343,27 +378,13 @@ export class PlayerService {
       }
     });
 
-    // 3. 计算出场数 (Player appearances) - 通过 MatchLineup 统计实际出场
-    const lineups = await this.prisma.matchLineup.findMany({
-      where: {
-        playerId: id,
-        match: {
-          status: 'finished',
-        },
-      },
-      include: {
-        match: {
-          include: {
-            season: true,
-          },
-        },
-      },
-    });
-
+    // 计算出场数
     const matchCountsBySeason: Record<string, number> = {};
     lineups.forEach((lineup) => {
-      const sId = lineup.match?.season?.id || 'unknown';
-      matchCountsBySeason[sId] = (matchCountsBySeason[sId] || 0) + 1;
+      const sId = lineup.match?.season?.id;
+      if (sId) {
+        matchCountsBySeason[sId] = (matchCountsBySeason[sId] || 0) + 1;
+      }
     });
 
     // 组装最终结果

@@ -43,7 +43,7 @@ export class NewsService {
         skip,
         take: limitNum,
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       }),
       this.prisma.news.count({ where }),
     ]);

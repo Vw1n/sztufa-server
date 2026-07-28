@@ -4,7 +4,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class SeasonDeletionService {
-  public static readonly REQUIRED_DELETION_APPROVALS = 3;
+  public static readonly REQUIRED_DELETION_APPROVALS = 1;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -109,7 +109,7 @@ export class SeasonDeletionService {
       await this.auditLogService.log(
         username,
         'DELETE_SEASON',
-        `三名超级管理员审批通过，删除赛季 "${result.deleted?.name}"，同时删除 ${result.deleted?.matches} 场比赛、${result.deleted?.teamPlayers} 条赛季名单和 ${result.deleted?.groupTeams} 条分组记录`,
+        `超级管理员确认删除赛季 "${result.deleted?.name}"，同时删除 ${result.deleted?.matches} 场比赛、${result.deleted?.teamPlayers} 条赛季名单和 ${result.deleted?.groupTeams} 条分组记录`,
       );
     }
 

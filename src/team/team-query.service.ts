@@ -23,16 +23,45 @@ export class TeamQueryService {
       ];
     }
 
-    const [data, total] = await Promise.all([
+    const [teams, total] = await Promise.all([
       this.prisma.team.findMany({
         skip,
         take: limitNum,
         where,
-        include: { players: { where: { deletedAt: null } }, groupTeams: true },
+        include: {
+          players: {
+            where: {
+              deletedAt: null,
+              ...(seasonId && seasonId !== 'all' ? { seasonPlayers: { some: { seasonId } } } : {}),
+            },
+          },
+          groupTeams: seasonId && seasonId !== 'all' ? { where: { seasonId } } : true,
+          ...(seasonId && seasonId !== 'all' ? { seasonProfiles: { where: { seasonId } } } : {}),
+        },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.team.count({ where }),
     ]);
+    const data = teams.map((team: any) => {
+      const { seasonProfiles, ...baseTeam } = team;
+      const profile = seasonProfiles?.[0];
+      if (!profile) return baseTeam;
+      return {
+        ...baseTeam,
+        teamName: profile.teamName,
+        teamDoctor: profile.teamDoctor,
+        headCoach: profile.headCoach,
+        teamLeader: profile.teamLeader,
+        coachPhone: profile.coachPhone,
+        leaderPhone: profile.leaderPhone,
+        homeJerseyColor: profile.homeJerseyColor,
+        awayJerseyColor: profile.awayJerseyColor,
+        teamLogo: profile.teamLogo,
+        homeJersey: profile.homeJersey,
+        awayJersey: profile.awayJersey,
+        gender: profile.gender,
+      };
+    });
     return { data, total, page: pageNum, limit: limitNum };
   }
 

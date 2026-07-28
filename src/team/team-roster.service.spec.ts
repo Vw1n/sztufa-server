@@ -80,6 +80,14 @@ describe('TeamRosterService', () => {
     expect(prisma.season.findFirst).not.toHaveBeenCalled();
   });
 
+  it('does not fall back to players from other seasons when a roster is empty', async () => {
+    const { service, prisma } = createService();
+    prisma.team.findUnique.mockResolvedValue({ id: 'team-1', deletedAt: null });
+    prisma.seasonTeamPlayer.findMany.mockResolvedValue([]);
+
+    await expect(service.getTeamRoster('team-1', 'season-1')).resolves.toEqual([]);
+  });
+
   it('keeps the no-active-season error when no season is supplied', async () => {
     const { service, prisma } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-1', deletedAt: null });

@@ -95,35 +95,19 @@ describe('SeasonService', () => {
       return tx;
     };
 
-    it('records one approval without deleting the season', async () => {
+    it('deletes after one super admin confirms', async () => {
       const tx = createTransaction([{ id: 'admin-1', username: 'admin1' }]);
       await expect(
         service.approveSeasonDeletion('season-1', 'admin-1', 'admin1'),
       ).resolves.toMatchObject({
         success: true,
-        pending: true,
-        approval: { approvedCount: 1, requiredCount: 3 },
+        pending: false,
+        deleted: { id: 'season-1', matches: 2 },
       });
       expect(tx.seasonDeletionApproval.upsert).toHaveBeenCalledWith({
         where: { seasonId_approverId: { seasonId: 'season-1', approverId: 'admin-1' } },
         update: {},
         create: { seasonId: 'season-1', approverId: 'admin-1' },
-      });
-      expect(tx.season.delete).not.toHaveBeenCalled();
-    });
-
-    it('deletes only after three different super admins approve', async () => {
-      const tx = createTransaction([
-        { id: 'admin-1', username: 'admin1' },
-        { id: 'admin-2', username: 'admin2' },
-        { id: 'admin-3', username: 'admin3' },
-      ]);
-      await expect(
-        service.approveSeasonDeletion('season-1', 'admin-3', 'admin3'),
-      ).resolves.toMatchObject({
-        success: true,
-        pending: false,
-        deleted: { id: 'season-1', matches: 2 },
       });
       expect(tx.match.deleteMany).toHaveBeenCalledWith({ where: { seasonId: 'season-1' } });
       expect(tx.season.delete).toHaveBeenCalledWith({ where: { id: 'season-1' } });

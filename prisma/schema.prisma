@@ -39,6 +39,7 @@ model Player {
   id                  String  @id @default(cuid())
   name                String
   studentId           String  @unique
+  legacyKey           String? @unique
   jerseyNumber        String
   photo               String?
   status              String  @default("active")
@@ -66,6 +67,7 @@ model Player {
 
 model Match {
   id              String        @id @default(cuid())
+  legacyGameId    String?       @unique
   homeTeamId      String
   awayTeamId      String
   homeTeam        Team          @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Cascade)

@@ -37,6 +37,8 @@ describe('TeamQueryService', () => {
               seasonPlayers: { some: { seasonId: 'season-1' } },
             },
           },
+          groupTeams: { where: { seasonId: 'season-1' } },
+          seasonProfiles: { where: { seasonId: 'season-1' } },
         }),
         where: expect.objectContaining({
           deletedAt: null,
@@ -45,6 +47,49 @@ describe('TeamQueryService', () => {
         }),
       }),
     );
+  });
+
+  it('overlays season-specific team details without leaking the global profile', async () => {
+    const { service, prisma } = createService();
+    prisma.team.findMany.mockResolvedValue([
+      {
+        id: 'team-1',
+        teamName: '测试队',
+        headCoach: '当前教练',
+        teamLogo: 'current.png',
+        players: [],
+        groupTeams: [],
+        seasonProfiles: [
+          {
+            teamName: '测试队',
+            teamDoctor: null,
+            headCoach: null,
+            teamLeader: null,
+            coachPhone: null,
+            leaderPhone: null,
+            homeJerseyColor: '未记录',
+            awayJerseyColor: '未记录',
+            teamLogo: null,
+            homeJersey: null,
+            awayJersey: null,
+            gender: 'MALE',
+          },
+        ],
+      },
+    ]);
+    prisma.team.count.mockResolvedValue(1);
+
+    const result = await service.findAll(1, 10, 'season-1', 'MALE');
+
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        teamName: '测试队',
+        headCoach: null,
+        teamLogo: null,
+        homeJerseyColor: '未记录',
+      }),
+    );
+    expect(result.data[0]).not.toHaveProperty('seasonProfiles');
   });
 
   it('keeps the not-found behavior for deleted teams', async () => {

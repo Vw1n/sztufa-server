@@ -13,6 +13,7 @@ interface NormalizedSeason {
 
 interface NormalizedTeam {
   name: string;
+  seasonNames: Set<string>;
 }
 
 interface NormalizedPlayer {
@@ -271,6 +272,44 @@ export class ImportService {
             });
             teamIds.set(teamInput.name, team.id);
             created.teams += 1;
+          }
+        }
+
+        for (const teamInput of normalized.teams.values()) {
+          const teamId = teamIds.get(teamInput.name);
+          if (!teamId) {
+            throw new BadRequestException(`球队不存在: ${teamInput.name}`);
+          }
+          for (const seasonName of teamInput.seasonNames) {
+            const seasonId = seasonIds.get(seasonName);
+            if (!seasonId) {
+              throw new BadRequestException(`赛季不存在: ${seasonName}`);
+            }
+            await tx.seasonTeamProfile.upsert({
+              where: {
+                seasonId_teamId: {
+                  seasonId,
+                  teamId,
+                },
+              },
+              create: {
+                seasonId,
+                teamId,
+                teamName: teamInput.name,
+                teamDoctor: null,
+                headCoach: null,
+                teamLeader: null,
+                coachPhone: null,
+                leaderPhone: null,
+                homeJerseyColor: UNKNOWN_JERSEY,
+                awayJerseyColor: UNKNOWN_JERSEY,
+                teamLogo: null,
+                homeJersey: null,
+                awayJersey: null,
+                gender: seasonName.includes('女') ? 'FEMALE' : 'MALE',
+              },
+              update: {},
+            });
           }
         }
 
@@ -583,7 +622,7 @@ export class ImportService {
         normalized.errors.push(`${fileName}: 存在缺少名称的球队`);
         continue;
       }
-      normalized.teams.set(teamName, { name: teamName });
+      this.registerTeam(normalized, teamName, seasonName);
       if (!Array.isArray(team.players)) continue;
 
       for (const playerValue of team.players) {
@@ -643,8 +682,8 @@ export class ImportService {
         continue;
       }
 
-      normalized.teams.set(homeTeam, { name: homeTeam });
-      normalized.teams.set(awayTeam, { name: awayTeam });
+      this.registerTeam(normalized, homeTeam, seasonName);
+      this.registerTeam(normalized, awayTeam, seasonName);
       const events: NormalizedEvent[] = [];
       for (const [index, eventValue] of (Array.isArray(match.events)
         ? match.events
@@ -706,6 +745,21 @@ export class ImportService {
 
   private playerKey(teamName: string, playerName: string, seasonName: string | null): string {
     return `${seasonName || '未归季'}\u0000${teamName}\u0000${playerName}`;
+  }
+
+  private registerTeam(
+    normalized: NormalizedPackage,
+    teamName: string,
+    seasonName: string | null,
+  ): void {
+    let team = normalized.teams.get(teamName);
+    if (!team) {
+      team = { name: teamName, seasonNames: new Set() };
+      normalized.teams.set(teamName, team);
+    }
+    if (seasonName) {
+      team.seasonNames.add(seasonName);
+    }
   }
 
   private parseMatchDate(date: string, time: string | null): Date {

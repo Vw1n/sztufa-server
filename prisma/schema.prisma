@@ -27,6 +27,7 @@ model Team {
   users           User[]
   deletedAt       DateTime?
   seasonPlayers   SeasonTeamPlayer[]
+  seasonProfiles  SeasonTeamProfile[]
   groupTeams      SeasonGroupTeam[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -252,10 +253,37 @@ model Season {
   standingsCache Json?
   statsCache     Json?
   teamPlayers    SeasonTeamPlayer[]
+  teamProfiles   SeasonTeamProfile[]
   groupTeams     SeasonGroupTeam[]
   deletionApprovals SeasonDeletionApproval[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model SeasonTeamProfile {
+  id              String   @id @default(cuid())
+  seasonId        String
+  teamId          String
+  teamName        String
+  teamDoctor      String?
+  headCoach       String?
+  teamLeader      String?
+  coachPhone      String?
+  leaderPhone     String?
+  homeJerseyColor String
+  awayJerseyColor String
+  teamLogo        String?
+  homeJersey      String?
+  awayJersey      String?
+  gender          String
+  season          Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  team            Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([seasonId, teamId])
+  @@index([seasonId])
+  @@index([teamId])
 }
 
 model SeasonDeletionApproval {

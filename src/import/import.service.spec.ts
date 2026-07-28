@@ -194,6 +194,9 @@ describe('ImportService', () => {
       seasonTeamPlayer: {
         upsert: jest.fn().mockResolvedValue({}),
       },
+      seasonTeamProfile: {
+        upsert: jest.fn().mockResolvedValue({}),
+      },
       match: {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'match-1' }),
@@ -240,6 +243,16 @@ describe('ImportService', () => {
     });
     expect(tx.matchEvent.createMany).toHaveBeenCalledTimes(1);
     expect(tx.goal.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.seasonTeamProfile.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          seasonId: 'season-1',
+          teamName: '甲队',
+          headCoach: null,
+          teamLogo: null,
+        }),
+      }),
+    );
     expect(seasonStatistics.computeAndCache).toHaveBeenCalledWith('season-1');
     expect(auditLog.log).toHaveBeenCalledWith(
       'admin',

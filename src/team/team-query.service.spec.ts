@@ -30,6 +30,14 @@ describe('TeamQueryService', () => {
       expect.objectContaining({
         skip: 20,
         take: 20,
+        include: expect.objectContaining({
+          players: {
+            where: {
+              deletedAt: null,
+              seasonPlayers: { some: { seasonId: 'season-1' } },
+            },
+          },
+        }),
         where: expect.objectContaining({
           deletedAt: null,
           gender: 'MALE',

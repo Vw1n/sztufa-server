@@ -21,7 +21,7 @@ interface NormalizedPlayer {
   name: string;
   teamName: string;
   jerseyNumber: string;
-  seasonNames: Set<string>;
+  seasonName: string | null;
 }
 
 interface NormalizedEvent {
@@ -155,24 +155,11 @@ export class ImportService {
         }),
         this.prisma.player.findMany({
           where: {
-            OR: [
-              {
-                legacyKey: {
-                  in: [...normalized.players.values()].map((player) => player.legacyKey),
-                },
-              },
-              {
-                name: { in: [...normalized.players.values()].map((player) => player.name) },
-                team: { teamName: { in: [...normalized.teams.keys()] } },
-                deletedAt: null,
-              },
-            ],
+            legacyKey: {
+              in: [...normalized.players.values()].map((player) => player.legacyKey),
+            },
           },
-          select: {
-            legacyKey: true,
-            name: true,
-            team: { select: { teamName: true } },
-          },
+          select: { legacyKey: true },
         }),
         this.prisma.match.findMany({
           where: {
@@ -186,12 +173,7 @@ export class ImportService {
 
       const existingSeasons = new Set(seasons.map((season) => season.name));
       const existingTeams = new Set(teams.map((team) => team.teamName));
-      const existingPlayers = new Set(
-        players.flatMap((player) => [
-          ...(player.legacyKey ? [player.legacyKey] : []),
-          this.playerKey(player.team.teamName, player.name),
-        ]),
-      );
+      const existingPlayers = new Set(players.map((player) => player.legacyKey).filter(Boolean));
       const existingMatches = new Set(matches.map((match) => match.legacyGameId).filter(Boolean));
 
       create.seasons = records.seasons - existingSeasons.size;
@@ -199,7 +181,7 @@ export class ImportService {
       create.teams = records.teams - existingTeams.size;
       update.teams = existingTeams.size;
       for (const player of normalized.players.values()) {
-        if (existingPlayers.has(player.legacyKey) || existingPlayers.has(player.key)) {
+        if (existingPlayers.has(player.legacyKey)) {
           update.players += 1;
         } else {
           create.players += 1;
@@ -312,38 +294,25 @@ export class ImportService {
             });
             updated.players += 1;
           } else {
-            const manualPlayer = await tx.player.findFirst({
-              where: {
-                teamId,
+            player = await tx.player.create({
+              data: {
                 name: playerInput.name,
-                deletedAt: null,
+                studentId: `HIST-${stableHash(playerInput.legacyKey, 16).toUpperCase()}`,
+                legacyKey: playerInput.legacyKey,
+                jerseyNumber: playerInput.jerseyNumber,
+                photo: null,
+                teamId,
               },
             });
-            if (manualPlayer) {
-              player = await tx.player.update({
-                where: { id: manualPlayer.id },
-                data: { legacyKey: playerInput.legacyKey },
-              });
-              updated.players += 1;
-            } else {
-              player = await tx.player.create({
-                data: {
-                  name: playerInput.name,
-                  studentId: `HIST-${stableHash(playerInput.legacyKey, 16).toUpperCase()}`,
-                  legacyKey: playerInput.legacyKey,
-                  jerseyNumber: playerInput.jerseyNumber,
-                  photo: null,
-                  teamId,
-                },
-              });
-              created.players += 1;
-            }
+            created.players += 1;
           }
           playerIds.set(playerInput.key, player.id);
 
-          for (const seasonName of playerInput.seasonNames) {
-            const seasonId = seasonIds.get(seasonName);
-            if (!seasonId) continue;
+          if (playerInput.seasonName) {
+            const seasonId = seasonIds.get(playerInput.seasonName);
+            if (!seasonId) {
+              throw new BadRequestException(`赛季不存在: ${playerInput.seasonName}`);
+            }
             await tx.seasonTeamPlayer.upsert({
               where: {
                 seasonId_playerId: {
@@ -426,7 +395,9 @@ export class ImportService {
               event.teamName ||
               (event.teamType === 'home' ? matchInput.homeTeam : matchInput.awayTeam);
             const playerId = event.playerName
-              ? playerIds.get(this.playerKey(eventTeamName, event.playerName)) || null
+              ? playerIds.get(
+                  this.playerKey(eventTeamName, event.playerName, matchInput.seasonName),
+                ) || null
               : null;
             return {
               matchId: match.id,
@@ -622,7 +593,7 @@ export class ImportService {
           normalized.warnings.push(`${fileName}/${teamName}: 跳过缺少姓名的球员`);
           continue;
         }
-        const key = this.playerKey(teamName, playerName);
+        const key = this.playerKey(teamName, playerName, seasonName);
         let playerInput = normalized.players.get(key);
         if (!playerInput) {
           const jerseyNumbers = Array.isArray(player.jerseyNumbers)
@@ -638,11 +609,10 @@ export class ImportService {
             name: playerName,
             teamName,
             jerseyNumber,
-            seasonNames: new Set(),
+            seasonName,
           };
           normalized.players.set(key, playerInput);
         }
-        if (seasonName) playerInput.seasonNames.add(seasonName);
       }
     }
   }
@@ -734,8 +704,8 @@ export class ImportService {
     return { seasons: 0, teams: 0, players: 0, matches: 0, events: 0 };
   }
 
-  private playerKey(teamName: string, playerName: string): string {
-    return `${teamName}\u0000${playerName}`;
+  private playerKey(teamName: string, playerName: string, seasonName: string | null): string {
+    return `${seasonName || '未归季'}\u0000${teamName}\u0000${playerName}`;
   }
 
   private parseMatchDate(date: string, time: string | null): Date {

@@ -28,7 +28,15 @@ export class TeamQueryService {
         skip,
         take: limitNum,
         where,
-        include: { players: { where: { deletedAt: null } }, groupTeams: true },
+        include: {
+          players: {
+            where: {
+              deletedAt: null,
+              ...(seasonId && seasonId !== 'all' ? { seasonPlayers: { some: { seasonId } } } : {}),
+            },
+          },
+          groupTeams: true,
+        },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.team.count({ where }),

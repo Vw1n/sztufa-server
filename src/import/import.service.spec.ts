@@ -103,13 +103,13 @@ describe('ImportService', () => {
     expect(preview.warnings[0]).toContain('HIST-');
   });
 
-  it('把同名人工球员和同一历史比赛识别为覆盖更新', async () => {
+  it('把相同赛季的历史球员和历史比赛识别为覆盖更新', async () => {
     const prisma = createReadPrisma();
     prisma.season.findMany.mockResolvedValue([{ name: '2023 校长杯' }]);
     prisma.team.findMany.mockResolvedValue([{ teamName: '甲队' }, { teamName: '乙队' }]);
-    prisma.player.findMany.mockResolvedValue([
-      { legacyKey: null, name: '张三', team: { teamName: '甲队' } },
-    ]);
+    prisma.player.findMany.mockImplementation(({ where }: any) =>
+      Promise.resolve([{ legacyKey: where.legacyKey.in[0] }]),
+    );
     prisma.match.findMany.mockImplementation(({ where }: any) =>
       Promise.resolve([{ legacyGameId: where.legacyGameId.in[0] }]),
     );
@@ -124,6 +124,30 @@ describe('ImportService', () => {
       events: 0,
     });
     expect(preview.update).toEqual(counts);
+  });
+
+  it('为不同赛季的同名球队和同名球员创建独立球员记录', async () => {
+    const prisma = createReadPrisma();
+    const secondSeasonDocument = {
+      ...historyDocument,
+      season: { name: '2024 校长杯' },
+    };
+
+    const preview = await createService(prisma).previewFiles([
+      asUpload('2023.json'),
+      asUpload('2024.json', secondSeasonDocument),
+    ]);
+
+    expect(preview.canImport).toBe(true);
+    expect(preview.records).toEqual({
+      seasons: 2,
+      teams: 2,
+      players: 2,
+      matches: 2,
+      events: 2,
+    });
+    const playerQuery = prisma.player.findMany.mock.calls[0][0];
+    expect(new Set(playerQuery.where.legacyKey.in).size).toBe(2);
   });
 
   it('拒绝在同一批次中重复上传同一赛季', async () => {

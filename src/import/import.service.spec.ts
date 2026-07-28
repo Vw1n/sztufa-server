@@ -82,11 +82,7 @@ const createReadPrisma = () => ({
 });
 
 const createService = (prisma: any) =>
-  new ImportService(
-    prisma,
-    { computeAndCache: jest.fn() } as any,
-    { log: jest.fn() } as any,
-  );
+  new ImportService(prisma, { computeAndCache: jest.fn() } as any, { log: jest.fn() } as any);
 
 describe('ImportService', () => {
   it('预检分赛季文件并统计所有可导入实体', async () => {
@@ -103,9 +99,7 @@ describe('ImportService', () => {
       matches: 0,
       events: 0,
     });
-    expect(preview.files).toEqual([
-      { name: '2023.json', type: 'season', season: '2023 校长杯' },
-    ]);
+    expect(preview.files).toEqual([{ name: '2023.json', type: 'season', season: '2023 校长杯' }]);
     expect(preview.warnings[0]).toContain('HIST-');
   });
 
@@ -193,9 +187,7 @@ describe('ImportService', () => {
       ...createReadPrisma(),
       $transaction: jest.fn((work: (client: typeof tx) => Promise<void>) => work(tx)),
     };
-    (prisma.season as any).findUnique = jest
-      .fn()
-      .mockResolvedValue({ id: 'season-1' });
+    (prisma.season as any).findUnique = jest.fn().mockResolvedValue({ id: 'season-1' });
     const seasonStatistics = {
       computeAndCache: jest.fn().mockResolvedValue({ success: true }),
     };

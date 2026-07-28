@@ -218,7 +218,8 @@ export class ImportService {
 
     return {
       digest: normalized.digest,
-      canImport: normalized.errors.length === 0 && records.seasons + records.players + records.matches > 0,
+      canImport:
+        normalized.errors.length === 0 && records.seasons + records.players + records.matches > 0,
       files: normalized.files,
       records,
       create,
@@ -492,9 +493,7 @@ export class ImportService {
     for (const [seasonId, seasonName] of importedSeasons) {
       const cacheResult = await this.seasonStatistics.computeAndCache(seasonId);
       if (!cacheResult.success) {
-        normalized.warnings.push(
-          `${seasonName}: 数据已导入，但统计缓存刷新失败，可稍后重新计算`,
-        );
+        normalized.warnings.push(`${seasonName}: 数据已导入，但统计缓存刷新失败，可稍后重新计算`);
       }
     }
 
@@ -677,7 +676,10 @@ export class ImportService {
       normalized.teams.set(homeTeam, { name: homeTeam });
       normalized.teams.set(awayTeam, { name: awayTeam });
       const events: NormalizedEvent[] = [];
-      for (const [index, eventValue] of (Array.isArray(match.events) ? match.events : []).entries()) {
+      for (const [index, eventValue] of (Array.isArray(match.events)
+        ? match.events
+        : []
+      ).entries()) {
         const event = asRecord(eventValue);
         const rawType = text(event?.eventType);
         const mappedType = rawType ? HISTORY_EVENT_TYPES[rawType] : null;
@@ -691,8 +693,7 @@ export class ImportService {
           eventTime: text(event.time) || '未记录',
           eventType: mappedType,
           teamType,
-          teamName:
-            text(event.teamName) || (teamType === 'home' ? homeTeam : awayTeam),
+          teamName: text(event.teamName) || (teamType === 'home' ? homeTeam : awayTeam),
           playerName: text(event.playerName),
           jerseyNumber: text(event.jerseyNumber),
         });
@@ -725,10 +726,7 @@ export class ImportService {
       teams: normalized.teams.size,
       players: normalized.players.size,
       matches: normalized.matches.size,
-      events: [...normalized.matches.values()].reduce(
-        (sum, match) => sum + match.events.length,
-        0,
-      ),
+      events: [...normalized.matches.values()].reduce((sum, match) => sum + match.events.length, 0),
     };
   }
 

@@ -129,7 +129,13 @@ interface ImportUndoPayload {
       teamId: string;
       deletedAt: string | null;
     }>;
-    rosterLinks: Array<{ id: string; teamId: string }>;
+    rosterLinks: Array<{
+      id: string;
+      teamId: string;
+      playerName?: string;
+      jerseyNumber?: string;
+      playerPhoto?: string | null;
+    }>;
     matches: MatchUndoSnapshot[];
   };
 }
@@ -440,7 +446,13 @@ export class ImportService {
                   playerId: player.id,
                 },
               },
-              select: { id: true, teamId: true },
+              select: {
+                id: true,
+                teamId: true,
+                playerName: true,
+                jerseyNumber: true,
+                playerPhoto: true,
+              },
             });
             const rosterLink = await tx.seasonTeamPlayer.upsert({
               where: {
@@ -453,8 +465,16 @@ export class ImportService {
                 seasonId,
                 teamId,
                 playerId: player.id,
+                playerName: playerInput.name,
+                jerseyNumber: playerInput.jerseyNumber,
+                playerPhoto: null,
               },
-              update: { teamId },
+              update: {
+                teamId,
+                playerName: playerInput.name,
+                jerseyNumber: playerInput.jerseyNumber,
+                playerPhoto: null,
+              },
             });
             if (existingRosterLink) {
               undoPayload.updated.rosterLinks.push(existingRosterLink);
@@ -686,7 +706,12 @@ export class ImportService {
         for (const rosterLink of payload.updated.rosterLinks) {
           await tx.seasonTeamPlayer.update({
             where: { id: rosterLink.id },
-            data: { teamId: rosterLink.teamId },
+            data: {
+              teamId: rosterLink.teamId,
+              playerName: rosterLink.playerName,
+              jerseyNumber: rosterLink.jerseyNumber,
+              playerPhoto: rosterLink.playerPhoto,
+            },
           });
         }
 

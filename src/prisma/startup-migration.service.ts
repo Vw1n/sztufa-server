@@ -60,6 +60,9 @@ export class StartupMigrationService implements OnModuleInit {
               seasonId: season.id,
               teamId: player.teamId,
               playerId: player.id,
+              playerName: player.name,
+              jerseyNumber: player.jerseyNumber,
+              playerPhoto: player.photo,
             },
             update: {},
           })

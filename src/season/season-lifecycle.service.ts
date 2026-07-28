@@ -64,6 +64,9 @@ export class SeasonLifecycleService {
             seasonId: season.id,
             teamId: player.teamId,
             playerId: player.id,
+            playerName: player.name,
+            jerseyNumber: player.jerseyNumber,
+            playerPhoto: player.photo,
           })),
         });
       }
@@ -132,6 +135,9 @@ export class SeasonLifecycleService {
             seasonId: season.id,
             teamId: player.teamId,
             playerId: player.id,
+            playerName: player.name,
+            jerseyNumber: player.jerseyNumber,
+            playerPhoto: player.photo,
           })),
         });
       }

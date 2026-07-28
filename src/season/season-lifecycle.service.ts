@@ -11,9 +11,23 @@ export class SeasonLifecycleService {
   ) {}
 
   async getSeasons() {
-    return this.prisma.season.findMany({
+    const seasons = await this.prisma.season.findMany({
       orderBy: { createdAt: 'desc' },
     });
+    return seasons.sort((left, right) => {
+      const leftYear = this.extractSeasonYear(left.name);
+      const rightYear = this.extractSeasonYear(right.name);
+
+      if (leftYear !== rightYear) {
+        return rightYear - leftYear;
+      }
+      return left.name.localeCompare(right.name, 'zh-CN');
+    });
+  }
+
+  private extractSeasonYear(name: string): number {
+    const matchedYear = name.match(/(?:19|20)\d{2}/);
+    return matchedYear ? Number(matchedYear[0]) : Number.NEGATIVE_INFINITY;
   }
 
   async getActiveSeason() {

@@ -7,7 +7,12 @@ import { SeasonDeletionService } from './season-deletion.service';
 
 describe('SeasonService', () => {
   const prisma = {
-    season: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+    season: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
   const auditLogService = { log: jest.fn() };
@@ -25,6 +30,30 @@ describe('SeasonService', () => {
     deletionService = new SeasonDeletionService(prisma as any, auditLogService as any);
 
     service = new SeasonService(lifecycleService, groupService, knockoutService, deletionService);
+  });
+
+  describe('getSeasons', () => {
+    it('sorts seasons by the year in their names from newest to oldest', async () => {
+      prisma.season.findMany.mockResolvedValue([
+        { id: '1', name: '2022校长杯' },
+        { id: '2', name: '123' },
+        { id: '3', name: '2019校长杯' },
+        { id: '4', name: '2026春季赛季' },
+        { id: '5', name: '2023足协杯' },
+        { id: '6', name: '2025校长杯' },
+      ]);
+
+      const seasons = await service.getSeasons();
+
+      expect(seasons.map((season) => season.name)).toEqual([
+        '2026春季赛季',
+        '2025校长杯',
+        '2023足协杯',
+        '2022校长杯',
+        '2019校长杯',
+        '123',
+      ]);
+    });
   });
 
   describe('renameSeason', () => {

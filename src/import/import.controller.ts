@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Post,
   Req,
   UploadedFiles,
@@ -84,6 +85,22 @@ export class ImportController {
     );
     return {
       message: '历史 JSON 导入完成',
+      result,
+    };
+  }
+
+  @Get('json/last')
+  @ApiOperation({ summary: '查询最近一次可撤销的历史 JSON 导入' })
+  async getLastJsonImport() {
+    return this.importService.getLastImport();
+  }
+
+  @Post('json/undo')
+  @ApiOperation({ summary: '撤销最近一次历史 JSON 导入' })
+  async undoLastJsonImport(@Req() req: any) {
+    const result = await this.importService.undoLastImport(req.user?.username || 'admin');
+    return {
+      message: '已撤销上一次历史 JSON 导入',
       result,
     };
   }

@@ -192,10 +192,12 @@ describe('ImportService', () => {
         create: jest.fn().mockResolvedValue({ id: 'player-1' }),
       },
       seasonTeamPlayer: {
-        upsert: jest.fn().mockResolvedValue({}),
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({ id: 'roster-1' }),
       },
       seasonTeamProfile: {
-        upsert: jest.fn().mockResolvedValue({}),
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({ id: 'profile-1' }),
       },
       match: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -208,6 +210,9 @@ describe('ImportService', () => {
       matchEvent: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      historyImportBatch: {
+        create: jest.fn().mockResolvedValue({ id: 'batch-1' }),
       },
     };
     const prisma = {
@@ -243,6 +248,19 @@ describe('ImportService', () => {
     });
     expect(tx.matchEvent.createMany).toHaveBeenCalledTimes(1);
     expect(tx.goal.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.historyImportBatch.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        digest: expect.any(String),
+        username: 'admin',
+        undoPayload: expect.objectContaining({
+          created: expect.objectContaining({
+            seasonIds: ['season-1'],
+            playerIds: ['player-1'],
+            matchIds: ['match-1'],
+          }),
+        }),
+      }),
+    });
     expect(tx.seasonTeamProfile.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -258,6 +276,72 @@ describe('ImportService', () => {
       'admin',
       'IMPORT_HISTORY_JSON',
       expect.stringContaining('1 场比赛'),
+      tx,
+    );
+  });
+
+  it('在一个事务中撤销最近一次导入批次', async () => {
+    const undoPayload = {
+      affectedSeasonIds: ['season-1'],
+      created: {
+        seasonIds: ['season-1'],
+        teamIds: ['team-a'],
+        profileIds: ['profile-1'],
+        playerIds: ['player-1'],
+        rosterLinkIds: ['roster-1'],
+        matchIds: ['match-1'],
+      },
+      updated: {
+        teams: [],
+        players: [],
+        rosterLinks: [],
+        matches: [],
+      },
+    };
+    const tx = {
+      match: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      seasonTeamPlayer: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      seasonTeamProfile: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      player: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      team: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      season: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      historyImportBatch: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      historyImportBatch: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'batch-1',
+          undoPayload,
+        }),
+      },
+      season: { findUnique: jest.fn().mockResolvedValue(null) },
+      $transaction: jest.fn((work: (client: typeof tx) => Promise<void>) => work(tx)),
+    };
+    const auditLog = { log: jest.fn().mockResolvedValue(undefined) };
+    const service = new ImportService(
+      prisma as any,
+      { computeAndCache: jest.fn() } as any,
+      auditLog as any,
+    );
+
+    await expect(service.undoLastImport('admin')).resolves.toEqual({
+      batchId: 'batch-1',
+      affectedSeasons: 1,
+      restoredMatches: 0,
+      deletedMatches: 1,
+      restoredPlayers: 0,
+      deletedPlayers: 1,
+      warnings: [],
+    });
+    expect(tx.match.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['match-1'] } } });
+    expect(tx.historyImportBatch.update).toHaveBeenCalledWith({
+      where: { id: 'batch-1' },
+      data: { status: 'undone', undoneAt: expect.any(Date) },
+    });
+    expect(auditLog.log).toHaveBeenCalledWith(
+      'admin',
+      'UNDO_HISTORY_JSON_IMPORT',
+      '撤销历史 JSON 导入批次 batch-1',
       tx,
     );
   });

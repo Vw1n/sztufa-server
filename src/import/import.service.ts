@@ -94,6 +94,56 @@ export interface ImportExecutionResult {
   warnings: string[];
 }
 
+export interface LastImportBatch {
+  id: string;
+  digest: string;
+  username: string;
+  status: string;
+  summary: ImportExecutionResult;
+  createdAt: Date;
+}
+
+interface MatchUndoSnapshot {
+  id: string;
+  data: JsonRecord;
+  goals: JsonRecord[];
+  events: JsonRecord[];
+}
+
+interface ImportUndoPayload {
+  affectedSeasonIds: string[];
+  created: {
+    seasonIds: string[];
+    teamIds: string[];
+    profileIds: string[];
+    playerIds: string[];
+    rosterLinkIds: string[];
+    matchIds: string[];
+  };
+  updated: {
+    teams: Array<{ id: string; deletedAt: string | null }>;
+    players: Array<{
+      id: string;
+      name: string;
+      jerseyNumber: string;
+      teamId: string;
+      deletedAt: string | null;
+    }>;
+    rosterLinks: Array<{ id: string; teamId: string }>;
+    matches: MatchUndoSnapshot[];
+  };
+}
+
+export interface UndoImportResult {
+  batchId: string;
+  affectedSeasons: number;
+  restoredMatches: number;
+  deletedMatches: number;
+  restoredPlayers: number;
+  deletedPlayers: number;
+  warnings: string[];
+}
+
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_LOCATION = '深圳技术大学足球场';
@@ -228,6 +278,7 @@ export class ImportService {
     const created = this.emptyCounts();
     const updated = this.emptyCounts();
     const importedSeasons = new Map<string, string>();
+    const undoPayload = this.emptyUndoPayload();
 
     await this.prisma.$transaction(
       async (tx) => {
@@ -247,7 +298,12 @@ export class ImportService {
             });
             seasonIds.set(seasonInput.name, season.id);
             importedSeasons.set(season.id, seasonInput.name);
+            undoPayload.created.seasonIds.push(season.id);
             created.seasons += 1;
+          }
+          const seasonId = seasonIds.get(seasonInput.name);
+          if (seasonId && !undoPayload.affectedSeasonIds.includes(seasonId)) {
+            undoPayload.affectedSeasonIds.push(seasonId);
           }
         }
 
@@ -255,6 +311,10 @@ export class ImportService {
         for (const teamInput of normalized.teams.values()) {
           const existing = await tx.team.findUnique({ where: { teamName: teamInput.name } });
           if (existing) {
+            undoPayload.updated.teams.push({
+              id: existing.id,
+              deletedAt: existing.deletedAt?.toISOString() || null,
+            });
             const team = await tx.team.update({
               where: { id: existing.id },
               data: { deletedAt: null },
@@ -271,6 +331,7 @@ export class ImportService {
               },
             });
             teamIds.set(teamInput.name, team.id);
+            undoPayload.created.teamIds.push(team.id);
             created.teams += 1;
           }
         }
@@ -285,7 +346,16 @@ export class ImportService {
             if (!seasonId) {
               throw new BadRequestException(`赛季不存在: ${seasonName}`);
             }
-            await tx.seasonTeamProfile.upsert({
+            const existingProfile = await tx.seasonTeamProfile.findUnique({
+              where: {
+                seasonId_teamId: {
+                  seasonId,
+                  teamId,
+                },
+              },
+              select: { id: true },
+            });
+            const profile = await tx.seasonTeamProfile.upsert({
               where: {
                 seasonId_teamId: {
                   seasonId,
@@ -310,6 +380,9 @@ export class ImportService {
               },
               update: {},
             });
+            if (!existingProfile) {
+              undoPayload.created.profileIds.push(profile.id);
+            }
           }
         }
 
@@ -322,6 +395,13 @@ export class ImportService {
             where: { legacyKey: playerInput.legacyKey },
           });
           if (player) {
+            undoPayload.updated.players.push({
+              id: player.id,
+              name: player.name,
+              jerseyNumber: player.jerseyNumber,
+              teamId: player.teamId,
+              deletedAt: player.deletedAt?.toISOString() || null,
+            });
             player = await tx.player.update({
               where: { id: player.id },
               data: {
@@ -343,6 +423,7 @@ export class ImportService {
                 teamId,
               },
             });
+            undoPayload.created.playerIds.push(player.id);
             created.players += 1;
           }
           playerIds.set(playerInput.key, player.id);
@@ -352,7 +433,16 @@ export class ImportService {
             if (!seasonId) {
               throw new BadRequestException(`赛季不存在: ${playerInput.seasonName}`);
             }
-            await tx.seasonTeamPlayer.upsert({
+            const existingRosterLink = await tx.seasonTeamPlayer.findUnique({
+              where: {
+                seasonId_playerId: {
+                  seasonId,
+                  playerId: player.id,
+                },
+              },
+              select: { id: true, teamId: true },
+            });
+            const rosterLink = await tx.seasonTeamPlayer.upsert({
               where: {
                 seasonId_playerId: {
                   seasonId,
@@ -366,6 +456,11 @@ export class ImportService {
               },
               update: { teamId },
             });
+            if (existingRosterLink) {
+              undoPayload.updated.rosterLinks.push(existingRosterLink);
+            } else {
+              undoPayload.created.rosterLinkIds.push(rosterLink.id);
+            }
           }
         }
 
@@ -419,12 +514,19 @@ export class ImportService {
 
           const existing = await tx.match.findUnique({
             where: { legacyGameId: matchInput.legacyGameId },
+            include: { goals: true, events: true },
           });
+          if (existing) {
+            undoPayload.updated.matches.push(this.captureMatchSnapshot(existing));
+          }
           const match = existing
             ? await tx.match.update({ where: { id: existing.id }, data: matchData })
             : await tx.match.create({ data: matchData });
           if (existing) updated.matches += 1;
-          else created.matches += 1;
+          else {
+            undoPayload.created.matchIds.push(match.id);
+            created.matches += 1;
+          }
 
           await tx.goal.deleteMany({ where: { matchId: match.id } });
           await tx.matchEvent.deleteMany({ where: { matchId: match.id } });
@@ -487,6 +589,19 @@ export class ImportService {
           `导入历史 JSON：${created.seasons + updated.seasons} 个赛季、${created.teams + updated.teams} 支球队、${created.players + updated.players} 名球员、${created.matches + updated.matches} 场比赛、${created.events + updated.events} 条事件`,
           tx,
         );
+        await tx.historyImportBatch.create({
+          data: {
+            digest: normalized.digest,
+            username,
+            summary: {
+              digest: normalized.digest,
+              created,
+              updated,
+              warnings: normalized.warnings,
+            } as any,
+            undoPayload: undoPayload as any,
+          },
+        });
       },
       { maxWait: 10_000, timeout: 60_000 },
     );
@@ -512,6 +627,164 @@ export class ImportService {
       created,
       updated,
       warnings: normalized.warnings,
+    };
+  }
+
+  async getLastImport(): Promise<LastImportBatch | null> {
+    const batch = await this.prisma.historyImportBatch.findFirst({
+      where: { status: 'completed' },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        digest: true,
+        username: true,
+        status: true,
+        summary: true,
+        createdAt: true,
+      },
+    });
+    return batch ? ({ ...batch, summary: batch.summary as any } as LastImportBatch) : null;
+  }
+
+  async undoLastImport(username: string): Promise<UndoImportResult> {
+    const warnings: string[] = [];
+    const batch = await this.prisma.historyImportBatch.findFirst({
+      where: { status: 'completed' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!batch) {
+      throw new BadRequestException('没有可撤销的历史 JSON 导入记录');
+    }
+
+    const payload = batch.undoPayload as unknown as ImportUndoPayload;
+    await this.prisma.$transaction(
+      async (tx) => {
+        if (payload.created.matchIds.length > 0) {
+          await tx.match.deleteMany({ where: { id: { in: payload.created.matchIds } } });
+        }
+
+        for (const snapshot of payload.updated.matches) {
+          await tx.goal.deleteMany({ where: { matchId: snapshot.id } });
+          await tx.matchEvent.deleteMany({ where: { matchId: snapshot.id } });
+          await tx.match.update({
+            where: { id: snapshot.id },
+            data: this.restoreMatchData(snapshot.data),
+          });
+          if (snapshot.goals.length > 0) {
+            await tx.goal.createMany({ data: snapshot.goals as any });
+          }
+          if (snapshot.events.length > 0) {
+            await tx.matchEvent.createMany({ data: snapshot.events as any });
+          }
+        }
+
+        if (payload.created.rosterLinkIds.length > 0) {
+          await tx.seasonTeamPlayer.deleteMany({
+            where: { id: { in: payload.created.rosterLinkIds } },
+          });
+        }
+        for (const rosterLink of payload.updated.rosterLinks) {
+          await tx.seasonTeamPlayer.update({
+            where: { id: rosterLink.id },
+            data: { teamId: rosterLink.teamId },
+          });
+        }
+
+        if (payload.created.profileIds.length > 0) {
+          await tx.seasonTeamProfile.deleteMany({
+            where: { id: { in: payload.created.profileIds } },
+          });
+        }
+
+        for (const player of payload.updated.players) {
+          await tx.player.update({
+            where: { id: player.id },
+            data: {
+              name: player.name,
+              jerseyNumber: player.jerseyNumber,
+              teamId: player.teamId,
+              deletedAt: player.deletedAt ? new Date(player.deletedAt) : null,
+            },
+          });
+        }
+        if (payload.created.playerIds.length > 0) {
+          await tx.player.deleteMany({ where: { id: { in: payload.created.playerIds } } });
+        }
+
+        for (const team of payload.updated.teams) {
+          await tx.team.update({
+            where: { id: team.id },
+            data: { deletedAt: team.deletedAt ? new Date(team.deletedAt) : null },
+          });
+        }
+        if (payload.created.teamIds.length > 0) {
+          const deletedTeams = await tx.team.deleteMany({
+            where: {
+              id: { in: payload.created.teamIds },
+              players: { none: {} },
+              homeMatches: { none: {} },
+              awayMatches: { none: {} },
+              users: { none: {} },
+              seasonPlayers: { none: {} },
+              groupTeams: { none: {} },
+              seasonProfiles: { none: {} },
+            },
+          });
+          if (deletedTeams.count !== payload.created.teamIds.length) {
+            warnings.push('部分本批次新建球队已有其他关联数据，已保留这些球队');
+          }
+        }
+
+        if (payload.created.seasonIds.length > 0) {
+          const deletedSeasons = await tx.season.deleteMany({
+            where: {
+              id: { in: payload.created.seasonIds },
+              matches: { none: {} },
+              teamPlayers: { none: {} },
+              groupTeams: { none: {} },
+              teamProfiles: { none: {} },
+            },
+          });
+          if (deletedSeasons.count !== payload.created.seasonIds.length) {
+            warnings.push('部分本批次新建赛季已有其他关联数据，已保留这些赛季');
+          }
+        }
+
+        await tx.historyImportBatch.update({
+          where: { id: batch.id },
+          data: { status: 'undone', undoneAt: new Date() },
+        });
+        await this.auditLogService.log(
+          username,
+          'UNDO_HISTORY_JSON_IMPORT',
+          `撤销历史 JSON 导入批次 ${batch.id}`,
+          tx,
+        );
+      },
+      { maxWait: 10_000, timeout: 60_000 },
+    );
+
+    for (const seasonId of payload.affectedSeasonIds) {
+      const season = await this.prisma.season.findUnique({
+        where: { id: seasonId },
+        select: { id: true },
+      });
+      if (season) {
+        const result = await this.seasonStatistics.computeAndCache(season.id);
+        if (!result.success) {
+          warnings.push(`赛季 ${season.id} 已撤销，但统计缓存刷新失败`);
+        }
+      }
+    }
+
+    return {
+      batchId: batch.id,
+      affectedSeasons: payload.affectedSeasonIds.length,
+      restoredMatches: payload.updated.matches.length,
+      deletedMatches: payload.created.matchIds.length,
+      restoredPlayers: payload.updated.players.length,
+      deletedPlayers: payload.created.playerIds.length,
+      warnings,
     };
   }
 
@@ -741,6 +1014,86 @@ export class ImportService {
 
   private emptyCounts(): ImportEntityCounts {
     return { seasons: 0, teams: 0, players: 0, matches: 0, events: 0 };
+  }
+
+  private emptyUndoPayload(): ImportUndoPayload {
+    return {
+      affectedSeasonIds: [],
+      created: {
+        seasonIds: [],
+        teamIds: [],
+        profileIds: [],
+        playerIds: [],
+        rosterLinkIds: [],
+        matchIds: [],
+      },
+      updated: {
+        teams: [],
+        players: [],
+        rosterLinks: [],
+        matches: [],
+      },
+    };
+  }
+
+  private captureMatchSnapshot(match: JsonRecord): MatchUndoSnapshot {
+    return {
+      id: match.id,
+      data: {
+        legacyGameId: match.legacyGameId,
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+        homePenaltyScore: match.homePenaltyScore,
+        awayPenaltyScore: match.awayPenaltyScore,
+        winnerTeamId: match.winnerTeamId,
+        decidedBy: match.decidedBy,
+        matchDate: match.matchDate.toISOString(),
+        location: match.location,
+        status: match.status,
+        seasonId: match.seasonId,
+        stage: match.stage,
+        groupName: match.groupName,
+        knockoutRound: match.knockoutRound,
+        deletedAt: match.deletedAt?.toISOString() || null,
+      },
+      goals: (match.goals || []).map((goal: JsonRecord) => ({
+        matchId: match.id,
+        playerId: goal.playerId,
+        playerName: goal.playerName,
+        jerseyNumber: goal.jerseyNumber,
+        goalTime: goal.goalTime,
+        teamType: goal.teamType,
+      })),
+      events: (match.events || []).map((event: JsonRecord) => ({
+        matchId: match.id,
+        eventTime: event.eventTime,
+        eventType: event.eventType,
+        phase: event.phase,
+        shootoutRound: event.shootoutRound,
+        shootoutOrder: event.shootoutOrder,
+        playerId: event.playerId,
+        playerName: event.playerName,
+        jerseyNumber: event.jerseyNumber,
+        subPlayerId: event.subPlayerId,
+        subPlayerName: event.subPlayerName,
+        subJerseyNumber: event.subJerseyNumber,
+        assistPlayerId: event.assistPlayerId,
+        assistPlayerName: event.assistPlayerName,
+        assistJerseyNumber: event.assistJerseyNumber,
+        description: event.description,
+        teamType: event.teamType,
+      })),
+    };
+  }
+
+  private restoreMatchData(data: JsonRecord): JsonRecord {
+    return {
+      ...data,
+      matchDate: new Date(data.matchDate),
+      deletedAt: data.deletedAt ? new Date(data.deletedAt) : null,
+    };
   }
 
   private playerKey(teamName: string, playerName: string, seasonName: string | null): string {

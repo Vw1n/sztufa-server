@@ -286,6 +286,19 @@ model SeasonTeamProfile {
   @@index([teamId])
 }
 
+model HistoryImportBatch {
+  id          String    @id @default(cuid())
+  digest      String
+  username    String
+  status      String    @default("completed")
+  summary     Json
+  undoPayload Json
+  createdAt   DateTime  @default(now())
+  undoneAt    DateTime?
+
+  @@index([status, createdAt])
+}
+
 model SeasonDeletionApproval {
   id         String   @id @default(cuid())
   seasonId   String

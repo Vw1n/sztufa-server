@@ -27,12 +27,29 @@ export class TeamRosterService {
     tx: Prisma.TransactionClient,
     seasonId: string,
     teamId: string,
-    playerId: string,
+    player: {
+      id: string;
+      name: string;
+      jerseyNumber: string;
+      photo: string | null;
+    },
   ) {
     return tx.seasonTeamPlayer.upsert({
-      where: { seasonId_playerId: { seasonId, playerId } },
-      create: { seasonId, teamId, playerId },
-      update: { teamId },
+      where: { seasonId_playerId: { seasonId, playerId: player.id } },
+      create: {
+        seasonId,
+        teamId,
+        playerId: player.id,
+        playerName: player.name,
+        jerseyNumber: player.jerseyNumber,
+        playerPhoto: player.photo,
+      },
+      update: {
+        teamId,
+        playerName: player.name,
+        jerseyNumber: player.jerseyNumber,
+        playerPhoto: player.photo,
+      },
     });
   }
 
@@ -62,7 +79,13 @@ export class TeamRosterService {
       include: { player: true },
     });
 
-    const players = rosterRecords.map((record) => record.player);
+    const players = rosterRecords.map((record) => ({
+      ...record.player,
+      name: record.playerName,
+      jerseyNumber: record.jerseyNumber,
+      photo: record.playerPhoto,
+      teamId: record.teamId,
+    }));
 
     return players.sort((left, right) => {
       const leftParsed = parseInt(left.jerseyNumber, 10);

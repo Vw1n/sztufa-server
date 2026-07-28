@@ -50,18 +50,35 @@ describe('TeamRosterService', () => {
     );
   });
 
-  it('registers a player with the same upsert contract', async () => {
+  it('registers a player with a season-specific profile snapshot', async () => {
     const { service } = createService();
     const tx: any = {
       seasonTeamPlayer: { upsert: (jest.fn() as any).mockResolvedValue({}) },
     };
 
-    await service.registerPlayer(tx, 'season-1', 'team-1', 'player-1');
+    await service.registerPlayer(tx, 'season-1', 'team-1', {
+      id: 'player-1',
+      name: '张三',
+      jerseyNumber: '9',
+      photo: 'player.webp',
+    });
 
     expect(tx.seasonTeamPlayer.upsert).toHaveBeenCalledWith({
       where: { seasonId_playerId: { seasonId: 'season-1', playerId: 'player-1' } },
-      create: { seasonId: 'season-1', teamId: 'team-1', playerId: 'player-1' },
-      update: { teamId: 'team-1' },
+      create: {
+        seasonId: 'season-1',
+        teamId: 'team-1',
+        playerId: 'player-1',
+        playerName: '张三',
+        jerseyNumber: '9',
+        playerPhoto: 'player.webp',
+      },
+      update: {
+        teamId: 'team-1',
+        playerName: '张三',
+        jerseyNumber: '9',
+        playerPhoto: 'player.webp',
+      },
     });
   });
 
@@ -69,13 +86,37 @@ describe('TeamRosterService', () => {
     const { service, prisma } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-1', deletedAt: null });
     prisma.seasonTeamPlayer.findMany.mockResolvedValue([
-      { player: { id: 'player-20', jerseyNumber: '20' } },
-      { player: { id: 'player-2', jerseyNumber: '2' } },
+      {
+        teamId: 'team-1',
+        playerName: '旧姓名20',
+        jerseyNumber: '20',
+        playerPhoto: 'old-20.webp',
+        player: { id: 'player-20', name: '新姓名20', jerseyNumber: '8', photo: 'new.webp' },
+      },
+      {
+        teamId: 'team-1',
+        playerName: '旧姓名2',
+        jerseyNumber: '2',
+        playerPhoto: null,
+        player: { id: 'player-2', name: '新姓名2', jerseyNumber: '10', photo: 'new.webp' },
+      },
     ]);
 
     await expect(service.getTeamRoster('team-1', 'season-1')).resolves.toEqual([
-      { id: 'player-2', jerseyNumber: '2' },
-      { id: 'player-20', jerseyNumber: '20' },
+      {
+        id: 'player-2',
+        name: '旧姓名2',
+        jerseyNumber: '2',
+        photo: null,
+        teamId: 'team-1',
+      },
+      {
+        id: 'player-20',
+        name: '旧姓名20',
+        jerseyNumber: '20',
+        photo: 'old-20.webp',
+        teamId: 'team-1',
+      },
     ]);
     expect(prisma.season.findFirst).not.toHaveBeenCalled();
   });

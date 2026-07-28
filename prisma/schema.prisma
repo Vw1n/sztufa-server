@@ -313,14 +313,17 @@ model SeasonDeletionApproval {
 }
 
 model SeasonTeamPlayer {
-  id        String   @id @default(cuid())
-  seasonId  String
-  teamId    String
-  playerId  String
-  season    Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  seasonId     String
+  teamId       String
+  playerId     String
+  playerName   String
+  jerseyNumber String
+  playerPhoto  String?
+  season       Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  team         Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  player       Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
 
   @@unique([seasonId, playerId])
   @@index([seasonId])

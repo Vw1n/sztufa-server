@@ -110,8 +110,9 @@ describe('TeamService.createWithPlayers', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('rejects an active duplicate student ID inside the transaction', async () => {
+  it('reuses an existing student for a transfer into the selected season', async () => {
     const { service, tx } = createService();
+    const savedTeam = { id: 'team-1', teamName: '测试队', players: [] };
 
     tx.team.findFirst.mockResolvedValue(null);
     tx.season.findUnique.mockResolvedValue({
@@ -124,11 +125,48 @@ describe('TeamService.createWithPlayers', () => {
       id: 'existing-player',
       studentId: '20260001',
       deletedAt: null,
+      photo: 'old.webp',
     });
+    tx.player.update.mockResolvedValue({
+      id: 'existing-player',
+      name: '张三',
+      studentId: '20260001',
+      jerseyNumber: '10',
+      photo: 'https://images.example/player.webp',
+      teamId: 'team-1',
+      deletedAt: null,
+    });
+    tx.seasonTeamPlayer.upsert.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    tx.team.findUnique.mockResolvedValue(savedTeam);
 
-    await expect(service.createWithPlayers(dto, 'admin')).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.auditLog.create).not.toHaveBeenCalled();
-    expect(tx.team.findUnique).not.toHaveBeenCalled();
+    await expect(service.createWithPlayers(dto, 'admin')).resolves.toEqual(savedTeam);
+    expect(tx.player.create).not.toHaveBeenCalled();
+    expect(tx.player.update).toHaveBeenCalledWith({
+      where: { id: 'existing-player' },
+      data: expect.objectContaining({
+        name: '张三',
+        studentId: '20260001',
+        jerseyNumber: '10',
+        teamId: 'team-1',
+        deletedAt: null,
+      }),
+    });
+    expect(tx.seasonTeamPlayer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          seasonId_playerId: {
+            seasonId: 'season-1',
+            playerId: 'existing-player',
+          },
+        },
+        update: expect.objectContaining({
+          teamId: 'team-1',
+          playerName: '张三',
+          jerseyNumber: '10',
+        }),
+      }),
+    );
   });
 
   it('rejects an empty player list before starting the transaction', async () => {

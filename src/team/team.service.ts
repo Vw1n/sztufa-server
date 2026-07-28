@@ -99,10 +99,6 @@ export class TeamService {
             orderBy: { createdAt: 'desc' },
           });
 
-          if (existingPlayer?.deletedAt === null) {
-            throw new ConflictException(`学号 ${player.studentId} 已被其他在籍球员使用`);
-          }
-
           const savedPlayer = existingPlayer
             ? await tx.player.update({
                 where: { id: existingPlayer.id },
@@ -121,7 +117,7 @@ export class TeamService {
                 },
               });
 
-          await this.teamRosterService.registerPlayer(tx, targetSeason.id, team.id, savedPlayer.id);
+          await this.teamRosterService.registerPlayer(tx, targetSeason.id, team.id, savedPlayer);
         }
 
         await tx.auditLog.create({
@@ -294,8 +290,20 @@ export class TeamService {
               }
               await tx.seasonTeamPlayer.upsert({
                 where: { seasonId_playerId: { seasonId: season.id, playerId: existingPlayer.id } },
-                create: { seasonId: season.id, teamId, playerId: existingPlayer.id },
-                update: { teamId },
+                create: {
+                  seasonId: season.id,
+                  teamId,
+                  playerId: existingPlayer.id,
+                  playerName: normalizedDto.name,
+                  jerseyNumber: normalizedDto.jerseyNumber,
+                  playerPhoto: normalizedDto.photo ?? existingPlayer.photo ?? null,
+                },
+                update: {
+                  teamId,
+                  playerName: normalizedDto.name,
+                  jerseyNumber: normalizedDto.jerseyNumber,
+                  playerPhoto: normalizedDto.photo ?? existingPlayer.photo ?? null,
+                },
               });
             }
 
@@ -326,8 +334,20 @@ export class TeamService {
               }
               await tx.seasonTeamPlayer.upsert({
                 where: { seasonId_playerId: { seasonId: season.id, playerId: newPlayer.id } },
-                create: { seasonId: season.id, teamId, playerId: newPlayer.id },
-                update: { teamId },
+                create: {
+                  seasonId: season.id,
+                  teamId,
+                  playerId: newPlayer.id,
+                  playerName: newPlayer.name,
+                  jerseyNumber: newPlayer.jerseyNumber,
+                  playerPhoto: newPlayer.photo,
+                },
+                update: {
+                  teamId,
+                  playerName: newPlayer.name,
+                  jerseyNumber: newPlayer.jerseyNumber,
+                  playerPhoto: newPlayer.photo,
+                },
               });
             }
 

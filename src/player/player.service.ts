@@ -15,7 +15,14 @@ export class PlayerService {
   /**
    * 将球员同步到所有活跃赛季的名册中
    */
-  private async syncPlayerToActiveSeasons(playerId: string, teamId: string): Promise<void> {
+  private async syncPlayerToActiveSeasons(player: {
+    id: string;
+    teamId: string;
+    name: string;
+    jerseyNumber: string;
+    photo: string | null;
+  }): Promise<void> {
+    const { id: playerId, teamId } = player;
     const [activeSeasons, team] = await Promise.all([
       this.prisma.season.findMany({ where: { status: 'active' } }),
       this.prisma.team.findUnique({ where: { id: teamId }, select: { gender: true } }),
@@ -41,9 +48,15 @@ export class PlayerService {
           seasonId: season.id,
           teamId,
           playerId,
+          playerName: player.name,
+          jerseyNumber: player.jerseyNumber,
+          playerPhoto: player.photo,
         },
         update: {
           teamId,
+          playerName: player.name,
+          jerseyNumber: player.jerseyNumber,
+          playerPhoto: player.photo,
         },
       });
     }
@@ -100,7 +113,7 @@ export class PlayerService {
       });
 
       // 自动同步绑定至所有当前活跃赛季
-      await this.syncPlayerToActiveSeasons(updatedPlayer.id, updatedPlayer.teamId);
+      await this.syncPlayerToActiveSeasons(updatedPlayer);
 
       await this.auditLogService.log(
         username,
@@ -117,7 +130,7 @@ export class PlayerService {
     });
 
     // 新增球员自动绑定至所有当前活跃赛季
-    await this.syncPlayerToActiveSeasons(newPlayer.id, newPlayer.teamId);
+    await this.syncPlayerToActiveSeasons(newPlayer);
 
     await this.auditLogService.log(
       username,
@@ -190,8 +203,13 @@ export class PlayerService {
     });
 
     // 如果队籍发生迁移，同步更新当前活跃赛季名册信息
-    if (updatePlayerDto.teamId) {
-      await this.syncPlayerToActiveSeasons(id, updatePlayerDto.teamId);
+    if (
+      updatePlayerDto.teamId !== undefined ||
+      updatePlayerDto.name !== undefined ||
+      updatePlayerDto.jerseyNumber !== undefined ||
+      updatePlayerDto.photo !== undefined
+    ) {
+      await this.syncPlayerToActiveSeasons(updatedPlayer);
     }
 
     const diffs: string[] = [];

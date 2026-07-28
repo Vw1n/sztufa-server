@@ -192,10 +192,19 @@ export class BackupService {
           await tx.match.createMany({ data: matches });
         }
         if (data.seasonTeamPlayers && data.seasonTeamPlayers.length > 0) {
-          const seasonTeamPlayers = data.seasonTeamPlayers.map((stp: any) => ({
-            ...stp,
-            createdAt: stp.createdAt ? new Date(stp.createdAt) : undefined,
-          }));
+          const playersById = new Map(
+            (data.players || []).map((player: any) => [player.id, player]),
+          );
+          const seasonTeamPlayers = data.seasonTeamPlayers.map((stp: any) => {
+            const player = playersById.get(stp.playerId) as any;
+            return {
+              ...stp,
+              playerName: stp.playerName ?? player?.name,
+              jerseyNumber: stp.jerseyNumber ?? player?.jerseyNumber,
+              playerPhoto: stp.playerPhoto ?? player?.photo ?? null,
+              createdAt: stp.createdAt ? new Date(stp.createdAt) : undefined,
+            };
+          });
           await tx.seasonTeamPlayer.createMany({ data: seasonTeamPlayers });
         }
         if (data.matchLineups && data.matchLineups.length > 0) {

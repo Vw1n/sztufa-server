@@ -193,6 +193,28 @@ export class TeamService {
           data: teamData,
         });
 
+        // 球队录入页当前编辑的是活跃赛季资料，同步更新对应赛季快照。
+        await tx.seasonTeamProfile.updateMany({
+          where: {
+            teamId,
+            season: { status: 'active' },
+          },
+          data: {
+            teamName: updatedTeam.teamName,
+            teamDoctor: updatedTeam.teamDoctor,
+            headCoach: updatedTeam.headCoach,
+            teamLeader: updatedTeam.teamLeader,
+            coachPhone: updatedTeam.coachPhone,
+            leaderPhone: updatedTeam.leaderPhone,
+            homeJerseyColor: updatedTeam.homeJerseyColor,
+            awayJerseyColor: updatedTeam.awayJerseyColor,
+            teamLogo: updatedTeam.teamLogo,
+            homeJersey: updatedTeam.homeJersey,
+            awayJersey: updatedTeam.awayJersey,
+            gender: updatedTeam.gender,
+          },
+        });
+
         // Remove stale roster entries when a team's gender changes.
         for (const season of activeSeasons) {
           if (!isTeamGenderCompatibleWithSeason(season.name, updatedTeam.gender)) {

@@ -199,6 +199,7 @@ describe('TeamService.updateWithPlayers', () => {
       team: { update: jest.fn(), findUnique: jest.fn() },
       player: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
       seasonTeamPlayer: { upsert: jest.fn(), deleteMany: jest.fn() },
+      seasonTeamProfile: { updateMany: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     const prisma: any = {
@@ -219,7 +220,21 @@ describe('TeamService.updateWithPlayers', () => {
     const { service, prisma, tx } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team', deletedAt: null });
     prisma.season.findMany.mockResolvedValue([]);
-    tx.team.update.mockResolvedValue({ id: 'team-1' });
+    tx.team.update.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team',
+      teamDoctor: 'Doctor',
+      headCoach: 'Coach',
+      teamLeader: 'Leader',
+      coachPhone: '100',
+      leaderPhone: '200',
+      homeJerseyColor: 'Red',
+      awayJerseyColor: 'White',
+      teamLogo: null,
+      homeJersey: null,
+      awayJersey: null,
+      gender: 'MALE',
+    });
     tx.player.findUnique.mockResolvedValue({
       id: 'player-1',
       teamId: 'team-1',
@@ -250,6 +265,12 @@ describe('TeamService.updateWithPlayers', () => {
       }),
     );
     expect(tx.player.create).not.toHaveBeenCalled();
+    expect(tx.seasonTeamProfile.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { teamId: 'team-1', season: { status: 'active' } },
+        data: expect.objectContaining({ headCoach: 'Coach', homeJerseyColor: 'Red' }),
+      }),
+    );
   });
 
   it('rejects a coach attempting to update another team', async () => {

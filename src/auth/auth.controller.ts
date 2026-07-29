@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Get, Patch, Delete, Param, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
@@ -17,6 +18,7 @@ import { UpdateStudentIdDto } from './dto/update-student-id.dto';
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('student-register')
   @ApiOperation({ summary: '普通用户自主注册并绑定学号' })
   async registerStudent(@Body() dto: StudentRegisterDto) {
@@ -32,6 +34,7 @@ export class AuthController {
     return this.authService.register(createUserDto);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   @ApiOperation({ summary: '用户登录' })
   async login(@Body() loginDto: LoginDto) {
@@ -87,6 +90,7 @@ export class AuthController {
     return this.authService.deleteUser(id, operatorUsername, operatorId);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')

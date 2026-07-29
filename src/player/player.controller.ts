@@ -11,6 +11,7 @@ import {
   DefaultValuePipe,
   ParseIntPipe,
   Req,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PlayerService } from './player.service';
@@ -19,6 +20,7 @@ import { UpdatePlayerDto } from './dto/update-player.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { toPublicPlayerDto } from '../common/dto/public-response.dto';
 
 @Controller('api/v1/players')
 @ApiTags('球员')
@@ -35,32 +37,63 @@ export class PlayerController {
     return this.playerService.create(createPlayerDto, username, req.user);
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin', 'coach')
+  @Get('admin/manage')
+  @ApiOperation({ summary: '管理端获取包含敏感信息的完整球员列表' })
+  async findAdminAll(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('teamId') teamId?: string,
+    @Req() req?: any,
+  ) {
+    let effectiveTeamId = teamId;
+    if (req?.user?.role === 'coach') {
+      if (!req.user.teamId) {
+        throw new ForbiddenException('教练账号未绑定球队，无权访问管理数据');
+      }
+      effectiveTeamId = req.user.teamId;
+    }
+    return this.playerService.findAll(effectiveTeamId, page, limit);
+  }
+
   @Get()
-  @ApiOperation({ summary: '获取球员列表' })
-  findAll(
+  @ApiOperation({ summary: '获取脱敏后的公共球员列表' })
+  async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('teamId') teamId?: string,
   ) {
-    return this.playerService.findAll(teamId, page, limit);
+    const result = await this.playerService.findAll(teamId, page, limit);
+    return {
+      ...result,
+      data: result.data.map(toPublicPlayerDto),
+    };
   }
 
   @Get('search')
-  @ApiOperation({ summary: '按名称搜索球员' })
-  search(@Query('name') name: string) {
-    return this.playerService.searchByName(name);
+  @ApiOperation({ summary: '按名称搜索脱敏公共球员' })
+  async search(@Query('name') name: string) {
+    const list = await this.playerService.searchByName(name);
+    return list.map(toPublicPlayerDto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '获取单个球员' })
-  findOne(@Param('id') id: string) {
-    return this.playerService.findOne(id);
+  @ApiOperation({ summary: '获取单个脱敏公共球员' })
+  async findOne(@Param('id') id: string) {
+    const player = await this.playerService.findOne(id);
+    return toPublicPlayerDto(player);
   }
 
   @Get(':id/career')
-  @ApiOperation({ summary: '获取球员跨赛季生涯数据' })
-  getCareer(@Param('id') id: string) {
-    return this.playerService.getCareerStats(id);
+  @ApiOperation({ summary: '获取脱敏公共球员跨赛季生涯数据' })
+  async getCareer(@Param('id') id: string) {
+    const result = await this.playerService.getCareerStats(id);
+    return {
+      ...result,
+      player: toPublicPlayerDto(result.player),
+    };
   }
 
   @ApiBearerAuth()

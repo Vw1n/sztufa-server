@@ -8,9 +8,6 @@ import {
 import sharp from 'sharp';
 import { ParsedFieldDto, ParsedPlayerDto, ParsedTeamDto } from './dto/pdf-import.dto';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfjs = require('pdfjs-dist/build/pdf.js');
-
 export interface ExtractedImageItem {
   id: string;
   buffer: Buffer;
@@ -75,7 +72,9 @@ export class PdfParserService {
     }
 
     let doc: any;
+    let pdfjs: any;
     try {
+      pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
       const data = new Uint8Array(file.buffer);
       doc = await pdfjs.getDocument({ data }).promise;
     } catch (err: any) {

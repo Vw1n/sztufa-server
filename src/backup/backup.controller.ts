@@ -14,11 +14,11 @@ export class BackupController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')
   @Post('create')
-  @ApiOperation({ summary: '创建数据库备份并上传 R2' })
+  @ApiOperation({ summary: '创建数据库备份并上传 R2 私有桶' })
   async create(@Req() req: any) {
     const username = req.user?.username || 'system';
-    const downloadUrl = await this.backupService.createBackup(username);
-    return { success: true, downloadUrl };
+    const backupMetadata = await this.backupService.createBackup(username);
+    return { success: true, data: backupMetadata };
   }
 
   @ApiBearerAuth()
@@ -34,11 +34,25 @@ export class BackupController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')
+  @Post('download-url')
+  @ApiOperation({ summary: '获取云端私有备份的短期预签名下载链接' })
+  async getDownloadUrl(@Body('key') key: string) {
+    const downloadUrl = await this.backupService.getPresignedDownloadUrl(key);
+    return { success: true, downloadUrl };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
   @Post('restore')
   @ApiOperation({ summary: '根据备份文件还原数据库' })
-  async restore(@Req() req: any, @Body('key') key: string) {
+  async restore(
+    @Req() req: any,
+    @Body('key') key: string,
+    @Body('confirmText') confirmText?: string,
+  ) {
     const username = req.user?.username || 'system';
-    const result = await this.backupService.restoreBackup(username, key);
+    const result = await this.backupService.restoreBackup(username, key, confirmText);
     return { success: true, message: result };
   }
 
@@ -53,7 +67,7 @@ export class BackupController {
       throw new ForbiddenException('未授权的定时备份请求');
     }
 
-    const downloadUrl = await this.backupService.createBackup('vercel-cron-system');
-    return { success: true, downloadUrl };
+    const backupMetadata = await this.backupService.createBackup('vercel-cron-system');
+    return { success: true, data: backupMetadata };
   }
 }

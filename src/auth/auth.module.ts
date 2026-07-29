@@ -13,7 +13,7 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
-        const expiresIn = configService.get<string>('JWT_EXPIRES_IN', '7d');
+        const expiresIn = configService.get<string>('JWT_EXPIRES_IN', '30m');
 
         return {
           secret: configService.get<string>('JWT_SECRET', 'local-development-secret-change-me'),

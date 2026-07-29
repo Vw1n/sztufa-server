@@ -24,6 +24,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TeamQueryService } from './team-query.service';
 import { TeamRosterService } from './team-roster.service';
+import { toPublicTeamDto, toPublicPlayerDto } from '../common/dto/public-response.dto';
 
 @Controller('api/v1/teams')
 @ApiTags('球队')
@@ -54,33 +55,67 @@ export class TeamController {
     return this.teamService.create(createTeamDto, username);
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin', 'coach')
+  @Get('admin/manage')
+  @ApiOperation({ summary: '管理端获取包含联系方式的完整球队列表' })
+  async findAdminAll(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('seasonId') seasonId?: string,
+    @Query('gender') gender?: string,
+    @Req() req?: any,
+  ) {
+    if (req?.user?.role === 'coach') {
+      if (!req.user.teamId) {
+        throw new ForbiddenException('教练账号未绑定球队，无权访问管理数据');
+      }
+      const singleTeam = await this.teamQueryService.findOne(req.user.teamId);
+      return {
+        data: [singleTeam],
+        total: 1,
+        page: 1,
+        limit,
+      };
+    }
+    return this.teamQueryService.findAll(page, limit, seasonId, gender);
+  }
+
   @Get()
-  @ApiOperation({ summary: '获取球队列表' })
-  findAll(
+  @ApiOperation({ summary: '获取脱敏后的公共球队列表' })
+  async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('seasonId') seasonId?: string,
     @Query('gender') gender?: string,
   ) {
-    return this.teamQueryService.findAll(page, limit, seasonId, gender);
+    const result = await this.teamQueryService.findAll(page, limit, seasonId, gender);
+    return {
+      ...result,
+      data: result.data.map(toPublicTeamDto),
+    };
   }
 
   @Get('search')
-  @ApiOperation({ summary: '按名称搜索球队' })
-  search(@Query('name') name: string) {
-    return this.teamQueryService.searchByName(name);
+  @ApiOperation({ summary: '按名称搜索脱敏公共球队' })
+  async search(@Query('name') name: string) {
+    const list = await this.teamQueryService.searchByName(name);
+    return list.map(toPublicTeamDto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '获取单个球队' })
-  findOne(@Param('id') id: string) {
-    return this.teamQueryService.findOne(id);
+  @ApiOperation({ summary: '获取单个脱敏公共球队' })
+  async findOne(@Param('id') id: string) {
+    const team = await this.teamQueryService.findOne(id);
+    return toPublicTeamDto(team);
   }
 
   @Get(':id/players')
-  @ApiOperation({ summary: '获取球队在特定赛季的球员名册' })
-  getTeamRoster(@Param('id') id: string, @Query('seasonId') seasonId?: string) {
-    return this.teamRosterService.getTeamRoster(id, seasonId);
+  @ApiOperation({ summary: '获取球队在特定赛季的脱敏球员名册' })
+  async getTeamRoster(@Param('id') id: string, @Query('seasonId') seasonId?: string) {
+    const roster = await this.teamRosterService.getTeamRoster(id, seasonId);
+    return roster.map(toPublicPlayerDto);
   }
 
   @ApiBearerAuth()

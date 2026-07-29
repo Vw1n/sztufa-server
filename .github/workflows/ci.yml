@@ -18,6 +18,25 @@ jobs:
     name: 测试、检查与构建
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sztufa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sztufa_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sztufa_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sztufa_test
+      ALLOWED_TEST_DB_HOSTS: localhost,127.0.0.1
 
     steps:
       - name: 检出代码
@@ -33,13 +52,21 @@ jobs:
         run: npm ci
 
       - name: 检查高危依赖漏洞
-        run: npm audit --audit-level=high || true
+        run: npm audit --omit=dev --audit-level=high
 
       - name: 运行代码检查
         run: npm run lint:check
 
       - name: 运行测试
         run: npm test -- --runInBand
+
+      # 历史环境中的部分基础模型早于 migration 链，由 db push 建立。
+      # CI 使用一次性空库，按当前 Prisma Schema 同步结构后运行破坏性恢复测试。
+      - name: 同步隔离测试数据库结构
+        run: npx prisma db push --skip-generate
+
+      - name: 运行备份恢复 PostgreSQL 集成测试
+        run: npm run test:integration:backup
 
       - name: 生成生产构建
         run: npm run build

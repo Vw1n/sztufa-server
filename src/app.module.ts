@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { TeamModule } from './team/team.module';
 import { PlayerModule } from './player/player.module';
@@ -16,6 +18,18 @@ import { PredictionModule } from './prediction/prediction.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60000,
+        limit: 60,
+      },
+      {
+        name: 'strict',
+        ttl: 60000,
+        limit: 5,
+      },
+    ]),
     PrismaModule,
     AuthModule,
     TeamModule,
@@ -28,6 +42,12 @@ import { PredictionModule } from './prediction/prediction.module';
     SeasonModule,
     NewsModule,
     PredictionModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

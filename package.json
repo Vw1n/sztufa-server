@@ -12,6 +12,7 @@
     "build": "npx nest build",
     "vercel-build": "npx prisma generate && npx prisma migrate deploy && npx nest build && node copy-swagger.js",
     "test": "jest",
+    "test:integration:backup": "jest --runInBand --config jest.integration.config.js",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "lint": "eslint \"src/**/*.ts\"",
@@ -25,6 +26,9 @@
     "prisma:seed": "ts-node src/seeds/seed.ts",
     "cleanup:season-gender-rosters": "ts-node scripts/cleanup-season-gender-rosters.ts"
   },
+  "overrides": {
+    "js-yaml": "^4.1.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1076.0",
     "@aws-sdk/s3-request-presigner": "^3.1097.0",
@@ -35,6 +39,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.28",
     "@nestjs/swagger": "^11.4.6",
+    "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^5.7.0",
     "@types/passport-jwt": "^4.0.1",
     "bcryptjs": "^2.4.3",
@@ -42,9 +47,10 @@
     "class-validator": "^0.14.0",
     "dotenv": "^16.3.1",
     "express": "^5.1.0",
+    "helmet": "^8.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^6.2.108",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.35.2"
@@ -80,6 +86,9 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "testPathIgnorePatterns": [
+      "\\.integration\\.spec\\.ts$"
+    ],
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },

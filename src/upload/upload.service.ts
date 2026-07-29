@@ -46,6 +46,14 @@ export class UploadService {
   }
 
   getPublicUrl(key: string): string {
+    if (!key) return '';
+    if (
+      key.startsWith('private-') ||
+      key.startsWith('private-backups/') ||
+      key.startsWith('private-imports/')
+    ) {
+      throw new UnprocessableEntityException('私有存储对象不能直接生成公网访问 URL');
+    }
     const baseUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
     const cleanKey = key.replace(/^\//, '');
     return `${baseUrl}/${cleanKey}`;
@@ -119,7 +127,28 @@ export class UploadService {
     return urlOrKey;
   }
 
+  private validateImageMagicBytes(buffer: Buffer): void {
+    if (!buffer || buffer.length < 4) {
+      throw new UnprocessableEntityException('上传文件大小过小或已损坏');
+    }
+    const isPng =
+      buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+    const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    const isGif =
+      buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38;
+    const isWebp =
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+
+    if (!isPng && !isJpeg && !isGif && !isWebp) {
+      throw new UnprocessableEntityException(
+        '不受支持的图片格式，文件头魔数校验失败 (仅支持 PNG, JPEG, GIF, WEBP)',
+      );
+    }
+  }
+
   async uploadImage(file: Express.Multer.File): Promise<string> {
+    this.validateImageMagicBytes(file.buffer);
     let compressedBuffer: Buffer;
     try {
       compressedBuffer = await sharp(file.buffer)

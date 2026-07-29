@@ -2,14 +2,44 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ExpressAdapter } from '@nestjs/platform-express';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { PrismaClientExceptionFilter } from './prisma/prisma-client-exception.filter';
 import express from 'express';
+
+function validateStartupConfig() {
+  const requiredEnvVars = [
+    'DATABASE_URL',
+    'JWT_SECRET',
+    'R2_ENDPOINT',
+    'R2_ACCESS_KEY_ID',
+    'R2_SECRET_ACCESS_KEY',
+    'R2_BUCKET_NAME',
+  ];
+
+  const missing = requiredEnvVars.filter((key) => !process.env[key]);
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction && missing.length > 0) {
+    throw new Error(`[FATAL CONFIG ERROR] 生产环境缺少必要环境变量: ${missing.join(', ')}`);
+  }
+
+  const insecureSecrets = ['super-secret-key', 'dev-secret', 'default-jwt-secret', 'change-me'];
+  if (
+    isProduction &&
+    (!process.env.JWT_SECRET || insecureSecrets.includes(process.env.JWT_SECRET))
+  ) {
+    throw new Error(
+      '[FATAL CONFIG ERROR] 生产环境拒绝使用默认或不安全的 JWT_SECRET，请设置安全的随机密钥',
+    );
+  }
+}
 
 const server = express();
 let appInstance = null;
 
 async function createApp() {
+  validateStartupConfig();
   if (appInstance) {
     return appInstance;
   }
@@ -17,6 +47,23 @@ async function createApp() {
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
     logger: ['error', 'warn', 'log'],
   });
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+          connectSrc: ["'self'", 'https:'],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      hsts: process.env.NODE_ENV === 'production',
+    }),
+  );
 
   app.useGlobalFilters(new PrismaClientExceptionFilter());
 
@@ -66,21 +113,23 @@ async function createApp() {
     credentials: true,
   });
 
-  const config = new DocumentBuilder()
-    .setTitle('校园足球信息管理平台 API')
-    .setDescription('校园足球信息管理平台后端服务接口文档')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
+  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true') {
+    const config = new DocumentBuilder()
+      .setTitle('校园足球信息管理平台 API')
+      .setDescription('校园足球信息管理平台后端服务接口文档')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
+    const document = SwaggerModule.createDocument(app, config);
 
-  const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.use('/api/docs', express.static(__dirname + '/swagger-ui'));
-  expressApp.get('/api/docs/swagger.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.send(document);
-  });
+    const expressApp = app.getHttpAdapter().getInstance();
+    expressApp.use('/api/docs', express.static(__dirname + '/swagger-ui'));
+    expressApp.get('/api/docs/swagger.json', (req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.send(document);
+    });
+  }
 
   await app.init();
   appInstance = app;

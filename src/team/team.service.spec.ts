@@ -9,6 +9,7 @@ describe('TeamService.createWithPlayers', () => {
       team: {
         findFirst: jest.fn(),
         create: jest.fn(),
+        update: jest.fn(),
         findUnique: jest.fn(),
       },
       season: { findUnique: jest.fn() },
@@ -167,6 +168,78 @@ describe('TeamService.createWithPlayers', () => {
         }),
       }),
     );
+  });
+
+  it('reuses a same-name team from another season instead of rejecting it globally', async () => {
+    const { service, tx } = createService();
+    const historicalTeam = {
+      id: 'historical-team',
+      teamName: '测试队',
+      deletedAt: null,
+    };
+    const savedTeam = {
+      id: 'historical-team',
+      teamName: '测试队',
+      players: [{ id: 'player-1' }],
+    };
+
+    tx.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2026校长杯男子组',
+      status: 'active',
+    });
+    tx.team.findFirst.mockResolvedValueOnce(historicalTeam).mockResolvedValueOnce(null);
+    tx.team.update.mockResolvedValue({
+      ...historicalTeam,
+      homeJerseyColor: '蓝色',
+      awayJerseyColor: '白色',
+    });
+    tx.player.findFirst.mockResolvedValue(null);
+    tx.player.create.mockResolvedValue({
+      id: 'player-1',
+      name: '张三',
+      jerseyNumber: '10',
+      photo: 'https://images.example/player.webp',
+      teamId: historicalTeam.id,
+    });
+    tx.seasonTeamPlayer.upsert.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    tx.team.findUnique.mockResolvedValue(savedTeam);
+
+    await expect(service.createWithPlayers(dto, 'admin')).resolves.toEqual(savedTeam);
+
+    expect(tx.team.create).not.toHaveBeenCalled();
+    expect(tx.team.update).toHaveBeenCalledWith({
+      where: { id: historicalTeam.id },
+      data: expect.objectContaining({
+        teamName: '测试队',
+        deletedAt: null,
+      }),
+    });
+    expect(tx.seasonTeamPlayer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          seasonId: 'season-1',
+          teamId: historicalTeam.id,
+        }),
+      }),
+    );
+  });
+
+  it('rejects a same-name team that is already registered in the selected season', async () => {
+    const { service, tx } = createService();
+    tx.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2026校长杯男子组',
+      status: 'active',
+    });
+    tx.team.findFirst
+      .mockResolvedValueOnce({ id: 'team-1', teamName: '测试队', deletedAt: null })
+      .mockResolvedValueOnce({ id: 'team-1' });
+
+    await expect(service.createWithPlayers(dto, 'admin')).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.team.create).not.toHaveBeenCalled();
+    expect(tx.team.update).not.toHaveBeenCalled();
   });
 
   it('rejects an empty player list before starting the transaction', async () => {

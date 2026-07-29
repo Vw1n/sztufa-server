@@ -79,14 +79,38 @@ export class TeamService {
           teamData.gender || 'MALE',
         );
 
+        // A Team is shared across seasons. If the same team existed in an
+        // older season, reuse it and register the submitted roster in the
+        // selected season. Only duplicate participation in that season is a
+        // conflict.
         const existingTeam = await tx.team.findFirst({
-          where: { teamName: teamData.teamName, deletedAt: null },
+          where: { teamName: teamData.teamName },
         });
         if (existingTeam) {
-          throw new ConflictException('该球队名称已存在，请使用其他名称');
+          const alreadyInTargetSeason = await tx.team.findFirst({
+            where: {
+              id: existingTeam.id,
+              OR: [
+                { seasonPlayers: { some: { seasonId } } },
+                { seasonProfiles: { some: { seasonId } } },
+                { groupTeams: { some: { seasonId } } },
+                { homeMatches: { some: { seasonId } } },
+                { awayMatches: { some: { seasonId } } },
+              ],
+            },
+            select: { id: true },
+          });
+          if (alreadyInTargetSeason) {
+            throw new ConflictException('该球队已存在于所选赛季中');
+          }
         }
 
-        const team = await tx.team.create({ data: teamData });
+        const team = existingTeam
+          ? await tx.team.update({
+              where: { id: existingTeam.id },
+              data: { ...teamData, deletedAt: null },
+            })
+          : await tx.team.create({ data: teamData });
 
         for (const player of normalizedPlayers) {
           const existingPlayer = await tx.player.findFirst({

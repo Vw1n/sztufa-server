@@ -3,9 +3,12 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
@@ -161,6 +164,49 @@ export class PdfCommitRequestDto {
   @IsOptional()
   @IsString()
   seasonId?: string;
+}
+
+export class PdfUploadUrlRequestDto {
+  @ApiProperty({ description: '原始 PDF 文件名' })
+  @IsString()
+  fileName: string;
+
+  @ApiProperty({ description: 'PDF 文件大小（字节）' })
+  @IsInt()
+  @Min(1)
+  @Max(20 * 1024 * 1024)
+  fileSize: number;
+
+  @ApiProperty({ description: '文件 MIME 类型', default: 'application/pdf' })
+  @IsString()
+  mimeType: string;
+}
+
+export class PdfUploadUrlResponseDto {
+  @ApiProperty({ description: 'R2/S3 预签名 PUT 地址' })
+  uploadUrl: string;
+
+  @ApiProperty({ description: '上传后用于预览解析的临时对象 Key' })
+  objectKey: string;
+
+  @ApiProperty({ description: '预签名地址过期时间' })
+  expiresAt: string;
+}
+
+export class PdfPreviewUploadedRequestDto {
+  @ApiProperty({ description: '预签名流程返回的临时 PDF 对象 Key' })
+  @IsString()
+  objectKey: string;
+
+  @ApiProperty({ description: '原始 PDF 文件名' })
+  @IsString()
+  fileName: string;
+
+  @ApiProperty({ description: '浏览器选择文件时记录的大小（字节）' })
+  @IsInt()
+  @Min(1)
+  @Max(20 * 1024 * 1024)
+  fileSize: number;
 }
 
 export class PdfCommitResponseDto {

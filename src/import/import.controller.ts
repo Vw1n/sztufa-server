@@ -22,7 +22,11 @@ import {
 import { memoryStorage } from 'multer';
 import { ImportService } from './import.service';
 import { PdfImportService } from './pdf-import.service';
-import { PdfCommitRequestDto } from './dto/pdf-import.dto';
+import {
+  PdfCommitRequestDto,
+  PdfPreviewUploadedRequestDto,
+  PdfUploadUrlRequestDto,
+} from './dto/pdf-import.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -141,6 +145,30 @@ export class ImportController {
   }
 
   // ==================== PDF 报名表导入两阶段 API ====================
+
+  @Post('pdf/upload-url')
+  @ApiOperation({ summary: '获取 PDF 直传 R2/S3 的预签名地址（绕过 Serverless 请求体限制）' })
+  async createPdfUploadUrl(
+    @Body() dto: PdfUploadUrlRequestDto,
+    @Req() req: any,
+  ) {
+    return this.pdfImportService.createPdfUploadUrl(
+      req.user?.username || 'admin',
+      dto,
+    );
+  }
+
+  @Post('pdf/preview-uploaded')
+  @ApiOperation({ summary: '解析已经通过预签名地址直传至 R2/S3 的 PDF' })
+  async previewUploadedPdf(
+    @Body() dto: PdfPreviewUploadedRequestDto,
+    @Req() req: any,
+  ) {
+    return this.pdfImportService.previewUploadedPdf(
+      dto,
+      req.user?.username || 'admin',
+    );
+  }
 
   @Post('pdf/preview')
   @ApiOperation({ summary: '预检与智能解析官方 PDF 报名表（生成置信度及临时大头照）' })

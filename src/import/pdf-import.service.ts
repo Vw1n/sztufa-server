@@ -17,7 +17,10 @@ import {
   ParsedTeamDto,
   PdfCommitRequestDto,
   PdfCommitResponseDto,
+  PdfPreviewUploadedRequestDto,
   PdfPreviewResponseDto,
+  PdfUploadUrlRequestDto,
+  PdfUploadUrlResponseDto,
 } from './dto/pdf-import.dto';
 
 @Injectable()
@@ -29,6 +32,74 @@ export class PdfImportService {
     private readonly uploadService: UploadService,
     private readonly pdfParserService: PdfParserService,
   ) {}
+
+  async createPdfUploadUrl(
+    username: string,
+    dto: PdfUploadUrlRequestDto,
+  ): Promise<PdfUploadUrlResponseDto> {
+    if (!dto.fileName.toLowerCase().endsWith('.pdf')) {
+      throw new BadRequestException('只支持上传 .pdf 格式的报名表');
+    }
+    if (!['application/pdf', 'application/octet-stream'].includes(dto.mimeType)) {
+      throw new BadRequestException('PDF 文件 MIME 类型不正确');
+    }
+
+    const ownerScope = this.getPdfSourceOwnerScope(username);
+    const objectKey = `temp/pdf-source/${ownerScope}/${crypto.randomUUID()}.pdf`;
+    const uploadUrl = await this.uploadService.createPresignedUploadUrl(
+      objectKey,
+      'application/pdf',
+    );
+
+    return {
+      uploadUrl,
+      objectKey,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    };
+  }
+
+  async previewUploadedPdf(
+    dto: PdfPreviewUploadedRequestDto,
+    username: string,
+  ): Promise<PdfPreviewResponseDto> {
+    const expectedPrefix = `temp/pdf-source/${this.getPdfSourceOwnerScope(username)}/`;
+    if (
+      !dto.objectKey.startsWith(expectedPrefix) ||
+      dto.objectKey.slice(expectedPrefix.length).includes('/') ||
+      !dto.objectKey.endsWith('.pdf')
+    ) {
+      throw new BadRequestException('PDF 临时对象路径非法或不属于当前用户');
+    }
+    if (!dto.fileName.toLowerCase().endsWith('.pdf')) {
+      throw new BadRequestException('只支持解析 .pdf 格式的报名表');
+    }
+
+    try {
+      const buffer = await this.uploadService.getObjectBuffer(
+        dto.objectKey,
+        20 * 1024 * 1024,
+      );
+      if (buffer.length === 0 || buffer.length > 20 * 1024 * 1024) {
+        throw new BadRequestException('PDF 文件为空或超过 20MB 限制');
+      }
+      if (buffer.length !== dto.fileSize) {
+        throw new BadRequestException('PDF 上传不完整，请重新选择文件上传');
+      }
+
+      const file = {
+        fieldname: 'file',
+        originalname: dto.fileName,
+        encoding: '7bit',
+        mimetype: 'application/pdf',
+        size: buffer.length,
+        buffer,
+      } as Express.Multer.File;
+
+      return await this.previewPdf(file, username);
+    } finally {
+      await this.uploadService.deleteObject(dto.objectKey);
+    }
+  }
 
   async previewPdf(
     file: Express.Multer.File,
@@ -473,6 +544,10 @@ export class PdfImportService {
         `字段 "${fieldName}" 的匹配置信度较低 (${field.confidence})，请人工核对并勾选确认后提交`,
       );
     }
+  }
+
+  private getPdfSourceOwnerScope(username: string): string {
+    return crypto.createHash('sha256').update(username).digest('hex').slice(0, 20);
   }
 
   private async lazyCleanupExpiredBatches(username: string): Promise<void> {

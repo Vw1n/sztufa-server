@@ -33,6 +33,9 @@ describe('PdfImportService', () => {
 
     uploadServiceMock = {
       uploadBuffer: jest.fn().mockResolvedValue('https://cdn.example.com/temp/pdf/batch1/p1.webp'),
+      createPresignedUploadUrl: jest.fn().mockResolvedValue('https://r2.example.com/signed-put'),
+      getObjectBuffer: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4 test')),
+      deleteObject: jest.fn(async () => {}),
       extractKeyFromUrl: jest.fn((url) => {
         if (!url) return '';
         if (url.startsWith('https://cdn.example.com/')) {
@@ -79,6 +82,37 @@ describe('PdfImportService', () => {
       uploadServiceMock as any,
       pdfParserServiceMock as any,
     );
+  });
+
+  describe('PDF 大文件预签名直传', () => {
+    it('为当前管理员生成隔离的临时 PDF 对象 Key', async () => {
+      const result = await service.createPdfUploadUrl('admin', {
+        fileName: '报名表.pdf',
+        fileSize: 15 * 1024 * 1024,
+        mimeType: 'application/pdf',
+      });
+
+      expect(result.uploadUrl).toBe('https://r2.example.com/signed-put');
+      expect(result.objectKey).toMatch(/^temp\/pdf-source\/[a-f0-9]{20}\/.+\.pdf$/);
+      expect(uploadServiceMock.createPresignedUploadUrl).toHaveBeenCalledWith(
+        result.objectKey,
+        'application/pdf',
+      );
+    });
+
+    it('拒绝解析不属于当前管理员作用域的 PDF 对象 Key', async () => {
+      await expect(
+        service.previewUploadedPdf(
+          {
+            objectKey: 'temp/pdf-source/other-user/source.pdf',
+            fileName: '报名表.pdf',
+            fileSize: 100,
+          },
+          'admin',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(uploadServiceMock.getObjectBuffer).not.toHaveBeenCalled();
+    });
   });
 
   describe('uploadBatchTempPhoto - 手动替换照片校验与转码', () => {

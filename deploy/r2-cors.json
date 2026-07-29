@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "id": "pdf-direct-upload",
+      "allowed": {
+        "origins": [
+          "https://admin.sztufa.xyz",
+          "https://admin-dev.sztufa.xyz",
+          "http://localhost:3000"
+        ],
+        "methods": ["PUT"],
+        "headers": ["Content-Type"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

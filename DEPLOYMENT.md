@@ -271,11 +271,48 @@ Vercel 会自动触发重新部署。
 
 ## S3 / R2 存储桶 Lifecycle 生命周期配置
 
-为了保障 PDF 导入提取的临时大头照（`temp/pdf/` 路径）在过期或未提交时能够获得云端最终物理删除，请在 Cloudflare R2 / AWS S3 控制台中为 Bucket 配置 Lifecycle 规则：
+为了保障 PDF 导入源文件及提取的临时大头照（`temp/pdf-source/`、`temp/pdf/` 路径）在过期或未提交时能够获得云端最终物理删除，请在 Cloudflare R2 / AWS S3 控制台中为 Bucket 配置 Lifecycle 规则：
 
 1. **规则名称**：`AutoCleanTempPdfImports`
-2. **前缀/Prefix 过滤**：`temp/pdf/`
+2. **前缀/Prefix 过滤**：`temp/`
 3. **过期动作**：`1 天（24 小时）后自动物理删除对象`
+
+### PDF 浏览器直传 CORS
+
+大于 Vercel Function 4.5MB 请求体限制的 PDF 会通过预签名 URL 从管理端浏览器直接上传到 R2/S3。存储桶必须允许管理端来源执行 `PUT`：
+
+```json
+{
+  "rules": [
+    {
+      "id": "pdf-direct-upload",
+      "allowed": {
+        "origins": [
+          "https://admin.sztufa.xyz",
+          "https://admin-dev.sztufa.xyz",
+          "http://localhost:3000"
+        ],
+        "methods": ["PUT"],
+        "headers": ["Content-Type"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
+```
+
+开发与生产部署后都应从对应管理端域名实际上传一个大于 4.5MB 的 PDF，确认浏览器预检及 `PUT` 请求成功。
+
+仓库已提供可直接应用的配置文件 `deploy/r2-cors.json`。登录 Cloudflare 后运行：
+
+```powershell
+npx wrangler login
+npx wrangler r2 bucket cors set <R2_BUCKET_NAME> --file deploy/r2-cors.json
+npx wrangler r2 bucket cors list <R2_BUCKET_NAME>
+npx wrangler r2 bucket lifecycle add <R2_BUCKET_NAME> AutoCleanTempPdfImports temp/ --expire-days 1 --force
+npx wrangler r2 bucket lifecycle list <R2_BUCKET_NAME>
+```
 
 ---
 

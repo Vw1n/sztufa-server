@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { PdfImportService } from './pdf-import.service';
 import { PdfImportBatchStatus } from '@prisma/client';
 
@@ -72,7 +77,15 @@ describe('PdfImportService', () => {
           },
         ],
         extractedImages: [
-          { id: 'p1_1', buffer: Buffer.from('img'), x: 180, y: 200, width: 60, height: 80, page: 1 },
+          {
+            id: 'p1_1',
+            buffer: Buffer.from('img'),
+            x: 180,
+            y: 200,
+            width: 60,
+            height: 80,
+            page: 1,
+          },
         ],
       })),
     };
@@ -124,9 +137,9 @@ describe('PdfImportService', () => {
       });
       const fakeFile = { buffer: Buffer.from('FAKE_NOT_AN_IMAGE_DATA') } as any;
 
-      await expect(
-        service.uploadBatchTempPhoto('batch1', 'admin', fakeFile),
-      ).rejects.toThrow(UnprocessableEntityException);
+      await expect(service.uploadBatchTempPhoto('batch1', 'admin', fakeFile)).rejects.toThrow(
+        UnprocessableEntityException,
+      );
     });
   });
 
@@ -205,7 +218,11 @@ describe('PdfImportService', () => {
                 name: { value: '低置信度球员', confidence: 1.0 },
                 studentId: { value: '202100010001', confidence: 1.0 },
                 jerseyNumber: { value: '10', confidence: 1.0 },
-                photo: { value: 'https://cdn.example.com/temp/pdf/batch1/p1.webp', confidence: 0.5, manuallyConfirmed: false },
+                photo: {
+                  value: 'https://cdn.example.com/temp/pdf/batch1/p1.webp',
+                  confidence: 0.5,
+                  manuallyConfirmed: false,
+                },
                 needsManualConfirm: true,
               },
             ],
@@ -261,7 +278,11 @@ describe('PdfImportService', () => {
                 name: { value: '张三', confidence: 1.0 },
                 studentId: { value: '202100010001', confidence: 1.0 },
                 jerseyNumber: { value: '10', confidence: 1.0 },
-                photo: { value: 'https://cdn.example.com/temp/pdf/batch1/p1.webp', confidence: 1.0, manuallyConfirmed: true },
+                photo: {
+                  value: 'https://cdn.example.com/temp/pdf/batch1/p1.webp',
+                  confidence: 1.0,
+                  manuallyConfirmed: true,
+                },
                 needsManualConfirm: false,
               },
             ],
@@ -269,7 +290,9 @@ describe('PdfImportService', () => {
         ],
       } as any;
 
-      await expect(service.commitPdfBatch('batch1', 'admin', dto)).rejects.toThrow('PDF 批次提交失败');
+      await expect(service.commitPdfBatch('batch1', 'admin', dto)).rejects.toThrow(
+        'PDF 批次提交失败',
+      );
 
       expect(prismaMock.pdfImportBatch.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -312,9 +335,7 @@ describe('PdfImportService', () => {
         username: 'other_user',
       });
 
-      await expect(service.cancelPdfBatch('batch1', 'admin')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.cancelPdfBatch('batch1', 'admin')).rejects.toThrow(NotFoundException);
     });
 
     it('成功取消 PREVIEW 批次并销毁临时文件', async () => {

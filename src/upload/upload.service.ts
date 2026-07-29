@@ -199,7 +199,10 @@ export class UploadService {
         }),
       );
     } catch (error) {
-      this.logger.error(`S3 deleteObject 失败: key=${key}`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `S3 deleteObject 失败: key=${key}`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new ServiceUnavailableException(`S3 deleteObject 失败: ${key}`);
     }
   }
@@ -221,7 +224,10 @@ export class UploadService {
         }),
       );
     } catch (error) {
-      this.logger.error(`S3 deleteObjects 批量删除失败: count=${validKeys.length}`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `S3 deleteObjects 批量删除失败: count=${validKeys.length}`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new ServiceUnavailableException(`S3 deleteObjects 批量删除失败`);
     }
   }
@@ -249,10 +255,15 @@ export class UploadService {
           await this.deleteObjects(objects);
         }
 
-        continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined;
+        continuationToken = listResponse.IsTruncated
+          ? listResponse.NextContinuationToken
+          : undefined;
       } while (continuationToken);
     } catch (error) {
-      this.logger.error(`S3 deleteByPrefix 失败: prefix=${prefix}`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `S3 deleteByPrefix 失败: prefix=${prefix}`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new ServiceUnavailableException(`S3 deleteByPrefix 物理清理失败: prefix=${prefix}`);
     }
   }
@@ -268,7 +279,7 @@ export class UploadService {
         }),
       );
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

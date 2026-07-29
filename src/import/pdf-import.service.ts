@@ -14,7 +14,6 @@ import { UploadService } from '../upload/upload.service';
 import { PdfParserService } from './pdf-parser.service';
 import {
   ParsedFieldDto,
-  ParsedTeamDto,
   PdfCommitRequestDto,
   PdfCommitResponseDto,
   PdfPreviewUploadedRequestDto,
@@ -75,10 +74,7 @@ export class PdfImportService {
     }
 
     try {
-      const buffer = await this.uploadService.getObjectBuffer(
-        dto.objectKey,
-        20 * 1024 * 1024,
-      );
+      const buffer = await this.uploadService.getObjectBuffer(dto.objectKey, 20 * 1024 * 1024);
       if (buffer.length === 0 || buffer.length > 20 * 1024 * 1024) {
         throw new BadRequestException('PDF 文件为空或超过 20MB 限制');
       }
@@ -101,18 +97,12 @@ export class PdfImportService {
     }
   }
 
-  async previewPdf(
-    file: Express.Multer.File,
-    username: string,
-  ): Promise<PdfPreviewResponseDto> {
+  async previewPdf(file: Express.Multer.File, username: string): Promise<PdfPreviewResponseDto> {
     this.lazyCleanupExpiredBatches(username).catch((err) =>
       this.logger.warn('惰性清理过期批次异常', err),
     );
 
-    const fileHash = crypto
-      .createHash('sha256')
-      .update(file.buffer)
-      .digest('hex');
+    const fileHash = crypto.createHash('sha256').update(file.buffer).digest('hex');
 
     const recentSameBatch = await this.prisma.pdfImportBatch.findFirst({
       where: {
@@ -134,8 +124,7 @@ export class PdfImportService {
       };
     }
 
-    const { teams, extractedImages } =
-      await this.pdfParserService.parseRegistrationPdf(file);
+    const { teams, extractedImages } = await this.pdfParserService.parseRegistrationPdf(file);
 
     const batchId = `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const tempPrefix = `temp/pdf/${batchId}/`;
@@ -145,11 +134,7 @@ export class PdfImportService {
     try {
       for (const img of extractedImages) {
         const tempKey = `${tempPrefix}${img.id}.webp`;
-        const publicUrl = await this.uploadService.uploadBuffer(
-          img.buffer,
-          tempKey,
-          'image/webp',
-        );
+        const publicUrl = await this.uploadService.uploadBuffer(img.buffer, tempKey, 'image/webp');
         uploadedImageMap.set(img.id, publicUrl);
       }
 
@@ -188,10 +173,7 @@ export class PdfImportService {
         hasLowConfidence,
       };
     } catch (error) {
-      this.logger.error(
-        `Preview 批次创建失败，启动 S3 物理回滚补偿: prefix=${tempPrefix}`,
-        error,
-      );
+      this.logger.error(`Preview 批次创建失败，启动 S3 物理回滚补偿: prefix=${tempPrefix}`, error);
       await this.uploadService.deleteByPrefix(tempPrefix).catch(() => {});
       throw error;
     }
@@ -238,12 +220,16 @@ export class PdfImportService {
       }
 
       if (webpBuffer.length > 200 * 1024) {
-        throw new UnprocessableEntityException('大头照图片压缩后仍超过 200KB 体积限制，请提供较小分辨率的图片');
+        throw new UnprocessableEntityException(
+          '大头照图片压缩后仍超过 200KB 体积限制，请提供较小分辨率的图片',
+        );
       }
     } catch (err: any) {
       if (err instanceof UnprocessableEntityException) throw err;
       this.logger.error('手动更换照片 Sharp 解码转码失败', err);
-      throw new UnprocessableEntityException('更换的大头照图片损坏或格式不支持，请上传有效的图片文件');
+      throw new UnprocessableEntityException(
+        '更换的大头照图片损坏或格式不支持，请上传有效的图片文件',
+      );
     }
 
     const tempKey = `temp/pdf/${batchId}/manual_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.webp`;
@@ -274,8 +260,14 @@ export class PdfImportService {
 
       for (const player of team.players) {
         this.validateFieldConfidence(player.name, `球员姓名 (${player.name.value || '未知'})`);
-        this.validateFieldConfidence(player.studentId, `学号 (${player.studentId.value || '未知'})`);
-        this.validateFieldConfidence(player.jerseyNumber, `球衣号码 (${player.name.value || '未知'})`);
+        this.validateFieldConfidence(
+          player.studentId,
+          `学号 (${player.studentId.value || '未知'})`,
+        );
+        this.validateFieldConfidence(
+          player.jerseyNumber,
+          `球衣号码 (${player.name.value || '未知'})`,
+        );
         this.validateFieldConfidence(player.photo, `照片 (${player.name.value || '未知'})`);
 
         const photoUrl = player.photo.value;
@@ -318,10 +310,7 @@ export class PdfImportService {
             const fileName = sourceKey.substring(sourceKey.lastIndexOf('/') + 1);
             const formalKey = `${formalPrefix}${fileName}`;
 
-            const formalUrl = await this.uploadService.copyObject(
-              sourceKey,
-              formalKey,
-            );
+            const formalUrl = await this.uploadService.copyObject(sourceKey, formalKey);
             player.photo.value = formalUrl;
           }
         }
@@ -412,9 +401,9 @@ export class PdfImportService {
         });
       });
 
-      this.uploadService.deleteByPrefix(tempPrefix).catch((err) =>
-        this.logger.warn(`清理临时文件失败 prefix=${tempPrefix}`, err),
-      );
+      this.uploadService
+        .deleteByPrefix(tempPrefix)
+        .catch((err) => this.logger.warn(`清理临时文件失败 prefix=${tempPrefix}`, err));
 
       return {
         message: `成功完成 PDF 报名表提交，处理 ${createdTeamsCount} 支球队，${createdPlayersCount} 名球员`,
@@ -433,7 +422,10 @@ export class PdfImportService {
         await this.uploadService.deleteByPrefix(formalPrefix);
         cleanupSuccess = true;
       } catch (cleanErr) {
-        this.logger.error(`S3 正式目录清理失败，标记 cleanupRequired=true 留待后续任务重试: formalPrefix=${formalPrefix}`, cleanErr);
+        this.logger.error(
+          `S3 正式目录清理失败，标记 cleanupRequired=true 留待后续任务重试: formalPrefix=${formalPrefix}`,
+          cleanErr,
+        );
       }
 
       await this.prisma.pdfImportBatch
@@ -505,14 +497,19 @@ export class PdfImportService {
 
     for (const batch of stuckBatches) {
       const formalPrefix = `uploads/players/imports/${batch.id}/`;
-      this.logger.warn(`维护任务扫描到未完成清理的批次 ${batch.id}，执行 S3 物理删除: ${formalPrefix}`);
+      this.logger.warn(
+        `维护任务扫描到未完成清理的批次 ${batch.id}，执行 S3 物理删除: ${formalPrefix}`,
+      );
 
       let cleanOk = false;
       try {
         await this.uploadService.deleteByPrefix(formalPrefix);
         cleanOk = true;
       } catch (cleanErr) {
-        this.logger.error(`S3 清理失败，保持 cleanupRequired=true 以供下次轮询重试: batchId=${batch.id}`, cleanErr);
+        this.logger.error(
+          `S3 清理失败，保持 cleanupRequired=true 以供下次轮询重试: batchId=${batch.id}`,
+          cleanErr,
+        );
       }
 
       await this.prisma.pdfImportBatch.update({

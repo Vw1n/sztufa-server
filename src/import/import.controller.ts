@@ -12,13 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
-import {
-  ApiBearerAuth,
-  ApiBody,
-  ApiConsumes,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import { ImportService } from './import.service';
 import { PdfImportService } from './pdf-import.service';
@@ -148,26 +142,14 @@ export class ImportController {
 
   @Post('pdf/upload-url')
   @ApiOperation({ summary: '获取 PDF 直传 R2/S3 的预签名地址（绕过 Serverless 请求体限制）' })
-  async createPdfUploadUrl(
-    @Body() dto: PdfUploadUrlRequestDto,
-    @Req() req: any,
-  ) {
-    return this.pdfImportService.createPdfUploadUrl(
-      req.user?.username || 'admin',
-      dto,
-    );
+  async createPdfUploadUrl(@Body() dto: PdfUploadUrlRequestDto, @Req() req: any) {
+    return this.pdfImportService.createPdfUploadUrl(req.user?.username || 'admin', dto);
   }
 
   @Post('pdf/preview-uploaded')
   @ApiOperation({ summary: '解析已经通过预签名地址直传至 R2/S3 的 PDF' })
-  async previewUploadedPdf(
-    @Body() dto: PdfPreviewUploadedRequestDto,
-    @Req() req: any,
-  ) {
-    return this.pdfImportService.previewUploadedPdf(
-      dto,
-      req.user?.username || 'admin',
-    );
+  async previewUploadedPdf(@Body() dto: PdfPreviewUploadedRequestDto, @Req() req: any) {
+    return this.pdfImportService.previewUploadedPdf(dto, req.user?.username || 'admin');
   }
 
   @Post('pdf/preview')
@@ -192,11 +174,7 @@ export class ImportController {
     @Body() dto: PdfCommitRequestDto,
     @Req() req: any,
   ) {
-    return this.pdfImportService.commitPdfBatch(
-      batchId,
-      req.user?.username || 'admin',
-      dto,
-    );
+    return this.pdfImportService.commitPdfBatch(batchId, req.user?.username || 'admin', dto);
   }
 
   @Post('pdf/:batchId/photo')
@@ -211,20 +189,13 @@ export class ImportController {
     if (!file) {
       throw new BadRequestException('请选择图片文件');
     }
-    return this.pdfImportService.uploadBatchTempPhoto(
-      batchId,
-      req.user?.username || 'admin',
-      file,
-    );
+    return this.pdfImportService.uploadBatchTempPhoto(batchId, req.user?.username || 'admin', file);
   }
 
   @Post('pdf/:batchId/cancel')
   @ApiOperation({ summary: '主动取消 PDF 导入批次（物理清理临时大头照）' })
   async cancelPdfBatch(@Param('batchId') batchId: string, @Req() req: any) {
-    return this.pdfImportService.cancelPdfBatch(
-      batchId,
-      req.user?.username || 'admin',
-    );
+    return this.pdfImportService.cancelPdfBatch(batchId, req.user?.username || 'admin');
   }
 
   @Post('pdf/recovery')

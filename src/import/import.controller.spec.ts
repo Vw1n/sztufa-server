@@ -1,7 +1,6 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ImportController } from './import.controller';
 import { PdfCommitRequestDto } from './dto/pdf-import.dto';
-import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
 describe('ImportController & ValidationPipe DTO Safety', () => {
@@ -24,10 +23,7 @@ describe('ImportController & ValidationPipe DTO Safety', () => {
       recoverStuckBatches: jest.fn(),
     };
 
-    controller = new ImportController(
-      importServiceMock as any,
-      pdfImportServiceMock as any,
-    );
+    controller = new ImportController(importServiceMock as any, pdfImportServiceMock as any);
   });
 
   it('全局 ValidationPipe (whitelist: true) 绝不应剥离 ParsedFieldDto 中的 value, confidence, page 字段', async () => {
@@ -45,9 +41,19 @@ describe('ImportController & ValidationPipe DTO Safety', () => {
           players: [
             {
               name: { value: '张三', confidence: 1.0, page: 1, manuallyConfirmed: true },
-              studentId: { value: '202100010001', confidence: 1.0, page: 1, manuallyConfirmed: true },
+              studentId: {
+                value: '202100010001',
+                confidence: 1.0,
+                page: 1,
+                manuallyConfirmed: true,
+              },
               jerseyNumber: { value: '10', confidence: 1.0, page: 1, manuallyConfirmed: true },
-              photo: { value: 'temp/pdf/b1/p1.webp', confidence: 1.0, page: 1, manuallyConfirmed: true },
+              photo: {
+                value: 'temp/pdf/b1/p1.webp',
+                confidence: 1.0,
+                page: 1,
+                manuallyConfirmed: true,
+              },
               needsManualConfirm: false,
             },
           ],
@@ -72,16 +78,12 @@ describe('ImportController & ValidationPipe DTO Safety', () => {
 
   describe('previewPdf', () => {
     it('拒绝未提供文件', async () => {
-      await expect(controller.previewPdf(null as any, {})).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(controller.previewPdf(null as any, {})).rejects.toThrow(BadRequestException);
     });
 
     it('拒绝非 .pdf 后缀的文件', async () => {
       const file = { originalname: 'test.docx' } as any;
-      await expect(controller.previewPdf(file, {})).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(controller.previewPdf(file, {})).rejects.toThrow(BadRequestException);
     });
 
     it('正确转发符合规范的 PDF 文件至 PdfImportService', async () => {

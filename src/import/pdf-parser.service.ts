@@ -5,12 +5,9 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import sharp from 'sharp';
-import {
-  ParsedFieldDto,
-  ParsedPlayerDto,
-  ParsedTeamDto,
-} from './dto/pdf-import.dto';
+import { ParsedFieldDto, ParsedPlayerDto, ParsedTeamDto } from './dto/pdf-import.dto';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfjs = require('pdfjs-dist/build/pdf.js');
 
 export interface ExtractedImageItem {
@@ -47,9 +44,7 @@ export class PdfParserService {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutTimer = setTimeout(() => {
         abortSignal.aborted = true;
-        reject(
-          new BadRequestException('PDF 解析超时 (超过 15 秒限制)，文件可能过于复杂'),
-        );
+        reject(new BadRequestException('PDF 解析超时 (超过 15 秒限制)，文件可能过于复杂'));
       }, PARSE_TIMEOUT_MS);
     });
 
@@ -122,7 +117,7 @@ export class PdfParserService {
       pageTexts.push({ page: pageNum, items: textItems });
 
       const opList = await page.getOperatorList();
-      let transformStack: number[][] = [];
+      const transformStack: number[][] = [];
       let currentTransform = [1, 0, 0, 1, 0, 0];
 
       for (let i = 0; i < opList.fnArray.length; i++) {
@@ -141,10 +136,7 @@ export class PdfParserService {
           }
         } else if (fn === pdfjs.OPS.transform) {
           currentTransform = this.multiplyMatrix(currentTransform, args);
-        } else if (
-          fn === pdfjs.OPS.paintImageXObject ||
-          fn === pdfjs.OPS.paintInlineImageXObject
-        ) {
+        } else if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintInlineImageXObject) {
           const imgName = args[0];
           const imgObj = page.objs.get(imgName);
 
@@ -176,9 +168,7 @@ export class PdfParserService {
     }
 
     if (totalTextCount < 10) {
-      throw new BadRequestException(
-        '第一期暂不支持扫描图片件，请上传原生文本 PDF 报名表',
-      );
+      throw new BadRequestException('第一期暂不支持扫描图片件，请上传原生文本 PDF 报名表');
     }
 
     const teams = this.extractTeamsFromPageData(pageTexts, pageImages);
@@ -228,7 +218,12 @@ export class PdfParserService {
 
       let buf = await sharp(Buffer.from(imgObj.data), sharpInput)
         .rotate()
-        .resize({ width: targetWidth, height: targetHeight, fit: 'cover', withoutEnlargement: true })
+        .resize({
+          width: targetWidth,
+          height: targetHeight,
+          fit: 'cover',
+          withoutEnlargement: true,
+        })
         .webp({ quality })
         .toBuffer();
 
@@ -246,14 +241,19 @@ export class PdfParserService {
 
       if (buf.length > 200 * 1024) return null;
       return buf;
-    } catch (err) {
+    } catch {
       try {
         let quality = 80;
         let targetWidth = 400;
         let targetHeight = 533;
 
         let buf = await sharp(Buffer.from(imgObj.data))
-          .resize({ width: targetWidth, height: targetHeight, fit: 'cover', withoutEnlargement: true })
+          .resize({
+            width: targetWidth,
+            height: targetHeight,
+            fit: 'cover',
+            withoutEnlargement: true,
+          })
           .webp({ quality })
           .toBuffer();
 
@@ -335,7 +335,11 @@ export class PdfParserService {
     };
   }
 
-  private parseTeamHeaderFields(team: Partial<ParsedTeamDto>, items: ExtractedTextItem[], page: number) {
+  private parseTeamHeaderFields(
+    team: Partial<ParsedTeamDto>,
+    items: ExtractedTextItem[],
+    page: number,
+  ) {
     for (let i = 0; i < items.length; i++) {
       const text = items[i].text;
 
@@ -359,10 +363,12 @@ export class PdfParserService {
         if (val) team.teamDoctor = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
       } else if (text.includes('主队球衣颜色')) {
         const val = this.extractFieldValue(items, i);
-        if (val) team.homeJerseyColor = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
+        if (val)
+          team.homeJerseyColor = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
       } else if (text.includes('客队球衣颜色')) {
         const val = this.extractFieldValue(items, i);
-        if (val) team.awayJerseyColor = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
+        if (val)
+          team.awayJerseyColor = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
       }
     }
   }
@@ -370,7 +376,8 @@ export class PdfParserService {
   private extractFieldValue(items: ExtractedTextItem[], index: number): string {
     const labelItem = items[index];
     const candidate = items.find(
-      (item, idx) => idx > index && Math.abs(item.y - labelItem.y) < 10 && item.x > labelItem.x + 40,
+      (item, idx) =>
+        idx > index && Math.abs(item.y - labelItem.y) < 10 && item.x > labelItem.x + 40,
     );
     return candidate ? candidate.text : '';
   }
@@ -479,7 +486,7 @@ export class PdfParserService {
         }
 
         let photoConfidence = 1.0;
-        let warnings: string[] = [];
+        const warnings: string[] = [];
         let needsManualConfirm = false;
 
         if (bestMatchedImage && highestScore >= 0.3) {

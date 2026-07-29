@@ -9,9 +9,7 @@ describe('PdfParserService', () => {
   });
 
   it('应该拒绝为空的 PDF 文件', async () => {
-    await expect(service.parseRegistrationPdf(null as any)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(service.parseRegistrationPdf(null as any)).rejects.toThrow(BadRequestException);
   });
 
   it('应该拒绝魔数非 %PDF- 的非 PDF 文件', async () => {
@@ -20,9 +18,7 @@ describe('PdfParserService', () => {
       size: 14,
     } as any;
 
-    await expect(service.parseRegistrationPdf(fakeFile)).rejects.toThrow(
-      '无效的 PDF 文件类型',
-    );
+    await expect(service.parseRegistrationPdf(fakeFile)).rejects.toThrow('无效的 PDF 文件类型');
   });
 
   it('应该拒绝超过 20MB 的超大文件', async () => {
@@ -31,9 +27,7 @@ describe('PdfParserService', () => {
       size: 21 * 1024 * 1024,
     } as any;
 
-    await expect(service.parseRegistrationPdf(hugeFile)).rejects.toThrow(
-      'PDF 文件大小超过限制',
-    );
+    await expect(service.parseRegistrationPdf(hugeFile)).rejects.toThrow('PDF 文件大小超过限制');
   });
 
   it('应该对文本字符极少的纯扫描件弹出友善拦截提示', async () => {
@@ -81,11 +75,7 @@ describe('PdfParserService', () => {
       { id: 'img_p2', buffer: Buffer.from('img2'), x: 430, y: 420, width: 40, height: 60, page: 1 },
     ];
 
-    const extractPlayers = (service as any).extractPlayersFromPage(
-      pageTexts[0].items,
-      images,
-      1,
-    );
+    const extractPlayers = (service as any).extractPlayersFromPage(pageTexts[0].items, images, 1);
 
     expect(extractPlayers.length).toBe(2);
     expect(extractPlayers[0].photo.value).toBe('img_p1');

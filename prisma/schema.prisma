@@ -358,3 +358,33 @@ model SeasonGroupTeam {
   @@index([seasonId])
   @@index([teamId])
 }
+
+enum PdfImportBatchStatus {
+  PREVIEW
+  COMMITTING
+  COMMITTED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+model PdfImportBatch {
+  id              String               @id @default(cuid())
+  fileHash        String
+  username        String
+  status          PdfImportBatchStatus @default(PREVIEW)
+  previewData     Json?
+  expiresAt       DateTime
+  commitStartedAt DateTime?
+  committedAt     DateTime?
+  failedAt        DateTime?
+  failureReason   String?
+  finalObjectKeys Json?
+  cleanupRequired Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([username, status])
+  @@index([expiresAt])
+  @@index([fileHash])
+}

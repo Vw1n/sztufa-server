@@ -1,7 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import { getSeasonGender } from '../common/season-gender';
 
 @Injectable()
 export class SeasonLifecycleService {
@@ -64,27 +63,6 @@ export class SeasonLifecycleService {
         },
       });
 
-      const seasonGender = getSeasonGender(trimmedName);
-      const activePlayers = await tx.player.findMany({
-        where: {
-          deletedAt: null,
-          ...(seasonGender ? { team: { gender: seasonGender } } : {}),
-        },
-      });
-
-      if (activePlayers.length > 0) {
-        await tx.seasonTeamPlayer.createMany({
-          data: activePlayers.map((player) => ({
-            seasonId: season.id,
-            teamId: player.teamId,
-            playerId: player.id,
-            playerName: player.name,
-            jerseyNumber: player.jerseyNumber,
-            playerPhoto: player.photo,
-          })),
-        });
-      }
-
       await tx.player.updateMany({
         where: { deletedAt: null },
         data: {
@@ -101,7 +79,7 @@ export class SeasonLifecycleService {
     await this.auditLogService.log(
       username,
       'CREATE_SEASON',
-      `成功创建新赛季 "${trimmedName}"，将存量球员注册到新赛季名册并重置了红黄牌。`,
+      `成功创建新赛季 "${trimmedName}"，新赛季名单为空，并重置了球员红黄牌。`,
     );
 
     return newSeason;
@@ -135,27 +113,6 @@ export class SeasonLifecycleService {
         },
       });
 
-      const seasonGender = getSeasonGender(trimmedName);
-      const activePlayers = await tx.player.findMany({
-        where: {
-          deletedAt: null,
-          ...(seasonGender ? { team: { gender: seasonGender } } : {}),
-        },
-      });
-
-      if (activePlayers.length > 0) {
-        await tx.seasonTeamPlayer.createMany({
-          data: activePlayers.map((player) => ({
-            seasonId: season.id,
-            teamId: player.teamId,
-            playerId: player.id,
-            playerName: player.name,
-            jerseyNumber: player.jerseyNumber,
-            playerPhoto: player.photo,
-          })),
-        });
-      }
-
       await tx.player.updateMany({
         where: { deletedAt: null },
         data: {
@@ -172,7 +129,7 @@ export class SeasonLifecycleService {
     await this.auditLogService.log(
       username,
       'ARCHIVE_SEASON',
-      `成功归档往期赛季，并开启新赛季 "${trimmedName}"，将存量球员注册到新赛季名册并重置了红黄牌。`,
+      `成功归档往期赛季，并开启新赛季 "${trimmedName}"，新赛季名单为空，并重置了球员红黄牌。`,
     );
 
     return newSeason;

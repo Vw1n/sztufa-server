@@ -17,6 +17,7 @@ export class TeamQueryService {
     if (seasonId && seasonId !== 'all') {
       where.OR = [
         { groupTeams: { some: { seasonId } } },
+        { seasonProfiles: { some: { seasonId } } },
         { seasonPlayers: { some: { seasonId } } },
         { homeMatches: { some: { seasonId } } },
         { awayMatches: { some: { seasonId } } },

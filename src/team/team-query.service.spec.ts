@@ -43,7 +43,10 @@ describe('TeamQueryService', () => {
         where: expect.objectContaining({
           deletedAt: null,
           gender: 'MALE',
-          OR: expect.arrayContaining([{ seasonPlayers: { some: { seasonId: 'season-1' } } }]),
+          OR: expect.arrayContaining([
+            { seasonProfiles: { some: { seasonId: 'season-1' } } },
+            { seasonPlayers: { some: { seasonId: 'season-1' } } },
+          ]),
         }),
       }),
     );

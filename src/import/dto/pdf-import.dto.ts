@@ -209,6 +209,12 @@ export class PdfPreviewUploadedRequestDto {
   fileSize: number;
 }
 
+export class PdfAssetRequestDto {
+  @ApiProperty({ description: '预览批次中的临时图片 URL' })
+  @IsString()
+  url: string;
+}
+
 export class PdfCommitResponseDto {
   @ApiProperty({ description: '提示消息' })
   message: string;

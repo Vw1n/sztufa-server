@@ -248,6 +248,33 @@ export class PdfImportService {
     return { url: publicUrl };
   }
 
+  async getBatchTempAsset(batchId: string, username: string, url: string): Promise<Buffer> {
+    const batch = await this.prisma.pdfImportBatch.findFirst({
+      where: {
+        id: batchId,
+        username,
+        status: PdfImportBatchStatus.PREVIEW,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    if (!batch) {
+      throw new NotFoundException('PDF 预览批次不存在、已过期或无权访问');
+    }
+
+    const key = this.uploadService.extractKeyFromUrl(url);
+    const expectedPrefix = `temp/pdf/${batchId}/`;
+    if (
+      !key.startsWith(expectedPrefix) ||
+      key.slice(expectedPrefix.length).includes('/') ||
+      !key.endsWith('.webp')
+    ) {
+      throw new BadRequestException('图片不属于当前 PDF 预览批次');
+    }
+
+    return this.uploadService.getObjectBuffer(key, 200 * 1024);
+  }
+
   async commitPdfBatch(
     batchId: string,
     username: string,

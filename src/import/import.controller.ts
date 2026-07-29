@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Req,
+  StreamableFile,
   UploadedFile,
   UploadedFiles,
   UseGuards,
@@ -17,6 +18,7 @@ import { memoryStorage } from 'multer';
 import { ImportService } from './import.service';
 import { PdfImportService } from './pdf-import.service';
 import {
+  PdfAssetRequestDto,
   PdfCommitRequestDto,
   PdfPreviewUploadedRequestDto,
   PdfUploadUrlRequestDto,
@@ -190,6 +192,21 @@ export class ImportController {
       throw new BadRequestException('请选择图片文件');
     }
     return this.pdfImportService.uploadBatchTempPhoto(batchId, req.user?.username || 'admin', file);
+  }
+
+  @Post('pdf/:batchId/asset')
+  @ApiOperation({ summary: '读取当前 PDF 预览批次中的临时图片，用于回填录入表单' })
+  async getPdfBatchAsset(
+    @Param('batchId') batchId: string,
+    @Body() dto: PdfAssetRequestDto,
+    @Req() req: any,
+  ) {
+    const buffer = await this.pdfImportService.getBatchTempAsset(
+      batchId,
+      req.user?.username || 'admin',
+      dto.url,
+    );
+    return new StreamableFile(buffer, { type: 'image/webp' });
   }
 
   @Post('pdf/:batchId/cancel')

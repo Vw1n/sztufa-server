@@ -19,10 +19,10 @@ WHERE roster."seasonId" = season."id"
   )
   AND NOT EXISTS (
     SELECT 1
-    FROM "Match" AS match
-    WHERE match."seasonId" = season."id"
+    FROM "Match" AS season_match
+    WHERE season_match."seasonId" = season."id"
       AND (
-        match."homeTeamId" = roster."teamId"
-        OR match."awayTeamId" = roster."teamId"
+        season_match."homeTeamId" = roster."teamId"
+        OR season_match."awayTeamId" = roster."teamId"
       )
   );

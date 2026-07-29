@@ -419,7 +419,10 @@ export class BackupService {
             if (m.mvpPlayerId) {
               await tx.match.update({
                 where: { id: m.id },
-                data: { mvpPlayerId: m.mvpPlayerId },
+                data: {
+                  mvpPlayerId: m.mvpPlayerId,
+                  updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
+                },
               });
             }
           }
@@ -427,7 +430,10 @@ export class BackupService {
             if (p.suspendedAtMatchId) {
               await tx.player.update({
                 where: { id: p.id },
-                data: { suspendedAtMatchId: p.suspendedAtMatchId },
+                data: {
+                  suspendedAtMatchId: p.suspendedAtMatchId,
+                  updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
+                },
               });
             }
           }
@@ -503,7 +509,10 @@ export class BackupService {
             if (u.teamId) {
               await tx.user.update({
                 where: { id: u.id },
-                data: { teamId: u.teamId },
+                data: {
+                  teamId: u.teamId,
+                  updatedAt: u.updatedAt ? new Date(u.updatedAt) : undefined,
+                },
               });
             }
           }

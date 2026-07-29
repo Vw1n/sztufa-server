@@ -22,6 +22,8 @@ import {
   PdfUploadUrlResponseDto,
 } from './dto/pdf-import.dto';
 
+const PDF_PREVIEW_CACHE_VERSION = '2026-07-29-images-v2';
+
 @Injectable()
 export class PdfImportService {
   private readonly logger = new Logger(PdfImportService.name);
@@ -102,7 +104,11 @@ export class PdfImportService {
       this.logger.warn('惰性清理过期批次异常', err),
     );
 
-    const fileHash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+    const fileHash = crypto
+      .createHash('sha256')
+      .update(PDF_PREVIEW_CACHE_VERSION)
+      .update(file.buffer)
+      .digest('hex');
 
     const recentSameBatch = await this.prisma.pdfImportBatch.findFirst({
       where: {

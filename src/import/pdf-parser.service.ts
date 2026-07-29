@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import sharp from 'sharp';
@@ -79,6 +80,12 @@ export class PdfParserService {
       doc = await pdfjs.getDocument({ data }).promise;
     } catch (err: any) {
       this.logger.error('PDF 解析失败或文件已损坏', err);
+      if (
+        String(err?.message || err).includes('Setting up fake worker failed') ||
+        String(err?.message || err).includes('pdf.worker.js')
+      ) {
+        throw new ServiceUnavailableException('PDF 解析服务部署配置异常，请稍后重试或联系管理员');
+      }
       throw new UnprocessableEntityException('PDF 文件损坏或被加密，无法解密解析');
     }
 

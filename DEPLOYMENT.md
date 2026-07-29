@@ -292,7 +292,7 @@ Vercel 会自动触发重新部署。
           "https://admin-dev.sztufa.xyz",
           "http://localhost:3000"
         ],
-        "methods": ["PUT"],
+        "methods": ["GET", "PUT"],
         "headers": ["Content-Type"]
       },
       "exposeHeaders": ["ETag"],

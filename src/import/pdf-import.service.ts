@@ -140,6 +140,11 @@ export class PdfImportService {
 
       let hasLowConfidence = false;
       for (const team of teams) {
+        for (const field of [team.logo, team.homeJerseyPhoto, team.awayJerseyPhoto]) {
+          if (field?.value && uploadedImageMap.has(field.value)) {
+            field.value = uploadedImageMap.get(field.value)!;
+          }
+        }
         for (const player of team.players) {
           if (player.photo.value && uploadedImageMap.has(player.photo.value)) {
             player.photo.value = uploadedImageMap.get(player.photo.value)!;
@@ -303,6 +308,14 @@ export class PdfImportService {
 
     try {
       for (const team of teams) {
+        for (const field of [team.logo, team.homeJerseyPhoto, team.awayJerseyPhoto]) {
+          if (field?.value) {
+            const sourceKey = this.uploadService.extractKeyFromUrl(field.value);
+            const fileName = sourceKey.substring(sourceKey.lastIndexOf('/') + 1);
+            const formalKey = `${formalPrefix}${fileName}`;
+            field.value = await this.uploadService.copyObject(sourceKey, formalKey);
+          }
+        }
         for (const player of team.players) {
           const photoUrl = player.photo.value;
           if (photoUrl) {
@@ -336,6 +349,9 @@ export class PdfImportService {
                 teamDoctor: teamDto.teamDoctor.value || null,
                 homeJerseyColor: teamDto.homeJerseyColor.value || '白色',
                 awayJerseyColor: teamDto.awayJerseyColor.value || '黑色',
+                teamLogo: teamDto.logo?.value || null,
+                homeJersey: teamDto.homeJerseyPhoto?.value || null,
+                awayJersey: teamDto.awayJerseyPhoto?.value || null,
               },
             });
             createdTeamsCount++;
@@ -350,6 +366,9 @@ export class PdfImportService {
                 teamDoctor: teamDto.teamDoctor.value || team.teamDoctor,
                 homeJerseyColor: teamDto.homeJerseyColor.value || team.homeJerseyColor,
                 awayJerseyColor: teamDto.awayJerseyColor.value || team.awayJerseyColor,
+                teamLogo: teamDto.logo?.value || team.teamLogo,
+                homeJersey: teamDto.homeJerseyPhoto?.value || team.homeJersey,
+                awayJersey: teamDto.awayJerseyPhoto?.value || team.awayJersey,
               },
             });
           }

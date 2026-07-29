@@ -56,6 +56,7 @@ describe('PdfParserService', () => {
           { text: '球员姓名', x: 50, y: 500, page: 1 },
           { text: '学号', x: 150, y: 500, page: 1 },
           { text: '球衣号码', x: 250, y: 500, page: 1 },
+          { text: '学号', x: 10, y: 400, page: 1 },
           // 球员 1
           { text: '张三', x: 50, y: 400, page: 1 },
           { text: '202100010001', x: 150, y: 400, page: 1 },

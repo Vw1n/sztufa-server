@@ -306,6 +306,7 @@ export class PdfParserService {
         }
         currentTeam = this.createNewTeamDto(pageNum);
         this.parseTeamHeaderFields(currentTeam, items, pageNum);
+        this.assignTeamImages(currentTeam, items, images, pageNum);
       }
 
       const pagePlayers = this.extractPlayersFromPage(items, images, pageNum);
@@ -338,8 +339,61 @@ export class PdfParserService {
       teamDoctor: defaultField(),
       homeJerseyColor: defaultField(),
       awayJerseyColor: defaultField(),
+      logo: defaultField(),
+      homeJerseyPhoto: defaultField(),
+      awayJerseyPhoto: defaultField(),
       players: [],
     };
+  }
+
+  private assignTeamImages(
+    team: Partial<ParsedTeamDto>,
+    items: ExtractedTextItem[],
+    images: ExtractedImageItem[],
+    page: number,
+  ) {
+    const pageImages = images.filter((image) => image.page === page);
+    const findImageBelowLabel = (labels: string[]): ExtractedImageItem | null => {
+      const label = items.find((item) => labels.some((text) => item.text.includes(text)));
+      if (!label) return null;
+
+      const candidates = pageImages
+        .map((image) => {
+          const centerX = image.x + image.width / 2;
+          const centerY = image.y + image.height / 2;
+          return {
+            image,
+            horizontalDistance: Math.abs(centerX - label.x),
+            verticalDistance: label.y - centerY,
+          };
+        })
+        .filter(
+          ({ horizontalDistance, verticalDistance }) =>
+            horizontalDistance <= 70 && verticalDistance >= 0 && verticalDistance <= 140,
+        )
+        .sort(
+          (a, b) =>
+            a.horizontalDistance +
+            a.verticalDistance * 0.2 -
+            (b.horizontalDistance + b.verticalDistance * 0.2),
+        );
+
+      return candidates[0]?.image || null;
+    };
+
+    const logo = findImageBelowLabel(['队徽']);
+    const homeJersey = findImageBelowLabel(['队服（主）', '队服(主)']);
+    const awayJersey = findImageBelowLabel(['队服（客）', '队服(客)']);
+    const field = (image: ExtractedImageItem | null): ParsedFieldDto<string> => ({
+      value: image?.id || null,
+      confidence: image ? 1 : 0,
+      page,
+      manuallyConfirmed: false,
+    });
+
+    team.logo = field(logo);
+    team.homeJerseyPhoto = field(homeJersey);
+    team.awayJerseyPhoto = field(awayJersey);
   }
 
   private parseTeamHeaderFields(
@@ -351,8 +405,27 @@ export class PdfParserService {
       const text = items[i].text;
 
       if (text.includes('队伍名称')) {
-        const val = this.extractFieldValue(items, i);
-        if (val) team.teamName = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
+        const nextHeaderIndex = items.findIndex(
+          (item, itemIndex) => itemIndex > i && item.text.includes('队医姓名'),
+        );
+        const candidates = items
+          .slice(i + 1, nextHeaderIndex > i ? nextHeaderIndex : undefined)
+          .filter(
+            (item) =>
+              item.x > items[i].x + 40 &&
+              item.x < items[i].x + 200 &&
+              Math.abs(item.y - items[i].y) <= 12,
+          );
+        const val =
+          candidates.map((item) => item.text).join('') || this.extractFieldValue(items, i);
+        if (val) {
+          team.teamName = {
+            value: val,
+            confidence: 1.0,
+            page,
+            manuallyConfirmed: false,
+          };
+        }
       } else if (text.includes('主教练姓名')) {
         const val = this.extractFieldValue(items, i);
         if (val) team.headCoach = { value: val, confidence: 1.0, page, manuallyConfirmed: false };
@@ -395,7 +468,12 @@ export class PdfParserService {
     page: number,
   ): ParsedPlayerDto[] {
     const players: ParsedPlayerDto[] = [];
-    const studentIdItems = items.filter((i) => /^\d{10,12}$/.test(i.text));
+    const studentIdLabels = items.filter((item) => item.text.includes('学号'));
+    const studentIdItems = items.filter(
+      (item) =>
+        /^\d{10,12}$/.test(item.text) &&
+        studentIdLabels.some((label) => Math.abs(label.y - item.y) < 15 && label.x < item.x),
+    );
 
     if (studentIdItems.length === 0) return players;
 
@@ -481,9 +559,10 @@ export class PdfParserService {
           const deltaX = Math.abs(imgCenterX - playerX);
           const deltaY = imgCenterY - playerY;
 
-          if (deltaX <= 60 && deltaY >= -10 && deltaY <= 150) {
-            const distanceScore = Math.max(0, 1 - deltaX / 60 - Math.abs(deltaY - 60) / 100);
-            const totalScore = iouScore * 0.6 + distanceScore * 0.4;
+          if (deltaX <= 65 && deltaY >= 20 && deltaY <= 190) {
+            const columnScore = Math.max(0, 1 - deltaX / 65);
+            const verticalScore = Math.max(0, 1 - Math.abs(deltaY - 90) / 120);
+            const totalScore = iouScore * 0.25 + columnScore * 0.5 + verticalScore * 0.25;
 
             if (totalScore > highestScore) {
               highestScore = totalScore;

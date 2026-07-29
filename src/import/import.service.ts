@@ -1176,6 +1176,8 @@ export class ImportService {
       else if (round.includes('半决赛')) knockoutRound = 'SEMI_FINAL';
       else if (round === '决赛') knockoutRound = 'FINAL';
       else if (/三四名/.test(round)) knockoutRound = 'THIRD_PLACE';
+      else if (/五六名/.test(round)) knockoutRound = '5TH';
+      else if (/七八名/.test(round)) knockoutRound = '7TH';
       return { stage: 'KNOCKOUT', groupName: null, knockoutRound };
     }
     return { stage: 'LEAGUE', groupName: null, knockoutRound: null };

@@ -269,6 +269,16 @@ Vercel 会自动触发重新部署。
 3. 数据库连接状态
 4. 环境变量配置
 
+## S3 / R2 存储桶 Lifecycle 生命周期配置
+
+为了保障 PDF 导入提取的临时大头照（`temp/pdf/` 路径）在过期或未提交时能够获得云端最终物理删除，请在 Cloudflare R2 / AWS S3 控制台中为 Bucket 配置 Lifecycle 规则：
+
+1. **规则名称**：`AutoCleanTempPdfImports`
+2. **前缀/Prefix 过滤**：`temp/pdf/`
+3. **过期动作**：`1 天（24 小时）后自动物理删除对象`
+
+---
+
 ## 安全建议
 
 1. 定期更新依赖包

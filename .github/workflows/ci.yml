@@ -60,8 +60,10 @@ jobs:
       - name: 运行测试
         run: npm test -- --runInBand
 
-      - name: 部署隔离测试数据库结构
-        run: npx prisma migrate deploy
+      # 历史环境中的部分基础模型早于 migration 链，由 db push 建立。
+      # CI 使用一次性空库，按当前 Prisma Schema 同步结构后运行破坏性恢复测试。
+      - name: 同步隔离测试数据库结构
+        run: npx prisma db push --skip-generate
 
       - name: 运行备份恢复 PostgreSQL 集成测试
         run: npm run test:integration:backup

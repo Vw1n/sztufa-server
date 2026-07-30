@@ -31,10 +31,9 @@ export const PARSE_TIMEOUT_MS = 15000; // 15s 超时
 
 // 保留原生 import()，避免 CommonJS 编译把 .mjs 加载改写成 require()。
 // Node 20 不允许 require() 加载 pdfjs-dist 的 ESM 入口。
-const importEsmModule = new Function(
-  'specifier',
-  'return import(specifier)',
-) as (specifier: string) => Promise<any>;
+const importEsmModule = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<any>;
 
 @Injectable()
 export class PdfParserService {

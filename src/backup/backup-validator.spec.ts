@@ -95,4 +95,48 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
     expect(res.category).toBe('quarantine');
     expect(res.reason).toMatch(/SHA-256 Mismatch/);
   });
+
+  it('应该将包含无效外键（Goal.matchId 引用不存在的比赛）的 V2 归类为 quarantine', () => {
+    const v2 = buildValidV2();
+    v2.tables.Goal = [{ id: 'g1', matchId: 'non_existent_match', playerId: 'p1' }];
+    v2.manifest.tables.Goal = 1;
+    v2.manifest.checksum = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(v2.tables))
+      .digest('hex');
+    const str = JSON.stringify(v2);
+    const res = classifyBackupContent(str, Buffer.byteLength(str));
+    expect(res.category).toBe('quarantine');
+    expect(res.reason).toMatch(/引用了不存在的比赛 ID/);
+  });
+
+  it('应该将包含重复复合唯一键（Prediction 重复 userId+matchId）的 V2 归类为 quarantine', () => {
+    const v2 = buildValidV2();
+    v2.tables.Prediction = [
+      { id: 'pr1', userId: 'u1', matchId: 'm1' },
+      { id: 'pr2', userId: 'u1', matchId: 'm1' },
+    ];
+    v2.manifest.tables.Prediction = 2;
+    v2.manifest.checksum = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(v2.tables))
+      .digest('hex');
+    const str = JSON.stringify(v2);
+    const res = classifyBackupContent(str, Buffer.byteLength(str));
+    expect(res.category).toBe('quarantine');
+    expect(res.reason).toMatch(/重复的复合唯一键/);
+  });
+
+  it('应该将包含非法 ISO 日期字段的 V2 归类为 quarantine', () => {
+    const v2 = buildValidV2();
+    v2.tables.User[0].createdAt = 'invalid-date-string';
+    v2.manifest.checksum = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(v2.tables))
+      .digest('hex');
+    const str = JSON.stringify(v2);
+    const res = classifyBackupContent(str, Buffer.byteLength(str));
+    expect(res.category).toBe('quarantine');
+    expect(res.reason).toMatch(/包含无效日期值/);
+  });
 });

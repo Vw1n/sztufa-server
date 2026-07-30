@@ -1,3 +1,16 @@
+CREATE TABLE IF NOT EXISTS "Season" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "type" TEXT NOT NULL DEFAULT 'LEAGUE',
+    "standingsCache" JSONB,
+    "statsCache" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Season_pkey" PRIMARY KEY ("id")
+);
+
 CREATE TABLE "SeasonDeletionApproval" (
     "id" TEXT NOT NULL,
     "seasonId" TEXT NOT NULL,

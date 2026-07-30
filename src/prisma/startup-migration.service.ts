@@ -14,14 +14,15 @@ export class StartupMigrationService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    try {
-      if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL && !process.env.VERCEL) {
-        console.log('[Startup Migration] 检查并自动应用数据库迁移...');
+    if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL && !process.env.VERCEL) {
+      console.log('[Startup Migration] 检查并自动应用数据库迁移...');
+      try {
         execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[Startup Migration] 自动应用数据库迁移失败: ${errMsg}`);
+        throw err;
       }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[Startup Migration] 自动应用数据库迁移失败: ${errMsg}`);
     }
     await this.run();
   }

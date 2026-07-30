@@ -1,3 +1,16 @@
+-- Ensure MatchEvent table exists if migrating from clean database init
+CREATE TABLE IF NOT EXISTS "MatchEvent" (
+    "id" TEXT NOT NULL,
+    "matchId" TEXT NOT NULL,
+    "eventTime" TEXT NOT NULL,
+    "eventType" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "teamType" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MatchEvent_pkey" PRIMARY KEY ("id")
+);
+
 -- Add nullable match outcome fields first so older API versions remain compatible.
 ALTER TABLE "Match"
 ADD COLUMN "homePenaltyScore" INTEGER,

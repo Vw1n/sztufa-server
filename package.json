@@ -10,7 +10,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "build": "npx nest build",
-    "vercel-build": "npx prisma generate && npx prisma migrate deploy && npx nest build && node copy-swagger.js",
+    "vercel-build": "npx prisma generate && node scripts/run-vercel-migrations.js && npx nest build && node copy-swagger.js",
     "test": "jest",
     "test:integration:backup": "jest --runInBand --config jest.integration.config.js",
     "test:watch": "jest --watch",

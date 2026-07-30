@@ -7,7 +7,7 @@ import { PlayerCardSyncService } from './player-card-sync.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { MatchQueryService } from './match-query.service';
 import { MatchDataWriterService } from './match-data-writer.service';
-import { calculateMatchOutcome, resolveMatchOutcome } from './match-outcome';
+import { calculateMatchOutcome, hasOutcomeEvents, resolveMatchOutcome } from './match-outcome';
 
 import { PredictionService } from '../prediction/prediction.service';
 
@@ -52,9 +52,10 @@ export class MatchService {
 
     const { goals, events, lineups, ...matchData } = createMatchDto;
     delete (matchData as any).seasonId;
-    const outcome = events
-      ? calculateMatchOutcome(events)
-      : resolveMatchOutcome(matchData.homeScore || 0, matchData.awayScore || 0);
+    const outcome =
+      events && hasOutcomeEvents(events)
+        ? calculateMatchOutcome(events)
+        : resolveMatchOutcome(matchData.homeScore || 0, matchData.awayScore || 0);
     const winnerTeamId =
       outcome.winnerTeamType === 'home'
         ? createMatchDto.homeTeamId
@@ -185,14 +186,17 @@ export class MatchService {
     }
 
     const { goals, events, lineups, ...matchData } = updateMatchDto;
-    const outcome = events
-      ? calculateMatchOutcome(events)
-      : resolveMatchOutcome(
-          updateMatchDto.homeScore ?? match.homeScore,
-          updateMatchDto.awayScore ?? match.awayScore,
-          match.homePenaltyScore,
-          match.awayPenaltyScore,
-        );
+    // Historical JSON matches can have a final score without event details.
+    // An empty events array must not recalculate that score as 0:0.
+    const outcome =
+      events && hasOutcomeEvents(events)
+        ? calculateMatchOutcome(events)
+        : resolveMatchOutcome(
+            updateMatchDto.homeScore ?? match.homeScore,
+            updateMatchDto.awayScore ?? match.awayScore,
+            match.homePenaltyScore,
+            match.awayPenaltyScore,
+          );
     const winnerTeamId =
       outcome.winnerTeamType === 'home'
         ? finalHomeTeamId

@@ -7,6 +7,17 @@ type MatchEventLike = {
   phase?: string | null;
 };
 
+export const hasOutcomeEvents = (events: MatchEventLike[]): boolean =>
+  events.some((event) =>
+    [
+      MatchEventType.Goal,
+      MatchEventType.Penalty,
+      MatchEventType.OwnGoal,
+      MatchEventType.PenaltyShootoutGoal,
+      MatchEventType.PenaltyShootoutMiss,
+    ].includes(event.eventType as MatchEventType),
+  );
+
 export interface MatchOutcome {
   homeScore: number;
   awayScore: number;

@@ -109,6 +109,29 @@ describe('MatchService.update', () => {
     );
   });
 
+  it('preserves an imported score when the editor submits an empty event list', async () => {
+    const { service, prisma, matchQuery } = createService();
+    const importedMatch = {
+      ...originalMatch,
+      homeScore: 3,
+      awayScore: 2,
+      events: [],
+    };
+    prisma.match.findUnique
+      .mockResolvedValueOnce(importedMatch)
+      .mockResolvedValueOnce(importedMatch);
+    prisma.match.update.mockResolvedValue(importedMatch);
+    matchQuery.findDetails.mockResolvedValue(importedMatch);
+
+    await service.update('match-1', { homeScore: 3, awayScore: 2, events: [] }, 'admin');
+
+    expect(prisma.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ homeScore: 3, awayScore: 2 }),
+      }),
+    );
+  });
+
   it('validates replacement lineups against the new teams', async () => {
     const { service, prisma, matchQuery, matchDataWriter } = createService();
     const updatedMatch = {

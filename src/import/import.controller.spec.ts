@@ -26,6 +26,19 @@ describe('ImportController & ValidationPipe DTO Safety', () => {
     controller = new ImportController(importServiceMock as any, pdfImportServiceMock as any);
   });
 
+  it.each([
+    'createPdfUploadUrl',
+    'previewUploadedPdf',
+    'previewPdf',
+    'commitPdfBatch',
+    'uploadBatchTempPhoto',
+    'getPdfBatchAsset',
+    'cancelPdfBatch',
+    'recoverStuckPdfBatches',
+  ] as const)('PDF 导入接口 %s 不受全站通用限流影响', (methodName) => {
+    expect(Reflect.getMetadata('THROTTLER:SKIPdefault', controller[methodName])).toBe(true);
+  });
+
   it('全局 ValidationPipe (whitelist: true) 绝不应剥离 ParsedFieldDto 中的 value, confidence, page 字段', async () => {
     const rawPayload = {
       teams: [

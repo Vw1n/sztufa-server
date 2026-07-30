@@ -9,6 +9,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import multer from 'multer';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UploadService } from './upload.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -20,6 +21,7 @@ export class UploadController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post()
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
   @ApiOperation({ summary: '上传图片并压缩为 WebP 格式' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({

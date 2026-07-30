@@ -130,6 +130,18 @@ export class CreateMatchDto {
   @Min(0, { message: '客队比分不能为负数' })
   awayScore?: number;
 
+  @ApiProperty({ description: '点球大战主队比分', example: 4, required: false, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  homePenaltyScore?: number | null;
+
+  @ApiProperty({ description: '点球大战客队比分', example: 5, required: false, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  awayPenaltyScore?: number | null;
+
   @ApiProperty({ description: '比赛日期时间', example: '2024-01-15T14:00:00' })
   @IsDateString()
   matchDate: string;

@@ -7,7 +7,12 @@ import { PlayerCardSyncService } from './player-card-sync.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { MatchQueryService } from './match-query.service';
 import { MatchDataWriterService } from './match-data-writer.service';
-import { calculateMatchOutcome, hasOutcomeEvents, resolveMatchOutcome } from './match-outcome';
+import {
+  calculateMatchOutcome,
+  hasOutcomeEvents,
+  hasShootoutEvents,
+  resolveMatchOutcome,
+} from './match-outcome';
 
 import { PredictionService } from '../prediction/prediction.service';
 
@@ -54,8 +59,17 @@ export class MatchService {
     delete (matchData as any).seasonId;
     const outcome =
       events && hasOutcomeEvents(events)
-        ? calculateMatchOutcome(events)
-        : resolveMatchOutcome(matchData.homeScore || 0, matchData.awayScore || 0);
+        ? calculateMatchOutcome(
+            events,
+            createMatchDto.homePenaltyScore ?? null,
+            createMatchDto.awayPenaltyScore ?? null,
+          )
+        : resolveMatchOutcome(
+            matchData.homeScore || 0,
+            matchData.awayScore || 0,
+            createMatchDto.homePenaltyScore ?? null,
+            createMatchDto.awayPenaltyScore ?? null,
+          );
     const winnerTeamId =
       outcome.winnerTeamType === 'home'
         ? createMatchDto.homeTeamId
@@ -186,16 +200,29 @@ export class MatchService {
     }
 
     const { goals, events, lineups, ...matchData } = updateMatchDto;
+    const preserveStoredPenalty = events === undefined || !hasShootoutEvents(match.events);
+    const homePenaltyScore =
+      updateMatchDto.homePenaltyScore !== undefined
+        ? updateMatchDto.homePenaltyScore
+        : preserveStoredPenalty
+          ? match.homePenaltyScore
+          : null;
+    const awayPenaltyScore =
+      updateMatchDto.awayPenaltyScore !== undefined
+        ? updateMatchDto.awayPenaltyScore
+        : preserveStoredPenalty
+          ? match.awayPenaltyScore
+          : null;
     // Historical JSON matches can have a final score without event details.
     // An empty events array must not recalculate that score as 0:0.
     const outcome =
       events && hasOutcomeEvents(events)
-        ? calculateMatchOutcome(events)
+        ? calculateMatchOutcome(events, homePenaltyScore, awayPenaltyScore)
         : resolveMatchOutcome(
             updateMatchDto.homeScore ?? match.homeScore,
             updateMatchDto.awayScore ?? match.awayScore,
-            match.homePenaltyScore,
-            match.awayPenaltyScore,
+            homePenaltyScore,
+            awayPenaltyScore,
           );
     const winnerTeamId =
       outcome.winnerTeamType === 'home'

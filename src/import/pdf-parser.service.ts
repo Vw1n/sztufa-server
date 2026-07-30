@@ -193,9 +193,13 @@ export class PdfParserService {
       'pdf.worker.js',
       'pdf.worker.mjs',
       'cannot find module',
+      'cannot find package',
       'module not found',
       'failed to import',
       'failed to fetch dynamically imported module',
+      'dommatrix is not defined',
+      'imagedata is not defined',
+      'path2d is not defined',
     ].some((fragment) => normalized.includes(fragment));
   }
 

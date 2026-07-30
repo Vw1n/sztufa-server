@@ -29,6 +29,9 @@ interface NormalizedEvent {
   eventId: string;
   eventTime: string;
   eventType: string;
+  phase: 'REGULAR' | 'SHOOTOUT';
+  shootoutRound: number | null;
+  shootoutOrder: number | null;
   teamType: 'home' | 'away';
   teamName: string;
   playerName: string | null;
@@ -156,6 +159,14 @@ const DEFAULT_LOCATION = '深圳技术大学足球场';
 const UNKNOWN_JERSEY = '未记录';
 
 const HISTORY_EVENT_TYPES: Record<string, string> = {
+  goal: 'goal',
+  penalty: 'penalty',
+  own_goal: 'own_goal',
+  yellow_card: 'yellow_card',
+  red_card: 'red_card',
+  penalty_miss: 'penalty_miss',
+  penalty_shootout_goal: 'penalty_shootout_goal',
+  penalty_shootout_miss: 'penalty_shootout_miss',
   进球: 'goal',
   '进球(点球)': 'penalty',
   乌龙: 'own_goal',
@@ -164,6 +175,10 @@ const HISTORY_EVENT_TYPES: Record<string, string> = {
   红牌: 'red_card',
   失点: 'penalty_miss',
   点球罚丢: 'penalty_miss',
+  点球大战罚中: 'penalty_shootout_goal',
+  点球大战罚失: 'penalty_shootout_miss',
+  罚中: 'penalty_shootout_goal',
+  罚失: 'penalty_shootout_miss',
 };
 
 const asRecord = (value: unknown): JsonRecord | null =>
@@ -564,7 +579,9 @@ export class ImportService {
               matchId: match.id,
               eventTime: event.eventTime,
               eventType: event.eventType,
-              phase: 'REGULAR',
+              phase: event.phase,
+              shootoutRound: event.shootoutRound,
+              shootoutOrder: event.shootoutOrder,
               description: [event.playerName, event.eventType].filter(Boolean).join(' '),
               teamType: event.teamType,
               playerId,
@@ -982,23 +999,45 @@ export class ImportService {
 
       this.registerTeam(normalized, homeTeam, seasonName);
       this.registerTeam(normalized, awayTeam, seasonName);
+      const penalty = asRecord(match.penaltyShootout);
+      const regularEvents = Array.isArray(match.events) ? match.events : [];
+      const shootoutEvents = Array.isArray(penalty?.events)
+        ? penalty.events
+        : Array.isArray(penalty?.kicks)
+          ? penalty.kicks
+          : [];
       const events: NormalizedEvent[] = [];
-      for (const [index, eventValue] of (Array.isArray(match.events)
-        ? match.events
-        : []
-      ).entries()) {
+      for (const [index, eventValue] of [...regularEvents, ...shootoutEvents].entries()) {
         const event = asRecord(eventValue);
         const rawType = text(event?.eventType);
-        const mappedType = rawType ? HISTORY_EVENT_TYPES[rawType] : null;
+        const fromShootout = index >= regularEvents.length;
+        const scored = event?.scored;
+        const mappedType = rawType
+          ? HISTORY_EVENT_TYPES[rawType]
+          : fromShootout && typeof scored === 'boolean'
+            ? scored
+              ? 'penalty_shootout_goal'
+              : 'penalty_shootout_miss'
+            : null;
         const teamType = event?.teamType;
         if (!event || !mappedType || (teamType !== 'home' && teamType !== 'away')) {
           normalized.warnings.push(`${seasonName}/${gameId}: 跳过无法识别的第 ${index + 1} 条事件`);
           continue;
         }
+        const isShootout = fromShootout || mappedType.startsWith('penalty_shootout_');
+        const shootoutOrder = isShootout
+          ? integer(event.shootoutOrder ?? event.order) ||
+            events.filter((item) => item.phase === 'SHOOTOUT').length + 1
+          : null;
         events.push({
           eventId: text(event.eventId) || `${key}:${index + 1}`,
           eventTime: text(event.time) || '未记录',
           eventType: mappedType,
+          phase: isShootout ? 'SHOOTOUT' : 'REGULAR',
+          shootoutRound: isShootout
+            ? integer(event.shootoutRound ?? event.round) || Math.ceil(shootoutOrder! / 2)
+            : null,
+          shootoutOrder,
           teamType,
           teamName: text(event.teamName) || (teamType === 'home' ? homeTeam : awayTeam),
           playerName: text(event.playerName),
@@ -1006,7 +1045,6 @@ export class ImportService {
         });
       }
 
-      const penalty = asRecord(match.penaltyShootout);
       normalized.matches.set(key, {
         key,
         legacyGameId: `history:${stableHash(key)}`,

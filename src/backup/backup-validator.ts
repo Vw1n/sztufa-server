@@ -137,32 +137,58 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
     }
   };
 
-  validateDatesInRows(data.tables.Match, 'Match', [
-    'matchDate',
-    'createdAt',
-    'updatedAt',
-    'deletedAt',
-  ]);
-  validateDatesInRows(data.tables.News, 'News', [
-    'publishedAt',
-    'createdAt',
-    'updatedAt',
-    'deletedAt',
-  ]);
-  validateDatesInRows(data.tables.AuditLog, 'AuditLog', ['createdAt']);
-  validateDatesInRows(data.tables.HistoryImportBatch, 'HistoryImportBatch', [
-    'createdAt',
-    'undoneAt',
-  ]);
+  const dateFieldsMap: Record<string, string[]> = {
+    User: ['createdAt', 'updatedAt'],
+    Season: ['createdAt', 'updatedAt'],
+    Team: ['createdAt', 'updatedAt', 'deletedAt'],
+    Player: ['createdAt', 'updatedAt', 'deletedAt'],
+    Match: ['matchDate', 'createdAt', 'updatedAt', 'deletedAt'],
+    Prediction: ['submittedAt', 'settledAt', 'createdAt', 'updatedAt'],
+    Goal: ['createdAt'],
+    MatchEvent: ['createdAt'],
+    News: ['publishedAt', 'createdAt', 'updatedAt', 'deletedAt'],
+    AuditLog: ['createdAt'],
+    SeasonTeamProfile: ['createdAt', 'updatedAt'],
+    HistoryImportBatch: ['createdAt', 'undoneAt'],
+    SeasonDeletionApproval: ['createdAt'],
+    SeasonTeamPlayer: ['createdAt'],
+    SeasonGroupTeam: ['createdAt'],
+    PdfImportBatch: [
+      'expiresAt',
+      'commitStartedAt',
+      'committedAt',
+      'failedAt',
+      'createdAt',
+      'updatedAt',
+    ],
+  };
+
+  for (const [tableName, fields] of Object.entries(dateFieldsMap)) {
+    if (data.tables[tableName]) {
+      validateDatesInRows(data.tables[tableName], tableName, fields);
+    }
+  }
 
   const teamIds = new Set((data.tables.Team || []).map((t: any) => t.id));
   const seasonIds = new Set((data.tables.Season || []).map((s: any) => s.id));
   const userIds = new Set((data.tables.User || []).map((u: any) => u.id));
   const matchIds = new Set((data.tables.Match || []).map((m: any) => m.id));
+  const playerIds = new Set((data.tables.Player || []).map((p: any) => p.id));
+
+  for (const u of data.tables.User || []) {
+    if (u.teamId && !teamIds.has(u.teamId)) {
+      throw new BadRequestException(`User 行 ${u.id} 引用了不存在的球队 ID: ${u.teamId}`);
+    }
+  }
 
   for (const p of data.tables.Player || []) {
     if (p.teamId && !teamIds.has(p.teamId)) {
       throw new BadRequestException(`Player 行 ${p.id} 引用了不存在的球队 ID: ${p.teamId}`);
+    }
+    if (p.suspendedAtMatchId && !matchIds.has(p.suspendedAtMatchId)) {
+      throw new BadRequestException(
+        `Player 行 ${p.id} 引用了不存在的停赛比赛 ID: ${p.suspendedAtMatchId}`,
+      );
     }
   }
 
@@ -175,6 +201,11 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
     }
     if (m.seasonId && !seasonIds.has(m.seasonId)) {
       throw new BadRequestException(`Match 行 ${m.id} 引用了不存在的赛季 ID: ${m.seasonId}`);
+    }
+    if (m.mvpPlayerId && !playerIds.has(m.mvpPlayerId)) {
+      throw new BadRequestException(
+        `Match 行 ${m.id} 引用了不存在的 MVP 球员 ID: ${m.mvpPlayerId}`,
+      );
     }
   }
 
@@ -190,6 +221,121 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
       );
     }
   }
+
+  for (const g of data.tables.Goal || []) {
+    if (g.matchId && !matchIds.has(g.matchId)) {
+      throw new BadRequestException(`Goal 行 ${g.id} 引用了不存在的比赛 ID: ${g.matchId}`);
+    }
+    if (g.playerId && !playerIds.has(g.playerId)) {
+      throw new BadRequestException(`Goal 行 ${g.id} 引用了不存在的球员 ID: ${g.playerId}`);
+    }
+  }
+
+  for (const e of data.tables.MatchEvent || []) {
+    if (e.matchId && !matchIds.has(e.matchId)) {
+      throw new BadRequestException(`MatchEvent 行 ${e.id} 引用了不存在的比赛 ID: ${e.matchId}`);
+    }
+    if (e.playerId && !playerIds.has(e.playerId)) {
+      throw new BadRequestException(`MatchEvent 行 ${e.id} 引用了不存在的球员 ID: ${e.playerId}`);
+    }
+    if (e.subPlayerId && !playerIds.has(e.subPlayerId)) {
+      throw new BadRequestException(
+        `MatchEvent 行 ${e.id} 引用了不存在的换下球员 ID: ${e.subPlayerId}`,
+      );
+    }
+    if (e.assistPlayerId && !playerIds.has(e.assistPlayerId)) {
+      throw new BadRequestException(
+        `MatchEvent 行 ${e.id} 引用了不存在的助攻球员 ID: ${e.assistPlayerId}`,
+      );
+    }
+  }
+
+  for (const l of data.tables.MatchLineup || []) {
+    if (l.matchId && !matchIds.has(l.matchId)) {
+      throw new BadRequestException(`MatchLineup 引用了不存在的比赛 ID: ${l.matchId}`);
+    }
+    if (l.playerId && !playerIds.has(l.playerId)) {
+      throw new BadRequestException(`MatchLineup 引用了不存在的球员 ID: ${l.playerId}`);
+    }
+  }
+
+  for (const stp of data.tables.SeasonTeamProfile || []) {
+    if (stp.seasonId && !seasonIds.has(stp.seasonId)) {
+      throw new BadRequestException(`SeasonTeamProfile 引用了不存在的赛季 ID: ${stp.seasonId}`);
+    }
+    if (stp.teamId && !teamIds.has(stp.teamId)) {
+      throw new BadRequestException(`SeasonTeamProfile 引用了不存在的球队 ID: ${stp.teamId}`);
+    }
+  }
+
+  for (const stp of data.tables.SeasonTeamPlayer || []) {
+    if (stp.seasonId && !seasonIds.has(stp.seasonId)) {
+      throw new BadRequestException(`SeasonTeamPlayer 引用了不存在的赛季 ID: ${stp.seasonId}`);
+    }
+    if (stp.teamId && !teamIds.has(stp.teamId)) {
+      throw new BadRequestException(`SeasonTeamPlayer 引用了不存在的球队 ID: ${stp.teamId}`);
+    }
+    if (stp.playerId && !playerIds.has(stp.playerId)) {
+      throw new BadRequestException(`SeasonTeamPlayer 引用了不存在的球员 ID: ${stp.playerId}`);
+    }
+  }
+
+  for (const sgt of data.tables.SeasonGroupTeam || []) {
+    if (sgt.seasonId && !seasonIds.has(sgt.seasonId)) {
+      throw new BadRequestException(`SeasonGroupTeam 引用了不存在的赛季 ID: ${sgt.seasonId}`);
+    }
+    if (sgt.teamId && !teamIds.has(sgt.teamId)) {
+      throw new BadRequestException(`SeasonGroupTeam 引用了不存在的球队 ID: ${sgt.teamId}`);
+    }
+  }
+
+  for (const sda of data.tables.SeasonDeletionApproval || []) {
+    if (sda.seasonId && !seasonIds.has(sda.seasonId)) {
+      throw new BadRequestException(
+        `SeasonDeletionApproval 引用了不存在的赛季 ID: ${sda.seasonId}`,
+      );
+    }
+    if (sda.approverId && !userIds.has(sda.approverId)) {
+      throw new BadRequestException(
+        `SeasonDeletionApproval 引用了不存在的审批人 ID: ${sda.approverId}`,
+      );
+    }
+  }
+
+  const validateCompositeUniqueness = (rows: any[], tableName: string, fields: string[]) => {
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const key = fields.map((f) => String(row[f])).join('::');
+      if (seen.has(key)) {
+        throw new BadRequestException(
+          `表 ${tableName} 包含重复的复合唯一键 [${fields.join(', ')}]: ${key}`,
+        );
+      }
+      seen.add(key);
+    }
+  };
+
+  validateCompositeUniqueness(data.tables.Prediction || [], 'Prediction', ['userId', 'matchId']);
+  validateCompositeUniqueness(data.tables.MatchLineup || [], 'MatchLineup', [
+    'matchId',
+    'playerId',
+  ]);
+  validateCompositeUniqueness(data.tables.SeasonTeamProfile || [], 'SeasonTeamProfile', [
+    'seasonId',
+    'teamId',
+  ]);
+  validateCompositeUniqueness(data.tables.SeasonTeamPlayer || [], 'SeasonTeamPlayer', [
+    'seasonId',
+    'playerId',
+  ]);
+  validateCompositeUniqueness(data.tables.SeasonGroupTeam || [], 'SeasonGroupTeam', [
+    'seasonId',
+    'teamId',
+  ]);
+  validateCompositeUniqueness(data.tables.SeasonDeletionApproval || [], 'SeasonDeletionApproval', [
+    'seasonId',
+    'approverId',
+  ]);
 }
 
 export function classifyBackupContent(

@@ -36,6 +36,12 @@ describe('PdfParserService', () => {
         "Cannot find module 'pdfjs-dist/legacy/build/pdf.worker.mjs'",
       ),
     ).toBe(true);
+    expect(
+      (service as any).isPdfRuntimeConfigurationError(
+        "Cannot find package '@napi-rs/canvas' imported from pdf.mjs",
+      ),
+    ).toBe(true);
+    expect((service as any).isPdfRuntimeConfigurationError('DOMMatrix is not defined')).toBe(true);
     expect((service as any).isPdfRuntimeConfigurationError('Invalid PDF structure')).toBe(false);
   });
 

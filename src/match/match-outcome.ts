@@ -18,6 +18,13 @@ export const hasOutcomeEvents = (events: MatchEventLike[]): boolean =>
     ].includes(event.eventType as MatchEventType),
   );
 
+export const hasShootoutEvents = (events: MatchEventLike[]): boolean =>
+  events.some(
+    (event) =>
+      event.eventType === MatchEventType.PenaltyShootoutGoal ||
+      event.eventType === MatchEventType.PenaltyShootoutMiss,
+  );
+
 export interface MatchOutcome {
   homeScore: number;
   awayScore: number;
@@ -92,7 +99,11 @@ export const resolveMatchOutcome = (
   };
 };
 
-export const calculateMatchOutcome = (events: MatchEventLike[]): MatchOutcome => {
+export const calculateMatchOutcome = (
+  events: MatchEventLike[],
+  aggregateHomePenaltyScore: number | null = null,
+  aggregateAwayPenaltyScore: number | null = null,
+): MatchOutcome => {
   const regularScore = { home: 0, away: 0 };
   const penaltyScore = { home: 0, away: 0 };
   let hasShootout = false;
@@ -114,15 +125,17 @@ export const calculateMatchOutcome = (events: MatchEventLike[]): MatchOutcome =>
     }
   }
 
-  if (hasShootout && regularScore.home !== regularScore.away) {
+  const hasAggregateShootout =
+    aggregateHomePenaltyScore !== null && aggregateAwayPenaltyScore !== null;
+  if ((hasShootout || hasAggregateShootout) && regularScore.home !== regularScore.away) {
     throw new BadRequestException('常规/加时比分未打平时不能录入点球大战');
   }
 
   return resolveMatchOutcome(
     regularScore.home,
     regularScore.away,
-    hasShootout ? penaltyScore.home : null,
-    hasShootout ? penaltyScore.away : null,
+    hasShootout ? penaltyScore.home : hasAggregateShootout ? aggregateHomePenaltyScore : null,
+    hasShootout ? penaltyScore.away : hasAggregateShootout ? aggregateAwayPenaltyScore : null,
     hasExtraTime,
   );
 };

@@ -40,6 +40,28 @@ describe('calculateMatchOutcome', () => {
     });
   });
 
+  it('combines regular events with an aggregate imported shootout score', () => {
+    const outcome = calculateMatchOutcome(
+      [
+        { eventType: 'goal', teamType: 'home' },
+        { eventType: 'goal', teamType: 'home' },
+        { eventType: 'goal', teamType: 'away' },
+        { eventType: 'goal', teamType: 'away' },
+      ],
+      4,
+      5,
+    );
+
+    expect(outcome).toEqual({
+      homeScore: 2,
+      awayScore: 2,
+      homePenaltyScore: 4,
+      awayPenaltyScore: 5,
+      winnerTeamType: 'away',
+      decidedBy: 'PENALTIES',
+    });
+  });
+
   it('rejects a shootout when the full-time score is not level', () => {
     expect(() =>
       calculateMatchOutcome([

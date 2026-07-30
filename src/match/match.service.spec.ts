@@ -132,6 +132,47 @@ describe('MatchService.update', () => {
     );
   });
 
+  it('preserves an aggregate imported shootout score when regular events are edited', async () => {
+    const { service, prisma, matchQuery } = createService();
+    const regularEvents = [
+      { eventType: 'goal', teamType: 'home', playerId: 'home-1' },
+      { eventType: 'goal', teamType: 'home', playerId: 'home-2' },
+      { eventType: 'goal', teamType: 'away', playerId: 'away-1' },
+      { eventType: 'goal', teamType: 'away', playerId: 'away-2' },
+    ];
+    const importedFinal = {
+      ...originalMatch,
+      homeScore: 2,
+      awayScore: 2,
+      homePenaltyScore: 4,
+      awayPenaltyScore: 5,
+      events: regularEvents,
+    };
+    prisma.match.findUnique
+      .mockResolvedValueOnce(importedFinal)
+      .mockResolvedValueOnce(importedFinal);
+    prisma.match.update.mockResolvedValue(importedFinal);
+    matchQuery.findDetails.mockResolvedValue(importedFinal);
+
+    await service.update(
+      'match-1',
+      { homeScore: 2, awayScore: 2, events: regularEvents as any },
+      'admin',
+    );
+
+    expect(prisma.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          homeScore: 2,
+          awayScore: 2,
+          homePenaltyScore: 4,
+          awayPenaltyScore: 5,
+          decidedBy: 'PENALTIES',
+        }),
+      }),
+    );
+  });
+
   it('validates replacement lineups against the new teams', async () => {
     const { service, prisma, matchQuery, matchDataWriter } = createService();
     const updatedMatch = {

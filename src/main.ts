@@ -5,6 +5,7 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { PrismaClientExceptionFilter } from './prisma/prisma-client-exception.filter';
+import { createSingleFlightInitializer } from './serverless/single-flight-initializer';
 import express from 'express';
 
 function validateStartupConfig() {
@@ -36,13 +37,9 @@ function validateStartupConfig() {
 }
 
 const server = express();
-let appInstance = null;
 
-async function createApp() {
+async function initializeApp() {
   validateStartupConfig();
-  if (appInstance) {
-    return appInstance;
-  }
 
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
     logger: ['error', 'warn', 'log'],
@@ -132,9 +129,13 @@ async function createApp() {
   }
 
   await app.init();
-  appInstance = app;
   return app;
 }
+
+// Vercel 冷启动时图片请求会并发进入同一个函数实例。所有请求必须等待
+// 同一次 Nest 初始化完成，否则多个应用会同时向 Express 注册路由，
+// ThrottlerGuard 等生命周期组件可能在 onModuleInit 前被调用。
+const createApp = createSingleFlightInitializer(initializeApp);
 
 async function bootstrap() {
   const app = await createApp();

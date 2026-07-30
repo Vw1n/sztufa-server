@@ -29,6 +29,12 @@ export const MAX_PDF_SIZE = 20 * 1024 * 1024; // 20MB
 export const MAX_PDF_PAGES = 50;
 export const PARSE_TIMEOUT_MS = 15000; // 15s 超时
 
+// 保留原生 import()，避免 CommonJS 编译把 .mjs 加载改写成 require()。
+// Node 20 不允许 require() 加载 pdfjs-dist 的 ESM 入口。
+const importEsmModule = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<any>;
+
 @Injectable()
 export class PdfParserService {
   private readonly logger = new Logger(PdfParserService.name);
@@ -74,7 +80,7 @@ export class PdfParserService {
     let doc: any;
     let pdfjs: any;
     try {
-      pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      pdfjs = await this.loadPdfJs();
       const data = new Uint8Array(file.buffer);
       doc = await pdfjs.getDocument({ data }).promise;
     } catch (err: any) {
@@ -184,6 +190,10 @@ export class PdfParserService {
     }
 
     return { teams, extractedImages: pageImages };
+  }
+
+  private loadPdfJs(): Promise<any> {
+    return importEsmModule('pdfjs-dist/legacy/build/pdf.mjs');
   }
 
   private isPdfRuntimeConfigurationError(message: string): boolean {

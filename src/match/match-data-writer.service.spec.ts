@@ -65,6 +65,36 @@ describe('MatchDataWriterService', () => {
     });
   });
 
+  it('stores an own goal without an associated player', async () => {
+    const tx: any = { goal: { createMany: jest.fn() } };
+    const service = new MatchDataWriterService();
+
+    await service.writeGoals(
+      tx,
+      'match-1',
+      [
+        {
+          eventType: 'own_goal',
+          playerId: null,
+          playerName: null,
+          teamType: 'home',
+          eventTime: '10',
+        },
+      ],
+      undefined,
+    );
+
+    expect(tx.goal.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          playerId: null,
+          playerName: '未记录球员 (乌龙)',
+          teamType: 'away',
+        }),
+      ],
+    });
+  });
+
   it('stores structured shootout fields without creating a regular goal', async () => {
     const tx: any = {
       matchEvent: { createMany: jest.fn() },

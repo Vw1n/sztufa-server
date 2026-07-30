@@ -116,7 +116,7 @@ export class MatchDataWriterService {
           matchId,
           playerName:
             goal.eventType === 'own_goal'
-              ? `${goal.playerName} (乌龙)`
+              ? `${goal.playerName || '未记录球员'} (乌龙)`
               : goal.eventType === 'penalty'
                 ? `${goal.playerName} (点球)`
                 : goal.playerName || '',

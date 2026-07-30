@@ -138,10 +138,19 @@ export class PdfImportService {
     const uploadedImageMap = new Map<string, string>();
 
     try {
-      for (const img of extractedImages) {
-        const tempKey = `${tempPrefix}${img.id}.webp`;
-        const publicUrl = await this.uploadService.uploadBuffer(img.buffer, tempKey, 'image/webp');
-        uploadedImageMap.set(img.id, publicUrl);
+      const uploadedImages = await Promise.all(
+        extractedImages.map(async (img) => {
+          const tempKey = `${tempPrefix}${img.id}.webp`;
+          const publicUrl = await this.uploadService.uploadBuffer(
+            img.buffer,
+            tempKey,
+            'image/webp',
+          );
+          return [img.id, publicUrl] as const;
+        }),
+      );
+      for (const [imageId, publicUrl] of uploadedImages) {
+        uploadedImageMap.set(imageId, publicUrl);
       }
 
       let hasLowConfidence = false;

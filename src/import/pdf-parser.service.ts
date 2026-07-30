@@ -29,6 +29,12 @@ export const MAX_PDF_SIZE = 20 * 1024 * 1024; // 20MB
 export const MAX_PDF_PAGES = 50;
 export const PARSE_TIMEOUT_MS = 15000; // 15s 超时
 
+// 保留原生 import()，避免 CommonJS 编译把 .mjs 加载改写成 require()。
+// Node 20 不允许 require() 加载 pdfjs-dist 的 ESM 入口。
+const importEsmModule = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<any>;
+
 @Injectable()
 export class PdfParserService {
   private readonly logger = new Logger(PdfParserService.name);
@@ -74,15 +80,13 @@ export class PdfParserService {
     let doc: any;
     let pdfjs: any;
     try {
-      pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      pdfjs = await this.loadPdfJs();
       const data = new Uint8Array(file.buffer);
       doc = await pdfjs.getDocument({ data }).promise;
     } catch (err: any) {
       this.logger.error('PDF 解析失败或文件已损坏', err);
-      if (
-        String(err?.message || err).includes('Setting up fake worker failed') ||
-        String(err?.message || err).includes('pdf.worker.js')
-      ) {
+      const errorMessage = String(err?.message || err);
+      if (this.isPdfRuntimeConfigurationError(errorMessage)) {
         throw new ServiceUnavailableException('PDF 解析服务部署配置异常，请稍后重试或联系管理员');
       }
       throw new UnprocessableEntityException('PDF 文件损坏或被加密，无法解密解析');
@@ -186,6 +190,27 @@ export class PdfParserService {
     }
 
     return { teams, extractedImages: pageImages };
+  }
+
+  private loadPdfJs(): Promise<any> {
+    return importEsmModule('pdfjs-dist/legacy/build/pdf.mjs');
+  }
+
+  private isPdfRuntimeConfigurationError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return [
+      'setting up fake worker failed',
+      'pdf.worker.js',
+      'pdf.worker.mjs',
+      'cannot find module',
+      'cannot find package',
+      'module not found',
+      'failed to import',
+      'failed to fetch dynamically imported module',
+      'dommatrix is not defined',
+      'imagedata is not defined',
+      'path2d is not defined',
+    ].some((fragment) => normalized.includes(fragment));
   }
 
   private multiplyMatrix(m1: number[], m2: number[]): number[] {

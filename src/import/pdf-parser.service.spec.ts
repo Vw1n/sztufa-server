@@ -30,6 +30,21 @@ describe('PdfParserService', () => {
     await expect(service.parseRegistrationPdf(hugeFile)).rejects.toThrow('PDF 文件大小超过限制');
   });
 
+  it('应该把 PDF.js worker 缺失识别为部署配置错误', () => {
+    expect(
+      (service as any).isPdfRuntimeConfigurationError(
+        "Cannot find module 'pdfjs-dist/legacy/build/pdf.worker.mjs'",
+      ),
+    ).toBe(true);
+    expect(
+      (service as any).isPdfRuntimeConfigurationError(
+        "Cannot find package '@napi-rs/canvas' imported from pdf.mjs",
+      ),
+    ).toBe(true);
+    expect((service as any).isPdfRuntimeConfigurationError('DOMMatrix is not defined')).toBe(true);
+    expect((service as any).isPdfRuntimeConfigurationError('Invalid PDF structure')).toBe(false);
+  });
+
   it('应该对文本字符极少的纯扫描件弹出友善拦截提示', async () => {
     const validPdfMagicBuffer = Buffer.from('%PDF-1.4\n%fake pdf header for scanned document test');
     const scannedFile = {

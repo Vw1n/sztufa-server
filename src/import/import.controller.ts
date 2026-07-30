@@ -144,18 +144,21 @@ export class ImportController {
   // ==================== PDF 报名表导入两阶段 API ====================
 
   @Post('pdf/upload-url')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '获取 PDF 直传 R2/S3 的预签名地址（绕过 Serverless 请求体限制）' })
   async createPdfUploadUrl(@Body() dto: PdfUploadUrlRequestDto, @Req() req: any) {
     return this.pdfImportService.createPdfUploadUrl(req.user?.username || 'admin', dto);
   }
 
   @Post('pdf/preview-uploaded')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '解析已经通过预签名地址直传至 R2/S3 的 PDF' })
   async previewUploadedPdf(@Body() dto: PdfPreviewUploadedRequestDto, @Req() req: any) {
     return this.pdfImportService.previewUploadedPdf(dto, req.user?.username || 'admin');
   }
 
   @Post('pdf/preview')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '预检与智能解析官方 PDF 报名表（生成置信度及临时大头照）' })
   @ApiConsumes('multipart/form-data')
   @ApiBody(PDF_SINGLE_FILE_SCHEMA)
@@ -171,6 +174,7 @@ export class ImportController {
   }
 
   @Post('pdf/:batchId/commit')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '提交由管理员二次确认后的 PDF 导入批次（事务写入数据库）' })
   async commitPdfBatch(
     @Param('batchId') batchId: string,
@@ -181,6 +185,7 @@ export class ImportController {
   }
 
   @Post('pdf/:batchId/photo')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '为特定 PDF 导入批次单独替换上传临时大头照' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file', JSON_UPLOAD_OPTIONS))
@@ -212,12 +217,14 @@ export class ImportController {
   }
 
   @Post('pdf/:batchId/cancel')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '主动取消 PDF 导入批次（物理清理临时大头照）' })
   async cancelPdfBatch(@Param('batchId') batchId: string, @Req() req: any) {
     return this.pdfImportService.cancelPdfBatch(batchId, req.user?.username || 'admin');
   }
 
   @Post('pdf/recovery')
+  @SkipThrottle({ default: true })
   @ApiOperation({ summary: '受保护的维护触发接口：清理与恢复僵死的 PDF 导入批次' })
   async recoverStuckPdfBatches() {
     return this.pdfImportService.recoverStuckBatches();

@@ -24,11 +24,6 @@ import { PredictionModule } from './prediction/prediction.module';
         ttl: 60000,
         limit: 60,
       },
-      {
-        name: 'strict',
-        ttl: 60000,
-        limit: 5,
-      },
     ]),
     PrismaModule,
     AuthModule,

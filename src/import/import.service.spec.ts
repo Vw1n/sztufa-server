@@ -6,7 +6,7 @@ const counts = {
   teams: 2,
   players: 1,
   matches: 1,
-  events: 1,
+  events: 2,
 };
 
 const historyDocument = {
@@ -35,7 +35,21 @@ const historyDocument = {
       awayTeam: '乙队',
       homeScore: 1,
       awayScore: 0,
-      penaltyShootout: null,
+      penaltyShootout: {
+        homeScore: null,
+        awayScore: null,
+        kicks: [
+          {
+            eventId: 'shootout-1',
+            teamType: 'home',
+            playerName: '张三',
+            jerseyNumber: '9',
+            scored: true,
+            round: 1,
+            order: 1,
+          },
+        ],
+      },
       events: [
         {
           eventId: 'event-1',
@@ -144,7 +158,7 @@ describe('ImportService', () => {
       teams: 2,
       players: 2,
       matches: 2,
-      events: 2,
+      events: 4,
     });
     const playerQuery = prisma.player.findMany.mock.calls[0][0];
     expect(new Set(playerQuery.where.legacyKey.in).size).toBe(2);
@@ -247,6 +261,16 @@ describe('ImportService', () => {
       }),
     });
     expect(tx.matchEvent.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.matchEvent.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'penalty_shootout_goal',
+          phase: 'SHOOTOUT',
+          shootoutRound: 1,
+          shootoutOrder: 1,
+        }),
+      ]),
+    });
     expect(tx.goal.createMany).toHaveBeenCalledTimes(1);
     expect(tx.historyImportBatch.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

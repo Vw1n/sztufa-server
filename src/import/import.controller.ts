@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
 import { ImportService } from './import.service';
 import { PdfImportService } from './pdf-import.service';
@@ -196,6 +197,7 @@ export class ImportController {
 
   @Post('pdf/:batchId/asset')
   @ApiOperation({ summary: '读取当前 PDF 预览批次中的临时图片，用于回填录入表单' })
+  @SkipThrottle({ default: true })
   async getPdfBatchAsset(
     @Param('batchId') batchId: string,
     @Body() dto: PdfAssetRequestDto,

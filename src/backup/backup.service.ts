@@ -207,37 +207,80 @@ export class BackupService {
   }
 
   async listBackups(): Promise<BackupMetadata[]> {
+    const allFiles: any[] = [];
+    let continuationToken: string | undefined = undefined;
+    let isTruncated = true;
+    let pageCount = 0;
+    const maxPages = 100;
+    const seenTokens = new Set<string>();
+
     try {
-      const privateRes = await this.s3Client.send(
-        new ListObjectsV2Command({
+      while (isTruncated) {
+        if (pageCount >= maxPages) {
+          console.error(
+            `[BackupService] listBackups 达到最大允许页数限制 (${maxPages} 页)，且 IsTruncated 仍为 true`,
+          );
+          throw new ServiceUnavailableException(
+            '备份列表拉取超出最大允许页数限制，对象存储数据不完整',
+          );
+        }
+
+        pageCount++;
+        const command: ListObjectsV2Command = new ListObjectsV2Command({
           Bucket: process.env.R2_BUCKET_NAME,
           Prefix: 'private-backups/database/',
-        }),
-      );
-
-      const files = privateRes.Contents || [];
-
-      return files
-        .filter((file) => file.Key && file.Key.endsWith('.json'))
-        .map((file) => {
-          const key = file.Key || '';
-          const filename = key.replace('private-backups/database/', '');
-          return {
-            key,
-            filename,
-            size: file.Size || 0,
-            lastModified: file.LastModified,
-          };
-        })
-        .sort((a, b) => {
-          const timeA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
-          const timeB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-          return timeB - timeA;
+          ContinuationToken: continuationToken,
         });
+
+        const response = await this.s3Client.send(command);
+        if (response.Contents && response.Contents.length > 0) {
+          allFiles.push(...response.Contents);
+        }
+
+        isTruncated = !!response.IsTruncated;
+        const nextToken = response.NextContinuationToken;
+
+        if (isTruncated) {
+          if (!nextToken) {
+            console.error(
+              '[BackupService] listBackups IsTruncated 为 true，但未返回 NextContinuationToken',
+            );
+            throw new ServiceUnavailableException('对象存储服务响应分页异常：缺少分页令牌');
+          }
+          if (seenTokens.has(nextToken)) {
+            console.error(`[BackupService] listBackups 检测到重复的分页令牌: ${nextToken}`);
+            throw new ServiceUnavailableException('对象存储服务响应分页异常：检测到死循环分页令牌');
+          }
+          seenTokens.add(nextToken);
+        }
+
+        continuationToken = nextToken;
+      }
     } catch (err) {
+      if (err instanceof ServiceUnavailableException) {
+        throw err;
+      }
       console.error('获取 R2 备份列表失败:', err);
-      return [];
+      throw new ServiceUnavailableException('无法从对象存储获取备份文件列表');
     }
+
+    return allFiles
+      .filter((file) => file.Key && file.Key.endsWith('.json'))
+      .map((file) => {
+        const key = file.Key || '';
+        const filename = key.replace('private-backups/database/', '');
+        return {
+          key,
+          filename,
+          size: file.Size || 0,
+          lastModified: file.LastModified,
+        };
+      })
+      .sort((a, b) => {
+        const timeA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+        const timeB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+        return timeB - timeA;
+      });
   }
 
   async getPresignedDownloadUrl(key: string): Promise<string> {

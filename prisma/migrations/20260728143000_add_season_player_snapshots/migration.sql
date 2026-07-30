@@ -1,7 +1,17 @@
+CREATE TABLE IF NOT EXISTS "SeasonTeamPlayer" (
+    "id" TEXT NOT NULL,
+    "seasonId" TEXT NOT NULL,
+    "teamId" TEXT NOT NULL,
+    "playerId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SeasonTeamPlayer_pkey" PRIMARY KEY ("id")
+);
+
 ALTER TABLE "SeasonTeamPlayer"
-ADD COLUMN "playerName" TEXT,
-ADD COLUMN "jerseyNumber" TEXT,
-ADD COLUMN "playerPhoto" TEXT;
+ADD COLUMN IF NOT EXISTS "playerName" TEXT,
+ADD COLUMN IF NOT EXISTS "jerseyNumber" TEXT,
+ADD COLUMN IF NOT EXISTS "playerPhoto" TEXT;
 
 UPDATE "SeasonTeamPlayer" AS roster
 SET

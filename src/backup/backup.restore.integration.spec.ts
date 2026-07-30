@@ -428,38 +428,20 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       expect(restoredApproval?.seasonId).toBe('s1');
     });
 
-    it('当还原在 PostgreSQL 清库/写入事务末端触发模型唯一约束冲突时，整个 17 表事务必须完整回滚，全库 17 表快照摘要保持 100% 不变', async () => {
+    it('当还原在 PostgreSQL 清库/写入事务末端触发写入异常时，整个 17 表事务必须完整回滚，全库 17 表快照摘要保持 100% 不变', async () => {
       // 1. 确保已有合规测试数据
       await seedAll17Tables(testPrisma);
       const preFailSnapshot = await compute17TableSnapshot(testPrisma);
 
-      // 2. 构造一个能通过 validateBackupSchemaAndIntegrity 前置校验（各表计数正确、摘要正确），
-      // 但在事务写入末端附近的 MatchLineup 插入两条重复 [matchId, playerId] 导致 PostgreSQL 原生 MatchLineup_matchId_playerId_key 唯一约束冲突的数据包
+      // 2. 构造全量 100% 通过 validateBackupSchemaAndIntegrity 前置校验的合法备份数据包
       const tables: Record<string, any[]> = JSON.parse(JSON.stringify(preFailSnapshot.snapshot));
-      tables.MatchLineup = [
-        {
-          id: 'ml_dup1',
-          matchId: 'm1',
-          playerId: 'p1',
-          teamType: 'home',
-          lineupType: 'starting',
-        },
-        {
-          id: 'ml_dup2',
-          matchId: 'm1',
-          playerId: 'p1', // 重复 [matchId, playerId]，触发数据库原生 @@unique([matchId, playerId]) 冲突
-          teamType: 'home',
-          lineupType: 'substitute',
-        },
-      ];
-
       const tableCounts: Record<string, number> = {};
       for (const t of MANDATORY_BACKUP_TABLES) {
         tableCounts[t] = tables[t].length;
       }
 
       const checksum = crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex');
-      const conflictPayload = {
+      const validPayload = {
         formatVersion: '2.0',
         manifest: {
           checksumAlgorithm: 'sha256',
@@ -469,7 +451,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         tables,
       };
 
-      const jsonStr = JSON.stringify(conflictPayload);
+      const jsonStr = JSON.stringify(validPayload);
       jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
         if (command.constructor.name === 'GetObjectCommand') {
           return { Body: Readable.from([Buffer.from(jsonStr)]) } as any;
@@ -484,17 +466,35 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         .spyOn(service, 'createBackup')
         .mockResolvedValue({ key: 'private-backups/database/pre.json' } as any);
 
-      // 3. 执行 restoreBackup，由于在前几张表（User, Team, Player, Match...）都成功解绑并写入后，
-      // 在最后写入 PdfImportBatch 时触发唯一索引冲突，断言抛出异常
+      // 3. 监控 testPrisma.$transaction 确保真实进入数据库事务
+      let transactionEntered = false;
+      const originalTransaction = testPrisma.$transaction.bind(testPrisma);
+      jest.spyOn(testPrisma, '$transaction').mockImplementation(async (cb: any, options: any) => {
+        transactionEntered = true;
+        return originalTransaction(async (tx: any) => {
+          // 包装 tx.pdfImportBatch.createMany，在最后阶段抛出模拟数据库底层写入异常
+          const originalCreateMany = tx.pdfImportBatch.createMany.bind(tx.pdfImportBatch);
+          tx.pdfImportBatch.createMany = async (...args: any[]) => {
+            await originalCreateMany(...args);
+            throw new Error('[DB INTEGRATION TEST] 模拟数据库事务末端写入异常，触发 DB 事务回滚');
+          };
+          return cb(tx);
+        }, options);
+      });
+
+      // 4. 执行 restoreBackup，断言抛出事务末端异常
       await expect(
         service.restoreBackup(
           'admin',
           'private-backups/database/backup_conflict.json',
           'CONFIRM_RESTORE',
         ),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/模拟数据库事务末端写入异常/);
 
-      // 4. 断言 PostgreSQL 事务成功进行全表回滚：测算恢复失败后的全库 17 表快照摘要，必须与 preFailSnapshot 100% 深度相等！
+      // 5. 明确断言确实进入了 $transaction 事务
+      expect(transactionEntered).toBe(true);
+
+      // 6. 断言 PostgreSQL 事务成功进行全表回滚：测算恢复失败后的全库 17 表快照摘要，必须与 preFailSnapshot 100% 深度相等！
       const postFailSnapshot = await compute17TableSnapshot(testPrisma);
       expect(postFailSnapshot.hash).toBe(preFailSnapshot.hash);
       expect(postFailSnapshot.snapshot).toEqual(preFailSnapshot.snapshot);

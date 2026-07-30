@@ -47,6 +47,7 @@ model Player {
   yellowCards         Int     @default(0)
   redCards            Int     @default(0)
   suspendedAtMatchId  String?
+  suspendedAtMatch    Match?  @relation("PlayerSuspensionMatch", fields: [suspendedAtMatchId], references: [id], onDelete: SetNull)
   teamId              String
   team                Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   goals               Goal[]
@@ -88,6 +89,7 @@ model Match {
   season          Season?       @relation(fields: [seasonId], references: [id])
   mvpPlayerId     String?
   mvpPlayer       Player?       @relation("MatchMvpPlayer", fields: [mvpPlayerId], references: [id])
+  suspendedPlayers Player[]     @relation("PlayerSuspensionMatch")
   mvpPlayerName   String?
   lineups         MatchLineup[]
   stage           String        @default("LEAGUE") // LEAGUE, GROUP, KNOCKOUT

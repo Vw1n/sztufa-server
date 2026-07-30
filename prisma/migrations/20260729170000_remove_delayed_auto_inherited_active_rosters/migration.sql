@@ -1,3 +1,15 @@
+CREATE TABLE IF NOT EXISTS "SeasonGroupTeam" (
+    "id" TEXT NOT NULL,
+    "seasonId" TEXT NOT NULL,
+    "teamId" TEXT NOT NULL,
+    "groupName" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SeasonGroupTeam_pkey" PRIMARY KEY ("id")
+);
+
+ALTER TABLE "Match" ADD COLUMN IF NOT EXISTS "seasonId" TEXT;
+
 -- In production-compatible databases, defaults used by the season insert and
 -- the following roster createMany statement can differ by a fraction of a
 -- second. The earlier exact-timestamp cleanup therefore missed those rows.

@@ -7,6 +7,25 @@ import { resolveMatchOutcome } from '../match/match-outcome';
 
 type JsonRecord = Record<string, any>;
 
+const DEFAULT_IMPORT_TRANSACTION_TIMEOUT_MS = 240_000;
+const MAX_IMPORT_TRANSACTION_TIMEOUT_MS = 240_000;
+const IMPORT_TRANSACTION_MAX_WAIT_MS = 15_000;
+
+const getImportTransactionOptions = () => {
+  const configuredTimeout = Number.parseInt(
+    process.env.IMPORT_TRANSACTION_TIMEOUT_MS || '',
+    10,
+  );
+  const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? Math.min(configuredTimeout, MAX_IMPORT_TRANSACTION_TIMEOUT_MS)
+    : DEFAULT_IMPORT_TRANSACTION_TIMEOUT_MS;
+
+  return {
+    maxWait: IMPORT_TRANSACTION_MAX_WAIT_MS,
+    timeout,
+  };
+};
+
 interface NormalizedSeason {
   name: string;
 }
@@ -640,7 +659,7 @@ export class ImportService {
           },
         });
       },
-      { maxWait: 10_000, timeout: 60_000 },
+      getImportTransactionOptions(),
     );
 
     for (const seasonName of normalized.seasons.keys()) {
@@ -803,7 +822,7 @@ export class ImportService {
           tx,
         );
       },
-      { maxWait: 10_000, timeout: 60_000 },
+      getImportTransactionOptions(),
     );
 
     for (const seasonId of payload.affectedSeasonIds) {

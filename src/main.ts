@@ -41,6 +41,10 @@ const server = express();
 async function initializeApp() {
   validateStartupConfig();
 
+  const swaggerEnabled =
+    process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true';
+  const swaggerAssetOrigin = 'https://unpkg.com';
+
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
     logger: ['error', 'warn', 'log'],
   });
@@ -50,8 +54,17 @@ async function initializeApp() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            "'unsafe-eval'",
+            ...(swaggerEnabled ? [swaggerAssetOrigin] : []),
+          ],
+          styleSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            ...(swaggerEnabled ? [swaggerAssetOrigin] : []),
+          ],
           imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           connectSrc: ["'self'", 'https:'],
         },
@@ -79,6 +92,11 @@ async function initializeApp() {
     next();
   });
 
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   const allowedOrigins = new Set([
     'https://sztufa.xyz',
     'https://www.sztufa.xyz',
@@ -95,6 +113,7 @@ async function initializeApp() {
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://localhost:8080',
+    ...configuredOrigins,
   ]);
 
   app.enableCors({
@@ -110,7 +129,7 @@ async function initializeApp() {
     credentials: true,
   });
 
-  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true') {
+  if (swaggerEnabled) {
     const config = new DocumentBuilder()
       .setTitle('校园足球信息管理平台 API')
       .setDescription('校园足球信息管理平台后端服务接口文档')

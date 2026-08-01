@@ -56,6 +56,7 @@ describe('BackupService (V3 & Security Spec)', () => {
     process.env.BACKUP_MAX_COMPRESSED_BYTES = '104857600';
     process.env.BACKUP_MAX_UNCOMPRESSED_BYTES = '209715200';
     process.env.BACKUP_RETENTION_DELETE_ENABLED = 'true';
+    delete process.env.BACKUP_UPLOAD_TOKEN_TTL_SECONDS;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -111,7 +112,36 @@ describe('BackupService (V3 & Security Spec)', () => {
 
       expect(res.uploadToken).toContain('.');
       expect(res.key).toMatch(/^private-backups\/uploads\/upload_/);
+      expect(res.expiresIn).toBe(3600);
       expect(res.requiredHeaders).toEqual({ 'Content-Type': 'application/gzip' });
+    });
+
+    it('completeUpload 遇到过期 Token 时应该清理临时上传对象', async () => {
+      const initRes = await service.initUpload(
+        'u1',
+        'admin',
+        'backup.json',
+        1024,
+        'a'.repeat(64),
+      );
+      const [payloadBase64] = initRes.uploadToken.split('.');
+      const payload = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf8'));
+      payload.expiresAt = Date.now() - 1;
+      const expiredPayloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const hmacSecret = crypto
+        .createHmac('sha256', process.env.JWT_SECRET!)
+        .update('antigravity-backup-upload-token')
+        .digest();
+      const signature = crypto
+        .createHmac('sha256', hmacSecret)
+        .update(expiredPayloadBase64)
+        .digest('hex');
+      const sendSpy = jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+
+      await expect(
+        service.completeUpload('u1', 'admin', `${expiredPayloadBase64}.${signature}`),
+      ).rejects.toThrow(/上传 Token 已过期/);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
     });
 
     it('completeUpload 在服务端重算 SHA-256 与 init 记录不一致时必须拒绝并物理清除临时文件', async () => {

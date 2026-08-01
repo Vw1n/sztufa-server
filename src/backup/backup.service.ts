@@ -24,6 +24,10 @@ import { BackupRetentionService, RetentionResult } from './backup-retention.serv
 
 export { MANDATORY_BACKUP_TABLES, validateBackupSchemaAndIntegrity };
 
+const DEFAULT_BACKUP_UPLOAD_TTL_SECONDS = 60 * 60;
+const MIN_BACKUP_UPLOAD_TTL_SECONDS = 10 * 60;
+const MAX_BACKUP_UPLOAD_TTL_SECONDS = 6 * 60 * 60;
+
 export interface BackupMetadata {
   key: string;
   filename: string;
@@ -85,6 +89,17 @@ export class BackupService {
       throw new ServiceUnavailableException('系统关键服务异常：未配置 JWT_SECRET 环境变量');
     }
     return crypto.createHmac('sha256', jwtSecret).update('antigravity-backup-upload-token').digest();
+  }
+
+  private getUploadTtlSeconds(): number {
+    const configured = Number.parseInt(process.env.BACKUP_UPLOAD_TOKEN_TTL_SECONDS || '', 10);
+    if (!Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_BACKUP_UPLOAD_TTL_SECONDS;
+    }
+    return Math.min(
+      Math.max(configured, MIN_BACKUP_UPLOAD_TTL_SECONDS),
+      MAX_BACKUP_UPLOAD_TTL_SECONDS,
+    );
   }
 
   async createBackup(
@@ -632,7 +647,8 @@ export class BackupService {
     const ext = isGzip ? '.json.gz' : '.json';
     const contentType = isGzip ? 'application/gzip' : 'application/json';
     const key = `private-backups/uploads/upload_${Date.now()}_${crypto.randomUUID()}${ext}`;
-    const expiresAt = Date.now() + 10 * 60 * 1000;
+    const uploadTtlSeconds = this.getUploadTtlSeconds();
+    const expiresAt = Date.now() + uploadTtlSeconds * 1000;
 
     const payload = {
       key,
@@ -653,7 +669,9 @@ export class BackupService {
       ContentType: contentType,
     });
 
-    const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 600 });
+    const uploadUrl = await getSignedUrl(this.s3Client, command, {
+      expiresIn: uploadTtlSeconds,
+    });
 
     await this.auditLogService.log(
       username,
@@ -665,7 +683,7 @@ export class BackupService {
       uploadToken,
       uploadUrl,
       key,
-      expiresIn: 600,
+      expiresIn: uploadTtlSeconds,
       requiredHeaders: {
         'Content-Type': contentType,
       },
@@ -724,6 +742,9 @@ export class BackupService {
     }
 
     if (Date.now() > payload.expiresAt) {
+      await this.s3Client
+        .send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: payload.key }))
+        .catch(() => {});
       throw new BadRequestException('上传 Token 已过期，请重新发起直传');
     }
 

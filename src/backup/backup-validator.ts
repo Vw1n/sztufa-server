@@ -32,15 +32,27 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
     throw new BadRequestException('备份文件内容为空或不是有效的 JSON 对象');
   }
 
-  if (data.formatVersion !== '2.0') {
+  const allowedVersions = ['2.0', '3.0'];
+  if (!data.formatVersion || !allowedVersions.includes(data.formatVersion)) {
     throw new BadRequestException(
-      `不支持的备份文件格式版本: ${data.formatVersion || '未定义'}，仅支持 2.0`,
+      `不支持的备份文件格式版本: ${data.formatVersion || '未定义'}，仅支持 2.0 及 3.0`,
     );
+  }
+
+  if (data.formatVersion === '3.0') {
+    const allowedV3Keys = new Set(['manifest', 'formatVersion', 'timestamp', 'tables']);
+    const actualKeys = Object.keys(data);
+    for (const k of actualKeys) {
+      if (!allowedV3Keys.has(k)) {
+        throw new BadRequestException(`V3 备份文件格式非法：包含非预期的顶层属性 "${k}"`);
+      }
+    }
   }
 
   if (!data.manifest || typeof data.manifest !== 'object') {
     throw new BadRequestException('备份文件缺少 manifest 元数据信息');
   }
+
 
   if (data.manifest.checksumAlgorithm !== 'sha256' || !data.manifest.checksum) {
     throw new BadRequestException('备份文件元数据缺少合规的 sha256 校验和');
@@ -357,14 +369,15 @@ export function classifyBackupContent(
     return { category: 'quarantine', reason: `JSON 语法解析失败: ${err?.message || '非法格式'}` };
   }
 
-  if (!data || typeof data !== 'object' || data.formatVersion !== '2.0') {
-    return { category: 'legacy-archive', reason: '旧版 1.0 / 非 V2 格式备份文件' };
+  if (!data || typeof data !== 'object' || !['2.0', '3.0'].includes(data.formatVersion)) {
+    return { category: 'legacy-archive', reason: '旧版 1.0 / 非标准格式备份文件' };
   }
 
   try {
     validateBackupSchemaAndIntegrity(data);
-    return { category: 'active', reason: '标准 V2.0 全量合规备份', data };
+    return { category: 'active', reason: `标准 V${data.formatVersion} 全量合规备份`, data };
   } catch (err: any) {
-    return { category: 'quarantine', reason: `V2 校验拦截: ${err?.message || '架构校验未通过'}` };
+    const prefix = data.formatVersion === '3.0' ? 'V3 校验拦截' : 'V2 校验拦截';
+    return { category: 'quarantine', reason: `${prefix}: ${err?.message || '架构校验未通过'}` };
   }
 }

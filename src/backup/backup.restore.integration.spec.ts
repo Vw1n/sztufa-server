@@ -358,24 +358,32 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         expect(preExportSnapshot.counts[tableName]).toBeGreaterThanOrEqual(1);
       }
 
-      // 3. 拦截 S3 客户端，捕获真实 createBackup 导出的全量 JSON 字符串
-      let capturedBackupJson = '';
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
-        if (command.constructor.name === 'PutObjectCommand') {
-          capturedBackupJson = command.input.Body;
-          return { ETag: '"mock_etag"' } as any;
+      // 3. 拦截 S3 客户端，捕获真实 createBackup 导出的全量 GZIP 管道流
+      let capturedBackupBuffer: Buffer = Buffer.alloc(0);
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const stream = this.params.Body;
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.from(chunk));
         }
+        capturedBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-location' } as any;
+      });
+
+      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
         if (command.constructor.name === 'GetObjectCommand') {
-          const stream = Readable.from([Buffer.from(capturedBackupJson)]);
-          return { Body: stream } as any;
+          return { Body: Readable.from([capturedBackupBuffer]) } as any;
         }
         return {} as any;
       });
 
+
       // 执行真实 createBackup 导出
       const backupInfo = await service.createBackup('admin');
       expect(backupInfo.key).toMatch(/^private-backups\/database\/backup_/);
-      expect(capturedBackupJson).not.toBe('');
+      expect(capturedBackupBuffer.length).toBeGreaterThan(0);
+
 
       // 4. 彻底篡改数据库全量 17 表记录与关系
       await testPrisma.match.updateMany({ data: { mvpPlayerId: null } });

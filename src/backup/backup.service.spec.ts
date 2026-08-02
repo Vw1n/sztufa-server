@@ -9,6 +9,7 @@ import { parseAndValidateBackupStream } from './backup-serializer';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
 import { Readable } from 'stream';
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 jest.mock('@aws-sdk/client-s3');
 jest.mock('@aws-sdk/lib-storage', () => ({
@@ -100,6 +101,7 @@ describe('BackupService (V3 & Security Spec)', () => {
   describe('createBackup V3 游标分页与客户端中断', () => {
     it('应该使用游标分页 (take, orderBy, cursor) 查询数据模型，断言从未进行无限制全表查询', async () => {
       mockPrismaService.user.findMany.mockClear();
+      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(true);
 
       const result = await service.createBackup('admin', { purpose: 'manual' });
       expect(result.key).toMatch(/^private-backups\/database\/full\/backup_\d+_manual\.json\.gz$/);
@@ -111,6 +113,23 @@ describe('BackupService (V3 & Security Spec)', () => {
           take: expect.any(Number),
           orderBy: { id: 'asc' },
         }),
+      );
+    });
+
+    it('上传后完整性复验返回 false 时必须删除 R2 对象并拒绝返回成功元数据', async () => {
+      mockAuditLogService.log.mockClear();
+      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(false);
+      const sendSpy = jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+
+      await expect(service.createBackup('admin', { purpose: 'manual' })).rejects.toThrow(
+        '无法将备份文件保存至对象存储',
+      );
+
+      expect(sendSpy).toHaveBeenCalledWith(expect.any(DeleteObjectCommand));
+      expect(mockAuditLogService.log).not.toHaveBeenCalledWith(
+        'admin',
+        'CREATE_BACKUP',
+        expect.any(String),
       );
     });
 

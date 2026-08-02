@@ -1,4 +1,8 @@
-import { classifyBackupContent, MANDATORY_BACKUP_TABLES } from './backup-validator';
+import {
+  classifyBackupContent,
+  MANDATORY_BACKUP_TABLES,
+  validateBackupStreamIntegrity,
+} from './backup-validator';
 import { MandatoryBackupTableName } from './backup-table-registry';
 import { parseAndValidateBackupStream, createV3BackupStream } from './backup-serializer';
 import { Readable } from 'stream';
@@ -174,6 +178,11 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
 
       expect(parseResult.computedChecksum).toBe(expectedChecksum);
       expect(await checksumPromise).toBe(expectedChecksum);
+      expect(Object.keys(parseResult.tableCounts)).toEqual(MANDATORY_BACKUP_TABLES);
+      for (const tableName of MANDATORY_BACKUP_TABLES) {
+        expect(parseResult.tableCounts[tableName]).toBe(sampleTables[tableName].length);
+      }
+      expect(() => validateBackupStreamIntegrity(parseResult)).not.toThrow();
 
       parseResult.cleanup();
     });

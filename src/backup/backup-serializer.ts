@@ -709,6 +709,9 @@ export async function parseAndValidateBackupStream(
             }
             seenTableNames.add(tName);
             currentTable = tName;
+            // 仅在数据流中真实出现表键时登记计数，确保空数组表保留为 0，
+            // 同时继续由 seenTableNames 负责识别真正缺失的表。
+            tableCounts[currentTable] = 0;
 
             const prefixStr = `${isFirstTableHasher ? '' : ','}"${currentTable}":[`;
             tablesHasher.update(prefixStr);

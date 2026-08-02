@@ -256,7 +256,10 @@ export class BackupService {
     try {
       await parallelUpload.done();
       checksum = await checksumPromise;
-      await this.verifyBackupIntegrity(fileKey);
+      const verified = await this.verifyBackupIntegrity(fileKey);
+      if (!verified) {
+        throw new Error(`备份上传后完整性校验失败: ${fileKey}`);
+      }
     } catch (err: any) {
       await parallelUpload.abort().catch(() => {});
       try {

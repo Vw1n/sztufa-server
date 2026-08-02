@@ -13,6 +13,21 @@
       },
       "exposeHeaders": ["ETag"],
       "maxAgeSeconds": 3600
+    },
+    {
+      "id": "backup-direct-upload",
+      "allowed": {
+        "origins": [
+          "https://admin.sztufa.xyz",
+          "https://admin-dev.sztufa.xyz",
+          "http://localhost:3000",
+          "http://localhost:5173"
+        ],
+        "methods": ["GET", "PUT", "HEAD"],
+        "headers": ["Content-Type", "Content-Disposition"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
     }
   ]
 }

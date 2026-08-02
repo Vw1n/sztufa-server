@@ -243,6 +243,10 @@ describe('ImportService', () => {
     const result = await service.importFiles([asUpload('2023.json')], 'admin');
 
     expect(result.created).toEqual(counts);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 240_000,
+    });
     expect(tx.player.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         name: '张三',

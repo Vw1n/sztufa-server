@@ -1,4 +1,11 @@
-import { classifyBackupContent, MANDATORY_BACKUP_TABLES } from './backup-validator';
+import {
+  classifyBackupContent,
+  MANDATORY_BACKUP_TABLES,
+  validateBackupStreamIntegrity,
+} from './backup-validator';
+import { MandatoryBackupTableName } from './backup-table-registry';
+import { parseAndValidateBackupStream, createV3BackupStream } from './backup-serializer';
+import { Readable } from 'stream';
 import * as crypto from 'crypto';
 
 describe('BackupValidator Classifier & Integrty Test Suite', () => {
@@ -64,7 +71,7 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
 
   it('应该将超限大文件归类为 quarantine', () => {
     const str = 'a'.repeat(100);
-    const res = classifyBackupContent(str, 100, 50); // maxSizeBytes = 50
+    const res = classifyBackupContent(str, 100, 50);
     expect(res.category).toBe('quarantine');
     expect(res.reason).toMatch(/超过最大允许上限/);
   });
@@ -138,5 +145,72 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
     const res = classifyBackupContent(str, Buffer.byteLength(str));
     expect(res.category).toBe('quarantine');
     expect(res.reason).toMatch(/包含无效日期值/);
+  });
+
+  describe('增量 Checksum 字节序列与格式兼容性测试', () => {
+    it('对于包含中文、emoji、转义字符与嵌套 JSON 的多表数据，增量算出的 Checksum 必须与 sha256(JSON.stringify(tables)) 完全一致', async () => {
+      const sampleTables: Record<string, any[]> = {};
+      for (const t of MANDATORY_BACKUP_TABLES) {
+        sampleTables[t] = [];
+      }
+      sampleTables.User = [
+        {
+          id: 'u_101',
+          username: '测试管理员 ⚽ 🔥',
+          bio: 'Line1\nLine2\t"Quotes" \\ Special chars',
+          settings: { theme: 'dark', notifications: { email: true } },
+        },
+      ];
+
+      const expectedChecksum = crypto
+        .createHash('sha256')
+        .update(JSON.stringify(sampleTables))
+        .digest('hex');
+
+      const pageProvider = (tableName: MandatoryBackupTableName) => {
+        return (async function* () {
+          yield sampleTables[tableName];
+        })();
+      };
+
+      const { stream, checksumPromise } = createV3BackupStream(pageProvider);
+      const parseResult = await parseAndValidateBackupStream(stream, 'test.json.gz');
+
+      expect(parseResult.computedChecksum).toBe(expectedChecksum);
+      expect(await checksumPromise).toBe(expectedChecksum);
+      expect(Object.keys(parseResult.tableCounts)).toEqual(MANDATORY_BACKUP_TABLES);
+      for (const tableName of MANDATORY_BACKUP_TABLES) {
+        expect(parseResult.tableCounts[tableName]).toBe(sampleTables[tableName].length);
+      }
+      expect(() => validateBackupStreamIntegrity(parseResult)).not.toThrow();
+
+      parseResult.cleanup();
+    });
+
+    it('单条记录解析前，当单个字符串 Token 超过 BACKUP_MAX_RECORD_BYTES 时，必须在组装对象前触发早期拦截并彻底清理资源', async () => {
+      const origMax = process.env.BACKUP_MAX_RECORD_BYTES;
+      process.env.BACKUP_MAX_RECORD_BYTES = '100'; // 100 字节极小阈值
+
+      const hugeString = 'A'.repeat(500); // 500 字节远超 100 字节
+      const sampleTables: Record<string, any[]> = {};
+      for (const t of MANDATORY_BACKUP_TABLES) {
+        sampleTables[t] = [];
+      }
+      sampleTables.User = [{ id: 'u1', huge: hugeString }];
+
+      const jsonStr = JSON.stringify({ formatVersion: '3.0', tables: sampleTables });
+      const stream = Readable.from([jsonStr]);
+
+      const parseResult: any = null;
+      try {
+        await parseAndValidateBackupStream(stream, 'oversized.json');
+        fail('应当抛出单条记录超限异常');
+      } catch (err: any) {
+        expect(err.message).toMatch(/超出单条记录最大允许上限/);
+      } finally {
+        if (parseResult) parseResult.cleanup();
+        process.env.BACKUP_MAX_RECORD_BYTES = origMax;
+      }
+    });
   });
 });

@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { BackupService, MANDATORY_BACKUP_TABLES } from './backup.service';
+import { BackupRetentionService } from './backup-retention.service';
+import { BackupScopeService } from './backup-scope.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
 import { Readable } from 'stream';
@@ -8,6 +10,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
   let testPrisma: PrismaClient;
   let service: BackupService;
   let mockAuditLog: any;
+  let originalBackupRestoreEnabled: string | undefined;
 
   beforeAll(async () => {
     // 强制要求 TEST_DATABASE_URL 环境变量存在，否则终止整个集成测试套件
@@ -56,10 +59,28 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       log: jest.fn().mockResolvedValue(true),
     };
 
-    service = new BackupService(testPrisma as unknown as PrismaService, mockAuditLog as any);
+    const retentionService = new BackupRetentionService();
+    const scopeService = new BackupScopeService(testPrisma as unknown as PrismaService);
+    service = new BackupService(
+      testPrisma as unknown as PrismaService,
+      mockAuditLog as any,
+      retentionService,
+      scopeService,
+    );
+
+    // 保存原始值并启用恢复功能（所有集成测试均需要）
+    originalBackupRestoreEnabled = process.env.BACKUP_RESTORE_ENABLED;
+    process.env.BACKUP_RESTORE_ENABLED = 'true';
   });
 
   afterAll(async () => {
+    // 恢复 BACKUP_RESTORE_ENABLED 原始值
+    if (originalBackupRestoreEnabled === undefined) {
+      delete process.env.BACKUP_RESTORE_ENABLED;
+    } else {
+      process.env.BACKUP_RESTORE_ENABLED = originalBackupRestoreEnabled;
+    }
+
     if (testPrisma) {
       await testPrisma.$disconnect();
     }
@@ -358,24 +379,31 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         expect(preExportSnapshot.counts[tableName]).toBeGreaterThanOrEqual(1);
       }
 
-      // 3. 拦截 S3 客户端，捕获真实 createBackup 导出的全量 JSON 字符串
-      let capturedBackupJson = '';
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
-        if (command.constructor.name === 'PutObjectCommand') {
-          capturedBackupJson = command.input.Body;
-          return { ETag: '"mock_etag"' } as any;
+      // 3. 拦截 S3 客户端，捕获真实 createBackup 导出的全量 GZIP 管道流
+      let capturedBackupBuffer: Buffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const stream = this.params.Body;
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.from(chunk));
         }
+        capturedBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-location' } as any;
+      });
+
+      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
         if (command.constructor.name === 'GetObjectCommand') {
-          const stream = Readable.from([Buffer.from(capturedBackupJson)]);
-          return { Body: stream } as any;
+          return { Body: Readable.from([capturedBackupBuffer]) } as any;
         }
         return {} as any;
       });
 
       // 执行真实 createBackup 导出
       const backupInfo = await service.createBackup('admin');
-      expect(backupInfo.key).toMatch(/^private-backups\/database\/backup_/);
-      expect(capturedBackupJson).not.toBe('');
+      expect(backupInfo.key).toMatch(/^private-backups\/database\/full\/backup_/);
+      expect(capturedBackupBuffer.length).toBeGreaterThan(0);
 
       // 4. 彻底篡改数据库全量 17 表记录与关系
       await testPrisma.match.updateMany({ data: { mvpPlayerId: null } });
@@ -398,7 +426,6 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       expect(corruptedSnapshot.hash).not.toBe(preExportSnapshot.hash);
 
       // 5. 执行 restoreBackup 恢复
-      process.env.BACKUP_RESTORE_ENABLED = 'true';
       const restoreResult = await service.restoreBackup('admin', backupInfo.key, 'CONFIRM_RESTORE');
       expect(restoreResult).toBe('数据库还原成功');
 
@@ -433,38 +460,40 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       await seedAll17Tables(testPrisma);
       const preFailSnapshot = await compute17TableSnapshot(testPrisma);
 
-      // 2. 构造全量 100% 通过 validateBackupSchemaAndIntegrity 前置校验的合法备份数据包
-      const tables: Record<string, any[]> = JSON.parse(JSON.stringify(preFailSnapshot.snapshot));
-      const tableCounts: Record<string, number> = {};
-      for (const t of MANDATORY_BACKUP_TABLES) {
-        tableCounts[t] = tables[t].length;
-      }
+      // 2. 捕获真实 gzip backup buffer，保证 parseAndValidateBackupStream 能正确解析
+      let capturedRollbackBuffer: Buffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMockRollback = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMockRollback.prototype, 'done').mockImplementation(async function (
+        this: any,
+      ) {
+        const stream = this.params.Body;
+        if (!capturedRollbackBuffer.length) {
+          // 首次调用：捕获主备份 gzip buffer
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          capturedRollbackBuffer = Buffer.concat(chunks);
+        } else {
+          // 后续调用（pre-restore 快照）：排空流即可
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          for await (const _chunk of stream) {
+            /* drain */
+          }
+        }
+        return { Location: 'mock-location' } as any;
+      });
 
-      const checksum = crypto.createHash('sha256').update(JSON.stringify(tables)).digest('hex');
-      const validPayload = {
-        formatVersion: '2.0',
-        manifest: {
-          checksumAlgorithm: 'sha256',
-          checksum,
-          tables: tableCounts,
-        },
-        tables,
-      };
-
-      const jsonStr = JSON.stringify(validPayload);
       jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
         if (command.constructor.name === 'GetObjectCommand') {
-          return { Body: Readable.from([Buffer.from(jsonStr)]) } as any;
-        }
-        if (command.constructor.name === 'PutObjectCommand') {
-          return { ETag: '"pre_snapshot_etag"' } as any;
+          return { Body: Readable.from([capturedRollbackBuffer]) } as any;
         }
         return {} as any;
       });
 
-      jest
-        .spyOn(service, 'createBackup')
-        .mockResolvedValue({ key: 'private-backups/database/pre.json' } as any);
+      // 执行真实 createBackup，捕获合规 gzip buffer（供后续 GetObjectCommand 返回）
+      await service.createBackup('admin');
 
       // 3. 监控 testPrisma.$transaction 确保真实进入数据库事务
       let transactionEntered = false;

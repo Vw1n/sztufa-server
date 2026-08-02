@@ -5,7 +5,6 @@ import { BackupController } from './backup.controller';
 
 import { BackupService } from './backup.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 
@@ -19,7 +18,9 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
 
   beforeEach(async () => {
     mockBackupService = {
-      createBackup: jest.fn().mockResolvedValue({ key: 'private-backups/database/backup_123.json.gz' }),
+      createBackup: jest
+        .fn()
+        .mockResolvedValue({ key: 'private-backups/database/backup_123.json.gz' }),
       listBackups: jest.fn().mockResolvedValue([]),
       getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://r2.example.com/url'),
       restoreBackup: jest.fn().mockResolvedValue('数据库还原成功'),
@@ -28,7 +29,9 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
         uploadUrl: 'url',
         requiredHeaders: { 'Content-Type': 'application/gzip' },
       }),
-      completeUpload: jest.fn().mockResolvedValue({ key: 'private-backups/database/backup_uploaded.json.gz' }),
+      completeUpload: jest
+        .fn()
+        .mockResolvedValue({ key: 'private-backups/database/backup_uploaded.json.gz' }),
       deleteBackup: jest.fn().mockResolvedValue('备份删除成功'),
       cleanRetention: jest.fn().mockResolvedValue({ dryRun: true, plannedDeletions: [] }),
     };

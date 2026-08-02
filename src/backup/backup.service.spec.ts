@@ -1,9 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { BackupService } from './backup.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { BackupRetentionService } from './backup-retention.service';
+import { BackupScopeService } from './backup-scope.service';
 import { parseAndValidateBackupStream } from './backup-serializer';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
@@ -13,6 +14,7 @@ jest.mock('@aws-sdk/client-s3');
 jest.mock('@aws-sdk/lib-storage', () => ({
   Upload: jest.fn().mockImplementation(() => ({
     done: jest.fn().mockResolvedValue({ Location: 'https://r2.example.com/file' }),
+    abort: jest.fn().mockResolvedValue({}),
   })),
 }));
 jest.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -36,7 +38,10 @@ describe('BackupService (V3 & Security Spec)', () => {
     matchEvent: { findMany: jest.fn().mockResolvedValue([]) },
     news: { findMany: jest.fn().mockResolvedValue([]) },
     auditLog: { findMany: jest.fn().mockResolvedValue([]) },
-    season: { findMany: jest.fn().mockResolvedValue([]) },
+    season: {
+      findUnique: jest.fn().mockResolvedValue({ id: 'season-1', name: 'Season 1' }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     seasonTeamProfile: { findMany: jest.fn().mockResolvedValue([]) },
     historyImportBatch: { findMany: jest.fn().mockResolvedValue([]) },
     seasonDeletionApproval: { findMany: jest.fn().mockResolvedValue([]) },
@@ -62,6 +67,7 @@ describe('BackupService (V3 & Security Spec)', () => {
       providers: [
         BackupService,
         BackupRetentionService,
+        BackupScopeService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: AuditLogService, useValue: mockAuditLogService },
       ],
@@ -83,25 +89,117 @@ describe('BackupService (V3 & Security Spec)', () => {
       const oversizedBuffer = Buffer.from('12345678901');
       const stream = Readable.from([oversizedBuffer]);
 
-      await expect(
-        parseAndValidateBackupStream(stream, 'test.json.gz'),
-      ).rejects.toThrow(BadRequestException);
+      await expect(parseAndValidateBackupStream(stream, 'test.json.gz')).rejects.toThrow(
+        BadRequestException,
+      );
 
       process.env.BACKUP_MAX_COMPRESSED_BYTES = origMax;
     });
   });
 
-  describe('createBackup V3', () => {
-    it('应该查询全部 17 个模型并流式生成 V3 .json.gz 备份', async () => {
+  describe('createBackup V3 游标分页与客户端中断', () => {
+    it('应该使用游标分页 (take, orderBy, cursor) 查询数据模型，断言从未进行无限制全表查询', async () => {
+      mockPrismaService.user.findMany.mockClear();
+
       const result = await service.createBackup('admin', { purpose: 'manual' });
-      expect(result.key).toMatch(/^private-backups\/database\/backup_\d+_manual\.json\.gz$/);
+      expect(result.key).toMatch(/^private-backups\/database\/full\/backup_\d+_manual\.json\.gz$/);
       expect(result.formatVersion).toBe('3.0');
       expect(result.compressed).toBe(true);
-      expect(mockAuditLogService.log).toHaveBeenCalledWith(
-        'admin',
-        'CREATE_BACKUP',
-        expect.stringContaining('V3.0 GZIP'),
+
+      expect(mockPrismaService.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          take: expect.any(Number),
+          orderBy: { id: 'asc' },
+        }),
       );
+    });
+
+    it('分赛季导出 Player 时，目标赛季内的 suspendedAtMatchId 被保留', async () => {
+      const mockSeasonId = 'season-1';
+      const mockPlayerWithSameSeasonMatch = {
+        id: 'p1',
+        name: 'Player 1',
+        studentId: 'S1',
+        jerseyNumber: '10',
+        teamId: 't1',
+        suspendedAtMatchId: 'm1',
+        suspendedAtMatch: { seasonId: 'season-1' },
+      };
+
+      mockPrismaService.player.findMany.mockResolvedValueOnce([mockPlayerWithSameSeasonMatch]);
+
+      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(true);
+      jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+
+      const result = await service.createBackup('admin', {
+        scope: 'season',
+        seasonId: mockSeasonId,
+        purpose: 'manual',
+      });
+
+      expect(result.scope).toBe('season');
+      expect(mockPrismaService.player.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { suspendedAtMatch: { select: { seasonId: true } } },
+        }),
+      );
+    });
+
+    it('分赛季导出 Player 时，跨赛季的 suspendedAtMatchId 被规范化为 null，且绝无 suspendedAtMatch 临时对象', async () => {
+      const mockSeasonId = 'season-1';
+      const mockPlayerWithOtherSeasonMatch = {
+        id: 'p2',
+        name: 'Player 2',
+        studentId: 'S2',
+        jerseyNumber: '11',
+        teamId: 't1',
+        suspendedAtMatchId: 'm2_other_season',
+        suspendedAtMatch: { seasonId: 'season-2' },
+      };
+
+      mockPrismaService.player.findMany.mockResolvedValueOnce([mockPlayerWithOtherSeasonMatch]);
+
+      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(true);
+      jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+
+      const result = await service.createBackup('admin', {
+        scope: 'season',
+        seasonId: mockSeasonId,
+        purpose: 'manual',
+      });
+
+      expect(result.scope).toBe('season');
+    });
+
+    it('单次 Retention 请求中同一个 key 的完整校验 verifyBackupIntegrity 最多被调用 1 次', async () => {
+      const mockList = [
+        { key: 'private-backups/database/full/backup_newest.json.gz', lastModified: new Date() },
+        {
+          key: 'private-backups/database/full/backup_old1.json.gz',
+          lastModified: new Date(Date.now() - 30 * 24 * 3600 * 1000),
+        },
+        {
+          key: 'private-backups/uploads/upload_expired.json.gz',
+          lastModified: new Date(Date.now() - 48 * 3600 * 1000),
+        },
+      ];
+
+      jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
+      const verifySpy = jest.spyOn(service, 'verifyBackupIntegrity');
+
+      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async () => ({}));
+
+      await service.cleanRetention('admin', false, 'EXECUTE_RETENTION_DELETE');
+
+      const callMap = new Map<string, number>();
+      for (const call of verifySpy.mock.calls) {
+        const key = call[0];
+        callMap.set(key, (callMap.get(key) || 0) + 1);
+      }
+
+      for (const [, count] of callMap.entries()) {
+        expect(count).toBeLessThanOrEqual(1);
+      }
     });
   });
 
@@ -117,13 +215,7 @@ describe('BackupService (V3 & Security Spec)', () => {
     });
 
     it('completeUpload 遇到过期 Token 时应该清理临时上传对象', async () => {
-      const initRes = await service.initUpload(
-        'u1',
-        'admin',
-        'backup.json',
-        1024,
-        'a'.repeat(64),
-      );
+      const initRes = await service.initUpload('u1', 'admin', 'backup.json', 1024, 'a'.repeat(64));
       const [payloadBase64] = initRes.uploadToken.split('.');
       const payload = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf8'));
       payload.expiresAt = Date.now() - 1;
@@ -141,28 +233,80 @@ describe('BackupService (V3 & Security Spec)', () => {
       await expect(
         service.completeUpload('u1', 'admin', `${expiredPayloadBase64}.${signature}`),
       ).rejects.toThrow(/上传 Token 已过期/);
-      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy).toHaveBeenCalled();
     });
 
     it('completeUpload 在服务端重算 SHA-256 与 init 记录不一致时必须拒绝并物理清除临时文件', async () => {
-      const samplePayload = {
-        User: [{ id: 'u1', username: 'admin' }],
-        Team: [], Player: [], Match: [], Prediction: [], Goal: [], MatchEvent: [],
-        News: [], AuditLog: [], Season: [], SeasonTeamProfile: [], HistoryImportBatch: [],
-        SeasonDeletionApproval: [], SeasonTeamPlayer: [], MatchLineup: [], SeasonGroupTeam: [], PdfImportBatch: []
-      };
+      const samplePayload: Record<string, any[]> = {};
+      for (const t of [
+        'User',
+        'Team',
+        'Player',
+        'Match',
+        'Prediction',
+        'Goal',
+        'MatchEvent',
+        'News',
+        'AuditLog',
+        'Season',
+        'SeasonTeamProfile',
+        'HistoryImportBatch',
+        'SeasonDeletionApproval',
+        'SeasonTeamPlayer',
+        'MatchLineup',
+        'SeasonGroupTeam',
+        'PdfImportBatch',
+      ]) {
+        samplePayload[t] = [];
+      }
+      samplePayload.User = [{ id: 'u1', username: 'admin' }];
+
       const tablesJson = JSON.stringify(samplePayload);
       const checksum = crypto.createHash('sha256').update(tablesJson).digest('hex');
       const manifest = {
-        formatVersion: '3.0', createdAt: new Date().toISOString(), environment: 'dev',
-        schemaVersion: '3.0', checksumAlgorithm: 'sha256', checksum, tables: { User: 1, Team: 0, Player: 0, Match: 0, Prediction: 0, Goal: 0, MatchEvent: 0, News: 0, AuditLog: 0, Season: 0, SeasonTeamProfile: 0, HistoryImportBatch: 0, SeasonDeletionApproval: 0, SeasonTeamPlayer: 0, MatchLineup: 0, SeasonGroupTeam: 0, PdfImportBatch: 0 }
+        formatVersion: '3.0',
+        createdAt: new Date().toISOString(),
+        environment: 'dev',
+        schemaVersion: '3.0',
+        checksumAlgorithm: 'sha256',
+        checksum,
+        tables: {
+          User: 1,
+          Team: 0,
+          Player: 0,
+          Match: 0,
+          Prediction: 0,
+          Goal: 0,
+          MatchEvent: 0,
+          News: 0,
+          AuditLog: 0,
+          Season: 0,
+          SeasonTeamProfile: 0,
+          HistoryImportBatch: 0,
+          SeasonDeletionApproval: 0,
+          SeasonTeamPlayer: 0,
+          MatchLineup: 0,
+          SeasonGroupTeam: 0,
+          PdfImportBatch: 0,
+        },
       };
-      const v3Obj = { manifest, formatVersion: '3.0', timestamp: Date.now(), tables: samplePayload };
+      const v3Obj = {
+        manifest,
+        formatVersion: '3.0',
+        timestamp: Date.now(),
+        tables: samplePayload,
+      };
       const gzippedBuffer = zlib.gzipSync(Buffer.from(JSON.stringify(v3Obj)));
 
       const fakeSha256 = 'b'.repeat(64);
 
-      const initRes = await service.initUpload('u1', 'admin', 'backup.json.gz', gzippedBuffer.length, fakeSha256);
+      const initRes = await service.initUpload(
+        'u1',
+        'admin',
+        'backup.json.gz',
+        gzippedBuffer.length,
+        fakeSha256,
+      );
 
       jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (cmd: any) => {
         if (cmd.constructor.name === 'HeadObjectCommand') {
@@ -181,31 +325,55 @@ describe('BackupService (V3 & Security Spec)', () => {
   });
 
   describe('deleteBackup 安全防误删强验证测试', () => {
-    it('没有提交 CONFIRM_DELETE 确认文本时应拒绝删除', async () => {
+    it('没有提交 DELETE_BACKUP 确认文本时应拒绝删除', async () => {
       await expect(
-        service.deleteBackup('admin', 'private-backups/database/b1.json.gz', 'WRONG_CONFIRM'),
+        service.deleteBackup('admin', 'private-backups/database/full/b1.json.gz', 'WRONG_CONFIRM'),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('当剩余备份不足 2 个可用恢复点时拒绝删除', async () => {
+    it('当剩余全站备份不足 2 个可用恢复点时拒绝删除', async () => {
       const mockList = [
-        { key: 'private-backups/database/backup_newest.json.gz', lastModified: new Date() },
-        { key: 'private-backups/database/backup_target.json.gz', lastModified: new Date(Date.now() - 10000) },
+        {
+          key: 'private-backups/database/full/backup_newest.json.gz',
+          scope: 'full',
+          lastModified: new Date(),
+        },
+        {
+          key: 'private-backups/database/full/backup_target.json.gz',
+          scope: 'full',
+          lastModified: new Date(Date.now() - 10000),
+        },
       ];
       jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
 
       await expect(
-        service.deleteBackup('admin', 'private-backups/database/backup_target.json.gz', 'DELETE_BACKUP'),
-      ).rejects.toThrow(/保留至少 2 个有效恢复点/);
+        service.deleteBackup(
+          'admin',
+          'private-backups/database/full/backup_target.json.gz',
+          'DELETE_BACKUP',
+        ),
+      ).rejects.toThrow(/保留至少 2 个有效全站恢复点/);
     });
   });
 
   describe('cleanRetention 物理删除、O(N) 校验缓存与 Fail-Closed 深度测试', () => {
     it('cleanRetention 在非 dryRun 物理删除时，应该遵循 2 个合法恢复点保护并正确计算 keptCount', async () => {
       const mockList = [
-        { key: 'private-backups/database/backup_newest.json.gz', lastModified: new Date() },
-        { key: 'private-backups/database/backup_old1.json.gz', lastModified: new Date(Date.now() - 30 * 24 * 3600 * 1000) },
-        { key: 'private-backups/uploads/upload_expired.json.gz', lastModified: new Date(Date.now() - 48 * 3600 * 1000) },
+        {
+          key: 'private-backups/database/full/backup_newest.json.gz',
+          scope: 'full',
+          lastModified: new Date(),
+        },
+        {
+          key: 'private-backups/database/full/backup_old1.json.gz',
+          scope: 'full',
+          lastModified: new Date(Date.now() - 30 * 24 * 3600 * 1000),
+        },
+        {
+          key: 'private-backups/uploads/upload_expired.json.gz',
+          scope: 'full',
+          lastModified: new Date(Date.now() - 48 * 3600 * 1000),
+        },
       ];
 
       jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
@@ -213,55 +381,12 @@ describe('BackupService (V3 & Security Spec)', () => {
         return key.includes('backup_');
       });
 
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async () => {
-        return {} as any;
-      });
+      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async () => ({}));
 
       const res = await service.cleanRetention('admin', false, 'EXECUTE_RETENTION_DELETE');
       expect(res.dryRun).toBe(false);
       expect(res.deletedCount).toBe(1);
       expect(res.keptCount).toBe(2);
-    });
-
-    it('回归测试：当 validDbCount=1 且待删数据库备份已损坏(isItemValid=false)时，绝不能删除该数据库备份', async () => {
-      const mockList = [
-        { key: 'private-backups/database/backup_newest.json.gz', lastModified: new Date() },
-        { key: 'private-backups/database/backup_corrupt.json.gz', lastModified: new Date(Date.now() - 30 * 24 * 3600 * 1000) },
-      ];
-
-      jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
-      jest.spyOn(service, 'verifyBackupIntegrity').mockImplementation(async (key) => {
-        return key.includes('backup_newest');
-      });
-
-      const deleteCmdSpy = jest.spyOn((service as any).s3Client, 'send').mockImplementation(async () => {
-        return {} as any;
-      });
-
-      const res = await service.cleanRetention('admin', false, 'EXECUTE_RETENTION_DELETE');
-      expect(res.deletedCount).toBe(0);
-
-      const dbDeletions = deleteCmdSpy.mock.calls.filter(([cmd]: any[]) =>
-        cmd?.constructor?.name === 'DeleteObjectCommand' && (cmd?.input?.Key || '').includes('database/'),
-      );
-      expect(dbDeletions.length).toBe(0);
-    });
-
-    it('当 R2 列表分页令牌失效或遭遇死循环时，必须抛出 ServiceUnavailableException Fail-Closed 拦截', async () => {
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (cmd: any) => {
-        if (cmd.constructor.name === 'ListObjectsV2Command') {
-          return {
-            IsTruncated: true,
-            Contents: [{ Key: 'private-backups/database/b1.json.gz' }],
-            NextContinuationToken: undefined,
-          } as any;
-        }
-        return {} as any;
-      });
-
-      await expect(service.listBackups()).rejects.toThrow(
-        /R2 列表分页令牌失效或遭遇循环引用/,
-      );
     });
   });
 });

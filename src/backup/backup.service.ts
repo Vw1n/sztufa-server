@@ -18,9 +18,25 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import { MANDATORY_BACKUP_TABLES, validateBackupSchemaAndIntegrity } from './backup-validator';
-import { prepareV3BackupStream, parseAndValidateBackupStream } from './backup-serializer';
+import {
+  MANDATORY_BACKUP_TABLES,
+  MandatoryBackupTableName,
+  RESTORE_DELETE_ORDER,
+  RESTORE_INSERT_ORDER,
+  TABLE_METADATA_MAP,
+} from './backup-table-registry';
+import {
+  validateBackupSchemaAndIntegrity,
+  validateBackupStreamIntegrity,
+  validateForeignKeysFromStaging,
+} from './backup-validator';
+import {
+  createV3BackupStream,
+  parseAndValidateBackupStream,
+  ParseStreamResult,
+} from './backup-serializer';
 import { BackupRetentionService, RetentionResult } from './backup-retention.service';
+import { BackupScopeService, BackupScope, getSeasonTableWhereClause } from './backup-scope.service';
 
 export { MANDATORY_BACKUP_TABLES, validateBackupSchemaAndIntegrity };
 
@@ -39,6 +55,8 @@ export interface BackupMetadata {
   purpose?: string;
   protected?: boolean;
   validated?: boolean;
+  scope?: BackupScope;
+  seasonId?: string;
 }
 
 export interface UploadInitResult {
@@ -47,6 +65,14 @@ export interface UploadInitResult {
   key: string;
   expiresIn: number;
   requiredHeaders: Record<string, string>;
+}
+
+export interface CreateBackupOptions {
+  purpose?: 'manual' | 'scheduled' | 'pre-restore' | 'uploaded';
+  protected?: boolean;
+  scope?: BackupScope;
+  seasonId?: string;
+  signal?: AbortSignal;
 }
 
 @Injectable()
@@ -64,6 +90,7 @@ export class BackupService {
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
     private readonly retentionService: BackupRetentionService,
+    private readonly scopeService: BackupScopeService,
   ) {}
 
   private validateBackupKey(key: string): void {
@@ -88,7 +115,10 @@ export class BackupService {
     if (!jwtSecret) {
       throw new ServiceUnavailableException('系统关键服务异常：未配置 JWT_SECRET 环境变量');
     }
-    return crypto.createHmac('sha256', jwtSecret).update('antigravity-backup-upload-token').digest();
+    return crypto
+      .createHmac('sha256', jwtSecret)
+      .update('antigravity-backup-upload-token')
+      .digest();
   }
 
   private getUploadTtlSeconds(): number {
@@ -102,87 +132,152 @@ export class BackupService {
     );
   }
 
-  async createBackup(
-    username: string,
-    options?: { purpose?: 'manual' | 'scheduled' | 'pre-restore' | 'uploaded'; protected?: boolean },
-  ): Promise<BackupMetadata> {
+  async createBackup(username: string, options?: CreateBackupOptions): Promise<BackupMetadata> {
     const purpose = options?.purpose || 'manual';
     const isProtected = !!options?.protected;
+    const scope = options?.scope || 'full';
+    const pageSize = parseInt(process.env.BACKUP_PAGE_SIZE || '500', 10);
 
-    const tables = await this.prisma.$transaction(
-      async (tx) => {
-        const users = await tx.user.findMany();
-        const teamsList = await tx.team.findMany();
-        const playersList = await tx.player.findMany();
-        const matchesList = await tx.match.findMany();
-        const predictions = await tx.prediction.findMany();
-        const goalsList = await tx.goal.findMany();
-        const matchEventsList = await tx.matchEvent.findMany();
-        const newsList = await tx.news.findMany();
-        const auditLogsList = await tx.auditLog.findMany();
-        const seasonsList = await tx.season.findMany();
-        const seasonTeamProfiles = await tx.seasonTeamProfile.findMany();
-        const historyImportBatches = await tx.historyImportBatch.findMany();
-        const seasonDeletionApprovals = await tx.seasonDeletionApproval.findMany();
-        const seasonTeamPlayersList = await tx.seasonTeamPlayer.findMany();
-        const matchLineupsList = await tx.matchLineup.findMany();
-        const seasonGroupTeams = await tx.seasonGroupTeam.findMany();
-        const pdfImportBatches = await tx.pdfImportBatch.findMany();
+    let seasonInfo: { id: string; name: string } | undefined = undefined;
 
-        return {
-          User: users,
-          Team: teamsList,
-          Player: playersList,
-          Match: matchesList,
-          Prediction: predictions,
-          Goal: goalsList,
-          MatchEvent: matchEventsList,
-          News: newsList,
-          AuditLog: auditLogsList,
-          Season: seasonsList,
-          SeasonTeamProfile: seasonTeamProfiles,
-          HistoryImportBatch: historyImportBatches,
-          SeasonDeletionApproval: seasonDeletionApprovals,
-          SeasonTeamPlayer: seasonTeamPlayersList,
-          MatchLineup: matchLineupsList,
-          SeasonGroupTeam: seasonGroupTeams,
-          PdfImportBatch: pdfImportBatches,
-        };
-      },
-      {
-        isolationLevel: 'RepeatableRead',
-        timeout: 60000,
-      },
-    );
+    if (scope === 'season') {
+      if (!options?.seasonId) {
+        throw new BadRequestException('分赛季导出必须提供关联的 seasonId');
+      }
+      const seasonObj = await this.scopeService.validateSeason(options.seasonId);
+      seasonInfo = { id: seasonObj.id, name: seasonObj.name };
+    }
+
+    const pageIteratorProvider = (tableName: MandatoryBackupTableName) => {
+      const meta = TABLE_METADATA_MAP[tableName];
+      const prismaDelegate = (this.prisma as any)[meta.prismaDelegateName];
+
+      const whereClause =
+        scope === 'season' && options?.seasonId
+          ? getSeasonTableWhereClause(tableName, options.seasonId)
+          : {};
+
+      return (async function* () {
+        let lastId: string | null = null;
+        let hasMore = true;
+
+        while (hasMore) {
+          if (options?.signal?.aborted) {
+            throw new BadRequestException('客户端连接已断开，备份导出取消');
+          }
+
+          const findOptions: any = {
+            where: whereClause,
+            orderBy: { [meta.cursorField]: 'asc' },
+            take: pageSize,
+          };
+
+          if (scope === 'season' && tableName === 'Player') {
+            findOptions.include = {
+              suspendedAtMatch: { select: { seasonId: true } },
+            };
+          }
+
+          if (lastId) {
+            findOptions.cursor = { [meta.cursorField]: lastId };
+            findOptions.skip = 1;
+          }
+
+          const page: any[] = await prismaDelegate.findMany(findOptions);
+
+          if (!page || page.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          const processedPage = page.map((row: any) => {
+            if (scope === 'season' && tableName === 'Player') {
+              const { suspendedAtMatch, ...exportRecord } = row;
+              if (
+                exportRecord.suspendedAtMatchId &&
+                suspendedAtMatch?.seasonId !== options?.seasonId
+              ) {
+                exportRecord.suspendedAtMatchId = null;
+              }
+              return exportRecord;
+            }
+            return row;
+          });
+
+          yield processedPage;
+
+          lastId = page[page.length - 1][meta.cursorField];
+          if (page.length < pageSize) {
+            hasMore = false;
+          }
+        }
+      })();
+    };
 
     const createdAtIso = new Date().toISOString();
-    const { stream, checksum } = prepareV3BackupStream(tables, { createdAt: createdAtIso });
+    const { stream, checksumPromise } = createV3BackupStream(pageIteratorProvider, {
+      createdAt: createdAtIso,
+      scope,
+      season: seasonInfo,
+    });
 
     const protectSuffix = isProtected ? '_protected' : '';
     const filename = `backup_${Date.now()}_${purpose}${protectSuffix}.json.gz`;
-    const fileKey = `private-backups/database/${filename}`;
 
-    try {
-      const parallelUpload = new Upload({
-        client: this.s3Client,
-        params: {
-          Bucket: process.env.R2_BUCKET_NAME,
-          Key: fileKey,
-          Body: stream,
-          ContentType: 'application/gzip',
-          ContentDisposition: `attachment; filename="${filename}"`,
+    let fileKey = `private-backups/database/full/${filename}`;
+    if (scope === 'season' && options?.seasonId) {
+      fileKey = `private-backups/database/seasons/${options.seasonId}/${filename}`;
+    } else if (purpose === 'pre-restore') {
+      fileKey = `private-backups/database/${filename}`;
+    }
+
+    const parallelUpload = new Upload({
+      client: this.s3Client,
+      params: {
+        Bucket: process.env.R2_BUCKET_NAME,
+        Key: fileKey,
+        Body: stream,
+        ContentType: 'application/gzip',
+        ContentDisposition: `attachment; filename="${filename}"`,
+      },
+    });
+
+    if (options?.signal) {
+      options.signal.addEventListener(
+        'abort',
+        () => {
+          parallelUpload.abort().catch(() => {});
         },
-      });
+        { once: true },
+      );
+    }
+
+    let checksum = '';
+    try {
       await parallelUpload.done();
-    } catch (err) {
-      console.error('上传备份文件至 R2 失败:', err);
+      checksum = await checksumPromise;
+      await this.verifyBackupIntegrity(fileKey);
+    } catch (err: any) {
+      await parallelUpload.abort().catch(() => {});
+      try {
+        await this.s3Client.send(
+          new DeleteObjectCommand({
+            Bucket: process.env.R2_BUCKET_NAME,
+            Key: fileKey,
+          }),
+        );
+      } catch (deleteErr: any) {
+        console.error(`[CRITICAL] 备份校验失败且物理删除失败，遗留废弃文件: ${fileKey}`, deleteErr);
+      }
+      console.error('上传或校验备份文件至 R2 失败:', err);
+      if (err instanceof BadRequestException) throw err;
       throw new ServiceUnavailableException('无法将备份文件保存至对象存储');
     }
 
     await this.auditLogService.log(
       username,
       'CREATE_BACKUP',
-      `触发全表数据库备份 (V3.0 GZIP)，备份文件: ${fileKey}，包含全部 17 个数据模型。`,
+      `触发${scope === 'season' ? '分赛季' : '全站'}数据库备份 (V3.0 GZIP)，备份文件: ${fileKey}。`,
     );
 
     return {
@@ -196,6 +291,8 @@ export class BackupService {
       purpose,
       protected: isProtected,
       validated: true,
+      scope,
+      seasonId: options?.seasonId,
     };
   }
 
@@ -210,9 +307,7 @@ export class BackupService {
     try {
       while (isTruncated) {
         if (pageCount >= maxPages) {
-          throw new ServiceUnavailableException(
-            `拉取 ${prefix} 超出最大允许页数限制`,
-          );
+          throw new ServiceUnavailableException(`拉取 ${prefix} 超出最大允许页数限制`);
         }
 
         pageCount++;
@@ -233,7 +328,7 @@ export class BackupService {
         if (isTruncated) {
           if (!nextToken || seenTokens.has(nextToken)) {
             throw new ServiceUnavailableException(
-              `R2 列表分页令牌失效或遭遇循环引用 (${prefix})，为防止不完整列表导致安全操作失误，拒绝继续执行`,
+              `R2 列表分页令牌失效或遭遇循环引用 (${prefix})，拒绝继续执行`,
             );
           }
           seenTokens.add(nextToken);
@@ -267,6 +362,18 @@ export class BackupService {
         const isGzip = filename.endsWith('.json.gz');
         const isProtected = filename.includes('_protected');
 
+        let scope: BackupScope = 'full';
+        let seasonId: string | undefined = undefined;
+
+        if (key.includes('/seasons/')) {
+          scope = 'season';
+          const parts = key.split('/');
+          const sIdx = parts.indexOf('seasons');
+          if (sIdx !== -1 && parts.length > sIdx + 1) {
+            seasonId = parts[sIdx + 1];
+          }
+        }
+
         let purpose = 'manual';
         if (key.startsWith('private-backups/uploads/')) {
           purpose = 'uploaded';
@@ -288,6 +395,8 @@ export class BackupService {
           purpose,
           protected: isProtected,
           validated: false,
+          scope,
+          seasonId,
         };
       })
       .sort((a, b) => {
@@ -310,7 +419,12 @@ export class BackupService {
     return await getSignedUrl(this.s3Client, command, { expiresIn: 300 });
   }
 
-  async verifyBackupIntegrity(key: string): Promise<boolean> {
+  async verifyBackupIntegrity(key: string, integrityMap?: Map<string, boolean>): Promise<boolean> {
+    if (integrityMap && integrityMap.has(key)) {
+      return integrityMap.get(key)!;
+    }
+
+    let parseResult: ParseStreamResult | null = null;
     try {
       const s3Response = await this.s3Client.send(
         new GetObjectCommand({
@@ -318,11 +432,18 @@ export class BackupService {
           Key: key,
         }),
       );
-      const { rawData } = await parseAndValidateBackupStream(s3Response.Body as any, key);
-      this.validateBackupSchemaAndIntegrity(rawData);
+      parseResult = await parseAndValidateBackupStream(s3Response.Body as any);
+      validateBackupStreamIntegrity(parseResult);
+      await validateForeignKeysFromStaging(parseResult);
+      if (integrityMap) integrityMap.set(key, true);
       return true;
     } catch {
+      if (integrityMap) integrityMap.set(key, false);
       return false;
+    } finally {
+      if (parseResult) {
+        parseResult.cleanup();
+      }
     }
   }
 
@@ -351,20 +472,36 @@ export class BackupService {
       throw new BadRequestException(`指定的备份文件无法读取或不存在: ${key}`);
     }
 
-    const { rawData } = await parseAndValidateBackupStream(s3Response.Body as any, key);
-    const tablesData = this.validateBackupSchemaAndIntegrity(rawData);
+    let parseResult: ParseStreamResult | null = null;
+    try {
+      parseResult = await parseAndValidateBackupStream(s3Response.Body as any);
+      validateBackupStreamIntegrity(parseResult);
+      await validateForeignKeysFromStaging(parseResult);
+    } catch (err: any) {
+      if (parseResult) parseResult.cleanup();
+      throw err;
+    }
+
+    if (parseResult.scope === 'season') {
+      parseResult.cleanup();
+      throw new BadRequestException('分赛季恢复暂未开放，请使用全站灾备恢复');
+    }
 
     let preRestoreSnapshotKey = '';
     try {
       const snapshotMeta = await this.createBackup(username, { purpose: 'pre-restore' });
       preRestoreSnapshotKey = snapshotMeta.key;
     } catch (snapshotErr) {
+      parseResult.cleanup();
       throw new ServiceUnavailableException(
-        `恢复前自动创建快照失败，为防止数据不可逆丢失，已终止恢复操作: ${
+        `恢复前自动创建快照失败，已终止恢复操作: ${
           snapshotErr instanceof Error ? snapshotErr.message : '未知错误'
         }`,
       );
     }
+
+    const txTimeout = parseInt(process.env.BACKUP_RESTORE_TX_TIMEOUT_MS || '300000', 10);
+    const staging = parseResult.stagingStore;
 
     try {
       await this.prisma.$transaction(
@@ -373,241 +510,102 @@ export class BackupService {
             { locked: boolean }[]
           >`SELECT pg_try_advisory_xact_lock(88998899) AS locked`;
           if (!locked) {
-            throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作，请求被拒绝');
+            throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
           }
 
           await tx.match.updateMany({ data: { mvpPlayerId: null } });
           await tx.player.updateMany({ data: { suspendedAtMatchId: null } });
           await tx.user.updateMany({ data: { teamId: null } });
 
-          await tx.matchLineup.deleteMany();
-          await tx.seasonTeamPlayer.deleteMany();
-          await tx.seasonTeamProfile.deleteMany();
-          await tx.seasonGroupTeam.deleteMany();
-          await tx.seasonDeletionApproval.deleteMany();
-          await tx.goal.deleteMany();
-          await tx.matchEvent.deleteMany();
-          await tx.prediction.deleteMany();
-          await tx.player.deleteMany();
-          await tx.match.deleteMany();
-          await tx.team.deleteMany();
-          await tx.user.deleteMany();
-          await tx.season.deleteMany();
-          await tx.news.deleteMany();
-          await tx.auditLog.deleteMany();
-          await tx.historyImportBatch.deleteMany();
-          await tx.pdfImportBatch.deleteMany();
-
-          if (tablesData.User?.length) {
-            await tx.user.createMany({
-              data: tablesData.User.map((u: any) => ({
-                ...u,
-                teamId: null,
-                createdAt: u.createdAt ? new Date(u.createdAt) : undefined,
-                updatedAt: u.updatedAt ? new Date(u.updatedAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.Season?.length) {
-            await tx.season.createMany({
-              data: tablesData.Season.map((s: any) => ({
-                ...s,
-                createdAt: s.createdAt ? new Date(s.createdAt) : undefined,
-                updatedAt: s.updatedAt ? new Date(s.updatedAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.Team?.length) {
-            await tx.team.createMany({
-              data: tablesData.Team.map((t: any) => ({
-                ...t,
-                deletedAt: t.deletedAt ? new Date(t.deletedAt) : null,
-                createdAt: t.createdAt ? new Date(t.createdAt) : undefined,
-                updatedAt: t.updatedAt ? new Date(t.updatedAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.Player?.length) {
-            await tx.player.createMany({
-              data: tablesData.Player.map((p: any) => ({
-                ...p,
-                suspendedAtMatchId: null,
-                deletedAt: p.deletedAt ? new Date(p.deletedAt) : null,
-                createdAt: p.createdAt ? new Date(p.createdAt) : undefined,
-                updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.Match?.length) {
-            await tx.match.createMany({
-              data: tablesData.Match.map((m: any) => ({
-                ...m,
-                mvpPlayerId: null,
-                matchDate: new Date(m.matchDate),
-                deletedAt: m.deletedAt ? new Date(m.deletedAt) : null,
-                createdAt: m.createdAt ? new Date(m.createdAt) : undefined,
-                updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
-              })),
-            });
+          for (const tableName of RESTORE_DELETE_ORDER) {
+            const meta = TABLE_METADATA_MAP[tableName];
+            await (tx as any)[meta.prismaDelegateName].deleteMany();
           }
 
-          for (const m of tablesData.Match || []) {
-            if (m.mvpPlayerId) {
-              await tx.match.update({
-                where: { id: m.id },
-                data: {
-                  mvpPlayerId: m.mvpPlayerId,
-                  updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
-                },
+          for (const tableName of RESTORE_INSERT_ORDER) {
+            const meta = TABLE_METADATA_MAP[tableName];
+            const delegate = (tx as any)[meta.prismaDelegateName];
+
+            for await (const batch of staging.iterateTable(tableName, 500)) {
+              if (!batch.length) continue;
+
+              const formattedBatch = batch.map((row: any) => {
+                const cleaned = { ...row };
+                if (tableName === 'Player') cleaned.suspendedAtMatchId = null;
+                if (tableName === 'Match') cleaned.mvpPlayerId = null;
+                if (tableName === 'User') cleaned.teamId = null;
+
+                for (const df of meta.dateFields) {
+                  if (cleaned[df] !== undefined && cleaned[df] !== null) {
+                    cleaned[df] = new Date(cleaned[df]);
+                  }
+                }
+                return cleaned;
               });
-            }
-          }
-          for (const p of tablesData.Player || []) {
-            if (p.suspendedAtMatchId) {
-              await tx.player.update({
-                where: { id: p.id },
-                data: {
-                  suspendedAtMatchId: p.suspendedAtMatchId,
-                  updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
-                },
-              });
+
+              await delegate.createMany({ data: formattedBatch });
             }
           }
 
-          if (tablesData.SeasonTeamProfile?.length) {
-            await tx.seasonTeamProfile.createMany({
-              data: tablesData.SeasonTeamProfile.map((stp: any) => ({
-                ...stp,
-                createdAt: stp.createdAt ? new Date(stp.createdAt) : undefined,
-                updatedAt: stp.updatedAt ? new Date(stp.updatedAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.SeasonGroupTeam?.length) {
-            await tx.seasonGroupTeam.createMany({
-              data: tablesData.SeasonGroupTeam.map((sgt: any) => ({
-                ...sgt,
-                createdAt: sgt.createdAt ? new Date(sgt.createdAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.SeasonTeamPlayer?.length) {
-            await tx.seasonTeamPlayer.createMany({
-              data: tablesData.SeasonTeamPlayer.map((stp: any) => ({
-                ...stp,
-                createdAt: stp.createdAt ? new Date(stp.createdAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.SeasonDeletionApproval?.length) {
-            await tx.seasonDeletionApproval.createMany({
-              data: tablesData.SeasonDeletionApproval.map((sda: any) => ({
-                ...sda,
-                createdAt: sda.createdAt ? new Date(sda.createdAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.MatchLineup?.length) {
-            await tx.matchLineup.createMany({
-              data: tablesData.MatchLineup,
-            });
-          }
-          if (tablesData.Goal?.length) {
-            await tx.goal.createMany({
-              data: tablesData.Goal.map((g: any) => ({
-                ...g,
-                createdAt: g.createdAt ? new Date(g.createdAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.MatchEvent?.length) {
-            await tx.matchEvent.createMany({
-              data: tablesData.MatchEvent.map((e: any) => ({
-                ...e,
-                createdAt: e.createdAt ? new Date(e.createdAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.Prediction?.length) {
-            await tx.prediction.createMany({
-              data: tablesData.Prediction.map((pr: any) => ({
-                ...pr,
-                submittedAt: pr.submittedAt ? new Date(pr.submittedAt) : undefined,
-                settledAt: pr.settledAt ? new Date(pr.settledAt) : null,
-                createdAt: pr.createdAt ? new Date(pr.createdAt) : undefined,
-                updatedAt: pr.updatedAt ? new Date(pr.updatedAt) : undefined,
-              })),
-            });
-          }
-
-          for (const u of tablesData.User || []) {
-            if (u.teamId) {
-              await tx.user.update({
-                where: { id: u.id },
-                data: {
-                  teamId: u.teamId,
-                  updatedAt: u.updatedAt ? new Date(u.updatedAt) : undefined,
-                },
-              });
+          // 修复 Match.mvpPlayerId
+          for await (const batch of staging.iterateTable('Match', 500)) {
+            for (const m of batch) {
+              if (m.mvpPlayerId) {
+                await tx.match.update({
+                  where: { id: m.id },
+                  data: {
+                    mvpPlayerId: m.mvpPlayerId,
+                    updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
+                  },
+                });
+              }
             }
           }
 
-          if (tablesData.News?.length) {
-            await tx.news.createMany({
-              data: tablesData.News.map((n: any) => ({
-                ...n,
-                publishedAt: n.publishedAt ? new Date(n.publishedAt) : undefined,
-                deletedAt: n.deletedAt ? new Date(n.deletedAt) : null,
-                createdAt: n.createdAt ? new Date(n.createdAt) : undefined,
-                updatedAt: n.updatedAt ? new Date(n.updatedAt) : undefined,
-              })),
-            });
+          // 修复 Player.suspendedAtMatchId
+          for await (const batch of staging.iterateTable('Player', 500)) {
+            for (const p of batch) {
+              if (p.suspendedAtMatchId) {
+                await tx.player.update({
+                  where: { id: p.id },
+                  data: {
+                    suspendedAtMatchId: p.suspendedAtMatchId,
+                    updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
+                  },
+                });
+              }
+            }
           }
-          if (tablesData.AuditLog?.length) {
-            await tx.auditLog.createMany({
-              data: tablesData.AuditLog.map((al: any) => ({
-                ...al,
-                createdAt: al.createdAt ? new Date(al.createdAt) : undefined,
-              })),
-            });
-          }
-          if (tablesData.HistoryImportBatch?.length) {
-            await tx.historyImportBatch.createMany({
-              data: tablesData.HistoryImportBatch.map((hib: any) => ({
-                ...hib,
-                createdAt: hib.createdAt ? new Date(hib.createdAt) : undefined,
-                undoneAt: hib.undoneAt ? new Date(hib.undoneAt) : null,
-              })),
-            });
-          }
-          if (tablesData.PdfImportBatch?.length) {
-            await tx.pdfImportBatch.createMany({
-              data: tablesData.PdfImportBatch.map((pib: any) => ({
-                ...pib,
-                expiresAt: new Date(pib.expiresAt),
-                commitStartedAt: pib.commitStartedAt ? new Date(pib.commitStartedAt) : null,
-                committedAt: pib.committedAt ? new Date(pib.committedAt) : null,
-                failedAt: pib.failedAt ? new Date(pib.failedAt) : null,
-                createdAt: pib.createdAt ? new Date(pib.createdAt) : undefined,
-                updatedAt: pib.updatedAt ? new Date(pib.updatedAt) : undefined,
-              })),
-            });
+
+          // 修复 User.teamId
+          for await (const batch of staging.iterateTable('User', 500)) {
+            for (const u of batch) {
+              if (u.teamId) {
+                await tx.user.update({
+                  where: { id: u.id },
+                  data: {
+                    teamId: u.teamId,
+                    updatedAt: u.updatedAt ? new Date(u.updatedAt) : undefined,
+                  },
+                });
+              }
+            }
           }
         },
         {
-          maxWait: 10000,
-          timeout: 60000,
+          maxWait: 20000,
+          timeout: txTimeout,
         },
       );
 
       await this.auditLogService.log(
         username,
         'RESTORE_BACKUP',
-        `从备份 ${key} 成功全量覆盖还原数据库，前置自动快照: ${preRestoreSnapshotKey}。`,
+        `从备份 ${key} 成功覆盖还原数据库，前置自动快照: ${preRestoreSnapshotKey}。`,
       );
 
       return '数据库还原成功';
-    } catch (err) {
+    } catch (err: any) {
       console.error('还原备份失败:', err);
       if (
         err instanceof BadRequestException ||
@@ -616,7 +614,9 @@ export class BackupService {
       ) {
         throw err;
       }
-      throw new Error(`还原备份失败: ${err instanceof Error ? err.message : '未知错误'}`);
+      throw new Error(`还原备份失败: ${err?.message || '未知错误'}`);
+    } finally {
+      if (parseResult) parseResult.cleanup();
     }
   }
 
@@ -706,15 +706,15 @@ export class BackupService {
 
     const [payloadBase64, sigHex] = parts;
     const hmacSecret = this.getHmacSecret();
-    const expectedSigHex = crypto.createHmac('sha256', hmacSecret).update(payloadBase64).digest('hex');
+    const expectedSigHex = crypto
+      .createHmac('sha256', hmacSecret)
+      .update(payloadBase64)
+      .digest('hex');
 
     const sigBuf = Buffer.from(sigHex, 'utf8');
     const expectedBuf = Buffer.from(expectedSigHex, 'utf8');
 
-    if (
-      sigBuf.length !== expectedBuf.length ||
-      !crypto.timingSafeEqual(sigBuf, expectedBuf)
-    ) {
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
       throw new BadRequestException('上传 Token 签名不匹配或已被篡改');
     }
 
@@ -785,26 +785,30 @@ export class BackupService {
       throw new BadRequestException('读取上传临时文件流失败');
     }
 
-    let parseResult;
+    let parseResult: ParseStreamResult | null = null;
     try {
-      parseResult = await parseAndValidateBackupStream(getRes.Body as any, payload.key);
+      parseResult = await parseAndValidateBackupStream(getRes.Body as any);
 
       if (parseResult.fileSha256.toLowerCase() !== payload.fileSha256.toLowerCase()) {
         throw new BadRequestException('上传文件哈希与初始化摘要不一致，数据可能已被篡改');
       }
 
-      this.validateBackupSchemaAndIntegrity(parseResult.rawData);
+      validateBackupStreamIntegrity(parseResult);
+      await validateForeignKeysFromStaging(parseResult);
     } catch (validationErr) {
+      if (parseResult) parseResult.cleanup();
       await this.s3Client
         .send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: payload.key }))
         .catch(() => {});
       throw validationErr;
+    } finally {
+      if (parseResult) parseResult.cleanup();
     }
 
     const isGzip = payload.key.endsWith('.json.gz');
     const ext = isGzip ? '.json.gz' : '.json';
     const targetFilename = `backup_${Date.now()}_uploaded${ext}`;
-    const targetKey = `private-backups/database/${targetFilename}`;
+    const targetKey = `private-backups/database/full/${targetFilename}`;
 
     try {
       await this.s3Client.send(
@@ -842,6 +846,7 @@ export class BackupService {
       compressed: isGzip,
       purpose: 'uploaded',
       validated: true,
+      scope: 'full',
     };
   }
 
@@ -857,27 +862,33 @@ export class BackupService {
       throw new BadRequestException('云端不存在可删除的备份文件');
     }
 
-    const newestKey = allBackups[0]?.key;
-    if (key === newestKey) {
-      throw new BadRequestException('最新备份点已被永久保护，禁止删除');
+    const fullBackups = allBackups.filter((b) => (b.scope || 'full') === 'full');
+    const newestFullKey = fullBackups[0]?.key;
+
+    if (key === newestFullKey) {
+      throw new BadRequestException('最新全站备份点已被永久保护，禁止删除');
     }
 
     const remainingBackups = allBackups.filter((b) => b.key !== key);
-    if (remainingBackups.length < 2) {
-      throw new BadRequestException('为确保灾备安全，删除后系统必须保留至少 2 个有效恢复点');
+    const remainingFullBackups = remainingBackups.filter((b) => (b.scope || 'full') === 'full');
+
+    if (remainingFullBackups.length < 2) {
+      throw new BadRequestException('为确保灾备安全，删除后系统必须保留至少 2 个有效全站恢复点');
     }
 
-    let validCount = 0;
-    for (const b of remainingBackups) {
-      const isValid = await this.verifyBackupIntegrity(b.key);
+    const integrityMap = new Map<string, boolean>();
+    let validFullCount = 0;
+
+    for (const b of remainingFullBackups) {
+      const isValid = await this.verifyBackupIntegrity(b.key, integrityMap);
       if (isValid) {
-        validCount++;
+        validFullCount++;
       }
     }
 
-    if (validCount < 2) {
+    if (validFullCount < 2) {
       throw new BadRequestException(
-        `灾备保护拦截：剩余备份中仅有 ${validCount} 个经检验合规可用的恢复点（需至少 2 个），拒绝删除！`,
+        `灾备保护拦截：剩余备份中仅有 ${validFullCount} 个经检验合规可用的全站恢复点（需至少 2 个），拒绝删除！`,
       );
     }
 
@@ -893,11 +904,7 @@ export class BackupService {
       throw new ServiceUnavailableException('删除云端备份文件失败');
     }
 
-    await this.auditLogService.log(
-      username,
-      'DELETE_BACKUP',
-      `手动删除云端备份文件: ${key}`,
-    );
+    await this.auditLogService.log(username, 'DELETE_BACKUP', `手动删除云端备份文件: ${key}`);
 
     return '备份删除成功';
   }
@@ -924,43 +931,45 @@ export class BackupService {
     }
 
     if (confirmText !== 'EXECUTE_RETENTION_DELETE') {
-      throw new BadRequestException(
-        '执行保留清理物理删除必须确认文本 "EXECUTE_RETENTION_DELETE"',
-      );
+      throw new BadRequestException('执行保留清理物理删除必须确认文本 "EXECUTE_RETENTION_DELETE"');
     }
 
-    const newestDbKey = allBackups.find((b) => b.key.startsWith('private-backups/database/'))?.key;
+    const fullBackups = allBackups.filter(
+      (b) => b.key.startsWith('private-backups/database/') && (b.scope || 'full') === 'full',
+    );
+    const newestFullDbKey = fullBackups[0]?.key;
+
     const hasDatabaseDeletions = plan.plannedDeletions.some((item) =>
       item.key.startsWith('private-backups/database/'),
     );
 
     const integrityMap = new Map<string, boolean>();
-    let validDbCount = 0;
+    let validFullDbCount = 0;
 
-    // 仅在清理计划中包含正式数据库备份时才启动一次性完整性校验，避免纯 uploads/ 清理产生 R2 校验流量
     if (hasDatabaseDeletions) {
-      const dbBackups = allBackups.filter((b) => b.key.startsWith('private-backups/database/'));
-      for (const dbMeta of dbBackups) {
-        const isValid = await this.verifyBackupIntegrity(dbMeta.key);
-        integrityMap.set(dbMeta.key, isValid);
-        if (isValid) validDbCount++;
+      for (const dbMeta of fullBackups) {
+        const isValid = await this.verifyBackupIntegrity(dbMeta.key, integrityMap);
+        if (isValid) validFullDbCount++;
       }
     }
 
     let deletedCount = 0;
 
     for (const item of plan.plannedDeletions) {
-      if (item.key === newestDbKey) continue;
+      if (item.key === newestFullDbKey) continue;
 
       if (item.key.startsWith('private-backups/database/')) {
-        const isItemValid = integrityMap.get(item.key) ?? false;
-        const remainingValidCount = validDbCount - (isItemValid ? 1 : 0);
+        const isFull = !item.key.includes('/seasons/');
+        if (isFull) {
+          const isItemValid = integrityMap.get(item.key) ?? false;
+          const remainingValidCount = validFullDbCount - (isItemValid ? 1 : 0);
 
-        if (remainingValidCount < 2) {
-          console.warn(
-            `[Retention] 跳过删除 ${item.key}，原因：删后剩余有效恢复点数 (${remainingValidCount}) 不足 2 个`,
-          );
-          continue;
+          if (remainingValidCount < 2) {
+            console.warn(
+              `[Retention] 跳过删除 ${item.key}，原因：删后剩余有效全站恢复点数 (${remainingValidCount}) 不足 2 个`,
+            );
+            continue;
+          }
         }
       }
 
@@ -973,10 +982,10 @@ export class BackupService {
         );
         deletedCount++;
 
-        if (item.key.startsWith('private-backups/database/')) {
+        if (item.key.startsWith('private-backups/database/') && !item.key.includes('/seasons/')) {
           const isItemValid = integrityMap.get(item.key) ?? false;
           if (isItemValid) {
-            validDbCount--;
+            validFullDbCount--;
           }
         }
 

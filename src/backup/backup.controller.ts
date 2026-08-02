@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Req,
+  Res,
   UseGuards,
   ForbiddenException,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import { BackupService } from './backup.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { BackupScope } from './backup-scope.service';
 
 @Controller('api/v1/backups')
 @ApiTags('备份管理')
@@ -24,10 +26,37 @@ export class BackupController {
   @Roles('super_admin')
   @Post('create')
   @ApiOperation({ summary: '创建数据库备份并上传 R2 私有桶 (V3.0 GZIP)' })
-  async create(@Req() req: any) {
+  async create(
+    @Req() req: any,
+    @Res({ passthrough: true }) res: any,
+    @Body('scope') scope?: BackupScope,
+    @Body('seasonId') seasonId?: string,
+  ) {
     const username = req.user?.username || 'system';
-    const backupMetadata = await this.backupService.createBackup(username, { purpose: 'manual' });
-    return { success: true, data: backupMetadata };
+    const abortController = new AbortController();
+
+    const onAborted = () => abortController.abort();
+    const onClose = () => {
+      if (!res.writableEnded) abortController.abort();
+    };
+
+    req.on('aborted', onAborted);
+    req.on('error', onAborted);
+    res.on('close', onClose);
+
+    try {
+      const backupMetadata = await this.backupService.createBackup(username, {
+        purpose: 'manual',
+        scope,
+        seasonId,
+        signal: abortController.signal,
+      });
+      return { success: true, data: backupMetadata };
+    } finally {
+      req.off('aborted', onAborted);
+      req.off('error', onAborted);
+      res.off('close', onClose);
+    }
   }
 
   @ApiBearerAuth()
@@ -126,7 +155,7 @@ export class BackupController {
 
   @Post('auto-backup')
   @ApiOperation({ summary: 'Vercel Cron 自动定时备份接口' })
-  async autoBackup(@Req() req: any) {
+  async autoBackup(@Req() req: any, @Res({ passthrough: true }) res: any) {
     const authHeader = req.headers['authorization'];
     const expectedToken = `Bearer ${process.env.CRON_SECRET}`;
 
@@ -134,9 +163,26 @@ export class BackupController {
       throw new ForbiddenException('未授权的定时备份请求');
     }
 
-    const backupMetadata = await this.backupService.createBackup('vercel-cron-system', {
-      purpose: 'scheduled',
-    });
-    return { success: true, data: backupMetadata };
+    const abortController = new AbortController();
+    const onAborted = () => abortController.abort();
+    const onClose = () => {
+      if (!res.writableEnded) abortController.abort();
+    };
+
+    req.on('aborted', onAborted);
+    req.on('error', onAborted);
+    res.on('close', onClose);
+
+    try {
+      const backupMetadata = await this.backupService.createBackup('vercel-cron-system', {
+        purpose: 'scheduled',
+        signal: abortController.signal,
+      });
+      return { success: true, data: backupMetadata };
+    } finally {
+      req.off('aborted', onAborted);
+      req.off('error', onAborted);
+      res.off('close', onClose);
+    }
   }
 }

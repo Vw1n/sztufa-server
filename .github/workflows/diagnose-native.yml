@@ -27,6 +27,7 @@ jobs:
         run: node -v && npm -v
 
       - name: 单独加载 better-sqlite3
+        continue-on-error: true
         run: node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('better-sqlite3 LOAD_OK'); db.prepare('select 1').get()"
 
       - name: 配置 Node.js 22 对比

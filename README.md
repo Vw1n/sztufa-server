@@ -33,7 +33,7 @@
 
 ### 环境要求
 
-- Node.js >= 20.x
+- Node.js >= 22.x
 - PostgreSQL >= 16.x
 - Docker (可选，推荐用于快速部署)
 

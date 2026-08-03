@@ -173,8 +173,22 @@ export class BackupObjectStoreService {
         }),
       );
       return response.Body as Readable;
-    } catch {
-      throw new BadRequestException(notFoundMessage || `指定的备份文件无法读取或不存在: ${key}`);
+    } catch (err: any) {
+      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException) {
+        throw err;
+      }
+      const isNotFound =
+        err?.name === 'NoSuchKey' ||
+        err?.name === 'NotFound' ||
+        err?.code === 'NoSuchKey' ||
+        err?.code === 'NotFound' ||
+        err?.$metadata?.httpStatusCode === 404;
+
+      if (isNotFound) {
+        throw new BadRequestException(notFoundMessage || `指定的备份文件不存在或无法读取: ${key}`);
+      }
+      console.error(`读取 R2 对象 ${key} 发生存储基础设施异常:`, err);
+      throw new ServiceUnavailableException(`对象存储服务异常，无法读取备份文件: ${key}`);
     }
   }
 
@@ -186,9 +200,23 @@ export class BackupObjectStoreService {
           Key: key,
         }),
       );
-      return response.ContentLength ?? -1;
-    } catch {
-      throw new BadRequestException(`未在云端找到指定的临时上传文件: ${key}`);
+      return response?.ContentLength ?? -1;
+    } catch (err: any) {
+      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException) {
+        throw err;
+      }
+      const isNotFound =
+        err?.name === 'NoSuchKey' ||
+        err?.name === 'NotFound' ||
+        err?.code === 'NoSuchKey' ||
+        err?.code === 'NotFound' ||
+        err?.$metadata?.httpStatusCode === 404;
+
+      if (isNotFound) {
+        throw new BadRequestException(`未在云端找到指定的备份文件: ${key}`);
+      }
+      console.error(`Head R2 对象 ${key} 发生存储基础设施异常:`, err);
+      throw new ServiceUnavailableException(`对象存储服务异常，无法获取备份元数据: ${key}`);
     }
   }
 
@@ -214,6 +242,7 @@ export class BackupObjectStoreService {
         Key: targetKey,
         ContentType: contentType,
         ContentDisposition: contentDisposition,
+        MetadataDirective: 'REPLACE',
       }),
     );
   }

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "校园足球信息管理平台后端服务",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "nest start",
@@ -13,7 +13,7 @@
     "vercel-build": "npx prisma generate && node scripts/run-vercel-migrations.js && npx nest build && node copy-swagger.js",
     "test": "jest",
     "test:integration:backup": "jest --runInBand --config jest.integration.config.js",
-    "test:backup-memory": "jest --runInBand src/backup/backup-memory.spec.ts",
+    "test:backup-memory": "jest --runInBand --testPathIgnorePatterns=\"^$\" src/backup/backup-memory.spec.ts",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "lint": "eslint \"src/**/*.ts\"",
@@ -68,7 +68,7 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.1.0",
-    "@types/node": "^20.10.0",
+    "@types/node": "^22.0.0",
     "@types/stream-json": "^1.7.8",
     "@types/supertest": "^2.0.16",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
@@ -94,7 +94,8 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "testPathIgnorePatterns": [
-      "\\.integration\\.spec\\.ts$"
+      "\\.integration\\.spec\\.ts$",
+      "backup-memory\\.spec\\.ts$"
     ],
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"

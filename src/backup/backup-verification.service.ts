@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { Readable } from 'stream';
 import { BackupObjectStoreService } from './backup-object-store.service';
 import { parseAndValidateBackupStream, ParseStreamResult } from './backup-serializer';
@@ -31,7 +31,10 @@ export class BackupVerificationService {
       await validateForeignKeysFromStaging(parseResult);
       if (integrityMap) integrityMap.set(key, true);
       return true;
-    } catch {
+    } catch (err) {
+      if (err instanceof ServiceUnavailableException) {
+        throw err;
+      }
       if (integrityMap) integrityMap.set(key, false);
       return false;
     } finally {

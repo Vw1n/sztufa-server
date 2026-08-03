@@ -201,6 +201,13 @@ export class BackupUploadService {
         isGzip ? 'application/gzip' : 'application/json',
         `attachment; filename="${targetFilename}"`,
       );
+      const targetSize = await this.objectStore.headObject(targetKey);
+      if (targetSize !== payload.size) {
+        await this.objectStore.deleteObject(targetKey).catch(() => {});
+        throw new Error(
+          `转存后目标对象大小 (${targetSize} 字节) 与预设大小 (${payload.size} 字节) 不一致`,
+        );
+      }
       await this.objectStore.deleteObject(payload.key);
     } catch (err) {
       console.error('转存备份文件失败:', err);

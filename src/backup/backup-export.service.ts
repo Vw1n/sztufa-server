@@ -144,6 +144,16 @@ export class BackupExportService {
       throw new ServiceUnavailableException('无法将备份文件保存至对象存储');
     }
 
+    let size = 0;
+    try {
+      const actualSize = await this.objectStore.headObject(fileKey);
+      if (typeof actualSize === 'number' && actualSize > 0) {
+        size = actualSize;
+      }
+    } catch {
+      // 降级保持 0
+    }
+
     await this.auditLogService.log(
       username,
       'CREATE_BACKUP',
@@ -153,7 +163,7 @@ export class BackupExportService {
     return {
       key: fileKey,
       filename,
-      size: 0,
+      size,
       lastModified: new Date(),
       formatVersion: '3.0',
       compressed: true,

@@ -366,6 +366,50 @@ describe('BackupService (V3 & Security Spec)', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('试图删除不存在的备份点时应拒绝', async () => {
+      jest.spyOn(objectStore, 'listBackups').mockResolvedValue([]);
+      await expect(
+        service.deleteBackup(
+          'admin',
+          'private-backups/database/full/backup_notfound.json.gz',
+          'DELETE_BACKUP',
+        ),
+      ).rejects.toThrow(/不存在/);
+    });
+
+    it('试图删除受 protected 标记保护的备份时应拒绝', async () => {
+      const mockList = [
+        {
+          key: 'private-backups/database/full/backup_1_protected.json.gz',
+          filename: 'backup_1_protected.json.gz',
+          protected: true,
+          scope: 'full',
+          lastModified: new Date(),
+        },
+        {
+          key: 'private-backups/database/full/backup_2.json.gz',
+          filename: 'backup_2.json.gz',
+          scope: 'full',
+          lastModified: new Date(Date.now() - 1000),
+        },
+        {
+          key: 'private-backups/database/full/backup_3.json.gz',
+          filename: 'backup_3.json.gz',
+          scope: 'full',
+          lastModified: new Date(Date.now() - 2000),
+        },
+      ];
+      jest.spyOn(objectStore, 'listBackups').mockResolvedValue(mockList as any);
+
+      await expect(
+        service.deleteBackup(
+          'admin',
+          'private-backups/database/full/backup_1_protected.json.gz',
+          'DELETE_BACKUP',
+        ),
+      ).rejects.toThrow(/已被标记为保护，禁止手动删除/);
+    });
+
     it('当剩余全站备份不足 2 个可用恢复点时拒绝删除', async () => {
       const mockList = [
         {

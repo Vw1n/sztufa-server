@@ -30,6 +30,20 @@ export class BackupMaintenanceService {
       throw new BadRequestException('云端不存在可删除的备份文件');
     }
 
+    const targetBackup = allBackups.find((b) => b.key === key);
+    if (!targetBackup) {
+      throw new BadRequestException(`指定删除的备份文件不存在: ${key}`);
+    }
+
+    const targetFilename = targetBackup.filename || targetBackup.key.split('/').pop() || '';
+    if (
+      targetBackup.protected ||
+      targetBackup.key.includes('_protected') ||
+      targetFilename.includes('_protected')
+    ) {
+      throw new BadRequestException('该备份点已被标记为保护，禁止手动删除');
+    }
+
     const fullBackups = allBackups.filter((b) => (b.scope || 'full') === 'full');
     const newestFullKey = fullBackups[0]?.key;
 

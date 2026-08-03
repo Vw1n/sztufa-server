@@ -1,0 +1,42 @@
+name: 原生模块崩溃诊断
+
+on:
+  push:
+    branches: [chore/fix-lint-baseline]
+
+jobs:
+  diagnose:
+    name: Ubuntu 原生模块加载诊断
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 配置 Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装锁定依赖
+        run: npm ci
+
+      - name: Node 版本
+        run: node -v && npm -v
+
+      - name: 单独加载 better-sqlite3
+        run: node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('better-sqlite3 LOAD_OK'); db.prepare('select 1').get()"
+
+      - name: 单独加载 sharp
+        run: node -e "const s=require('sharp'); console.log('sharp LOAD_OK', !!s)"
+
+      - name: 单独加载 @napi-rs/canvas
+        run: node -e "const c=require('@napi-rs/canvas'); console.log('canvas LOAD_OK', !!c)"
+
+      - name: 加载 BackupStagingStore 模块
+        run: node -e "require('./dist/backup/backup-staging-store')" || node -e "require('ts-node/register'); require('./src/backup/backup-staging-store'); console.log('staging-store MODULE_OK')"
+
+      - name: 只跑 staging 相关单元测试
+        run: npx jest --runInBand --testPathIgnorePatterns "backup-memory.spec.ts|\.integration\.spec\.ts$" src/backup 2>&1 | tail -20

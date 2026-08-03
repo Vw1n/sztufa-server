@@ -5,6 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { BackupRetentionService } from './backup-retention.service';
 import { BackupScopeService } from './backup-scope.service';
+import { BackupObjectStoreService } from './backup-object-store.service';
+import { BackupVerificationService } from './backup-verification.service';
+import { BackupExportService } from './backup-export.service';
+import { BackupRestoreService } from './backup-restore.service';
+import { BackupUploadService } from './backup-upload.service';
+import { BackupMaintenanceService } from './backup-maintenance.service';
 import { parseAndValidateBackupStream } from './backup-serializer';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
@@ -24,6 +30,8 @@ jest.mock('@aws-sdk/s3-request-presigner', () => ({
 
 describe('BackupService (V3 & Security Spec)', () => {
   let service: BackupService;
+  let objectStore: BackupObjectStoreService;
+  let verificationService: BackupVerificationService;
   let retentionService: BackupRetentionService;
 
   const mockPrismaService = {
@@ -67,6 +75,12 @@ describe('BackupService (V3 & Security Spec)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BackupService,
+        BackupObjectStoreService,
+        BackupVerificationService,
+        BackupExportService,
+        BackupRestoreService,
+        BackupUploadService,
+        BackupMaintenanceService,
         BackupRetentionService,
         BackupScopeService,
         { provide: PrismaService, useValue: mockPrismaService },
@@ -75,6 +89,8 @@ describe('BackupService (V3 & Security Spec)', () => {
     }).compile();
 
     service = module.get<BackupService>(BackupService);
+    objectStore = module.get<BackupObjectStoreService>(BackupObjectStoreService);
+    verificationService = module.get<BackupVerificationService>(BackupVerificationService);
     retentionService = module.get<BackupRetentionService>(BackupRetentionService);
   });
 
@@ -101,7 +117,7 @@ describe('BackupService (V3 & Security Spec)', () => {
   describe('createBackup V3 游标分页与客户端中断', () => {
     it('应该使用游标分页 (take, orderBy, cursor) 查询数据模型，断言从未进行无限制全表查询', async () => {
       mockPrismaService.user.findMany.mockClear();
-      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(true);
+      jest.spyOn(verificationService, 'verifyBackupIntegrity').mockResolvedValue(true);
 
       const result = await service.createBackup('admin', { purpose: 'manual' });
       expect(result.key).toMatch(/^private-backups\/database\/full\/backup_\d+_manual\.json\.gz$/);
@@ -118,8 +134,8 @@ describe('BackupService (V3 & Security Spec)', () => {
 
     it('上传后完整性复验返回 false 时必须删除 R2 对象并拒绝返回成功元数据', async () => {
       mockAuditLogService.log.mockClear();
-      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(false);
-      const sendSpy = jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+      jest.spyOn(verificationService, 'verifyBackupIntegrity').mockResolvedValue(false);
+      const sendSpy = jest.spyOn((objectStore as any).s3Client, 'send').mockResolvedValue({});
 
       await expect(service.createBackup('admin', { purpose: 'manual' })).rejects.toThrow(
         '无法将备份文件保存至对象存储',
@@ -147,8 +163,8 @@ describe('BackupService (V3 & Security Spec)', () => {
 
       mockPrismaService.player.findMany.mockResolvedValueOnce([mockPlayerWithSameSeasonMatch]);
 
-      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(true);
-      jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+      jest.spyOn(verificationService, 'verifyBackupIntegrity').mockResolvedValue(true);
+      jest.spyOn((objectStore as any).s3Client, 'send').mockResolvedValue({});
 
       const result = await service.createBackup('admin', {
         scope: 'season',
@@ -178,8 +194,8 @@ describe('BackupService (V3 & Security Spec)', () => {
 
       mockPrismaService.player.findMany.mockResolvedValueOnce([mockPlayerWithOtherSeasonMatch]);
 
-      jest.spyOn(service, 'verifyBackupIntegrity').mockResolvedValue(true);
-      jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+      jest.spyOn(verificationService, 'verifyBackupIntegrity').mockResolvedValue(true);
+      jest.spyOn((objectStore as any).s3Client, 'send').mockResolvedValue({});
 
       const result = await service.createBackup('admin', {
         scope: 'season',
@@ -203,10 +219,10 @@ describe('BackupService (V3 & Security Spec)', () => {
         },
       ];
 
-      jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
-      const verifySpy = jest.spyOn(service, 'verifyBackupIntegrity');
+      jest.spyOn(objectStore, 'listBackups').mockResolvedValue(mockList as any);
+      const verifySpy = jest.spyOn(verificationService, 'verifyBackupIntegrity');
 
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async () => ({}));
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async () => ({}));
 
       await service.cleanRetention('admin', false, 'EXECUTE_RETENTION_DELETE');
 
@@ -247,7 +263,7 @@ describe('BackupService (V3 & Security Spec)', () => {
         .createHmac('sha256', hmacSecret)
         .update(expiredPayloadBase64)
         .digest('hex');
-      const sendSpy = jest.spyOn((service as any).s3Client, 'send').mockResolvedValue({});
+      const sendSpy = jest.spyOn((objectStore as any).s3Client, 'send').mockResolvedValue({});
 
       await expect(
         service.completeUpload('u1', 'admin', `${expiredPayloadBase64}.${signature}`),
@@ -327,7 +343,7 @@ describe('BackupService (V3 & Security Spec)', () => {
         fakeSha256,
       );
 
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (cmd: any) => {
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (cmd: any) => {
         if (cmd.constructor.name === 'HeadObjectCommand') {
           return { ContentLength: gzippedBuffer.length } as any;
         }
@@ -363,7 +379,7 @@ describe('BackupService (V3 & Security Spec)', () => {
           lastModified: new Date(Date.now() - 10000),
         },
       ];
-      jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
+      jest.spyOn(objectStore, 'listBackups').mockResolvedValue(mockList as any);
 
       await expect(
         service.deleteBackup(
@@ -395,12 +411,12 @@ describe('BackupService (V3 & Security Spec)', () => {
         },
       ];
 
-      jest.spyOn(service, 'listBackups').mockResolvedValue(mockList as any);
-      jest.spyOn(service, 'verifyBackupIntegrity').mockImplementation(async (key) => {
+      jest.spyOn(objectStore, 'listBackups').mockResolvedValue(mockList as any);
+      jest.spyOn(verificationService, 'verifyBackupIntegrity').mockImplementation(async (key) => {
         return key.includes('backup_');
       });
 
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async () => ({}));
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async () => ({}));
 
       const res = await service.cleanRetention('admin', false, 'EXECUTE_RETENTION_DELETE');
       expect(res.dryRun).toBe(false);

@@ -2,6 +2,12 @@ import { PrismaClient } from '@prisma/client';
 import { BackupService, MANDATORY_BACKUP_TABLES } from './backup.service';
 import { BackupRetentionService } from './backup-retention.service';
 import { BackupScopeService } from './backup-scope.service';
+import { BackupObjectStoreService } from './backup-object-store.service';
+import { BackupVerificationService } from './backup-verification.service';
+import { BackupExportService } from './backup-export.service';
+import { BackupRestoreService } from './backup-restore.service';
+import { BackupUploadService } from './backup-upload.service';
+import { BackupMaintenanceService } from './backup-maintenance.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
 import { Readable } from 'stream';
@@ -9,6 +15,7 @@ import { Readable } from 'stream';
 describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
   let testPrisma: PrismaClient;
   let service: BackupService;
+  let objectStore: BackupObjectStoreService;
   let mockAuditLog: any;
   let originalBackupRestoreEnabled: string | undefined;
 
@@ -61,11 +68,38 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
 
     const retentionService = new BackupRetentionService();
     const scopeService = new BackupScopeService(testPrisma as unknown as PrismaService);
-    service = new BackupService(
+    objectStore = new BackupObjectStoreService();
+    const verificationService = new BackupVerificationService(objectStore);
+    const exportService = new BackupExportService(
       testPrisma as unknown as PrismaService,
+      objectStore,
+      verificationService,
       mockAuditLog as any,
-      retentionService,
       scopeService,
+    );
+    const restoreService = new BackupRestoreService(
+      testPrisma as unknown as PrismaService,
+      objectStore,
+      verificationService,
+      exportService,
+      mockAuditLog as any,
+    );
+    const uploadService = new BackupUploadService(objectStore, verificationService, mockAuditLog);
+    const maintenanceService = new BackupMaintenanceService(
+      objectStore,
+      verificationService,
+      retentionService,
+      mockAuditLog,
+    );
+    service = new BackupService(
+      exportService,
+      restoreService,
+      uploadService,
+      maintenanceService,
+      objectStore,
+      verificationService,
+      scopeService,
+      retentionService,
     );
 
     // 保存原始值并启用恢复功能（所有集成测试均需要）
@@ -393,7 +427,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         return { Location: 'mock-location' } as any;
       });
 
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
         if (command.constructor.name === 'GetObjectCommand') {
           return { Body: Readable.from([capturedBackupBuffer]) } as any;
         }
@@ -485,7 +519,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         return { Location: 'mock-location' } as any;
       });
 
-      jest.spyOn((service as any).s3Client, 'send').mockImplementation(async (command: any) => {
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
         if (command.constructor.name === 'GetObjectCommand') {
           return { Body: Readable.from([capturedRollbackBuffer]) } as any;
         }

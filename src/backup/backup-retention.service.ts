@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BackupMetadata } from './backup.service';
+import { BackupMetadata } from './backup.types';
 
 export interface RetentionPlanItem {
   key: string;

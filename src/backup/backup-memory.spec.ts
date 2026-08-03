@@ -262,6 +262,8 @@ runBenchmark(targetMb).catch(err => {
     // 比较断言：验证 60MB -> 120MB 数据量翻倍时，堆增量差值不超过 20 MB，证明 O(1) 非线性增长！
     const deltaDiff = Math.abs(diff120 - diff60);
     console.log(`[增量对比] 120MB 与 60MB 堆增量差值: ${deltaDiff.toFixed(2)} MB`);
+    // 60MB + 120MB 两个子进程串行实测约 1012 秒（60MB≈328s，120MB≈684s），
+    // 900s 的 jest 超时会提前掐断导致误报失败，故提升至 20 分钟。
     expect(deltaDiff).toBeLessThan(20);
-  }, 900000);
+  }, 1200000);
 });

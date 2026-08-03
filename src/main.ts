@@ -60,11 +60,7 @@ async function initializeApp() {
             "'unsafe-eval'",
             ...(swaggerEnabled ? [swaggerAssetOrigin] : []),
           ],
-          styleSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            ...(swaggerEnabled ? [swaggerAssetOrigin] : []),
-          ],
+          styleSrc: ["'self'", "'unsafe-inline'", ...(swaggerEnabled ? [swaggerAssetOrigin] : [])],
           imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           connectSrc: ["'self'", 'https:'],
         },

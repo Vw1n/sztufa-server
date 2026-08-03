@@ -29,6 +29,15 @@ jobs:
       - name: 单独加载 better-sqlite3
         run: node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('better-sqlite3 LOAD_OK'); db.prepare('select 1').get()"
 
+      - name: 配置 Node.js 22 对比
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Node 22 单独加载 better-sqlite3
+        run: node -e "const D=require('better-sqlite3'); const db=new D(':memory:'); console.log('NODE22 better-sqlite3 LOAD_OK'); db.prepare('select 1').get()"
+
       - name: 单独加载 sharp
         run: node -e "const s=require('sharp'); console.log('sharp LOAD_OK', !!s)"
 

@@ -1,22 +1,17 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { resolveMatchOutcome } from '../match/match-outcome';
 import {
-  ImportEntityCounts,
   ImportExecutionResult,
   ImportPreview,
   ImportUndoPayload,
-  JsonRecord,
   LastImportBatch,
-  MatchUndoSnapshot,
-  NormalizedEvent,
-  NormalizedMatch,
-  NormalizedPackage,
   UndoImportResult,
 } from './import.types';
+import { DEFAULT_LOCATION, UNKNOWN_JERSEY, ImportParser, stableHash } from './import-parser';
+import { ImportWriter, getImportTransactionOptions } from './import-writer';
 
 export type {
   ImportEntityCounts,
@@ -25,71 +20,6 @@ export type {
   LastImportBatch,
   UndoImportResult,
 } from './import.types';
-
-const DEFAULT_IMPORT_TRANSACTION_TIMEOUT_MS = 240_000;
-const MAX_IMPORT_TRANSACTION_TIMEOUT_MS = 240_000;
-const IMPORT_TRANSACTION_MAX_WAIT_MS = 15_000;
-
-const getImportTransactionOptions = () => {
-  const configuredTimeout = Number.parseInt(process.env.IMPORT_TRANSACTION_TIMEOUT_MS || '', 10);
-  const timeout =
-    Number.isFinite(configuredTimeout) && configuredTimeout > 0
-      ? Math.min(configuredTimeout, MAX_IMPORT_TRANSACTION_TIMEOUT_MS)
-      : DEFAULT_IMPORT_TRANSACTION_TIMEOUT_MS;
-
-  return {
-    maxWait: IMPORT_TRANSACTION_MAX_WAIT_MS,
-    timeout,
-  };
-};
-
-const MAX_FILES = 10;
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const DEFAULT_LOCATION = '深圳技术大学足球场';
-const UNKNOWN_JERSEY = '未记录';
-
-const HISTORY_EVENT_TYPES: Record<string, string> = {
-  goal: 'goal',
-  penalty: 'penalty',
-  own_goal: 'own_goal',
-  yellow_card: 'yellow_card',
-  red_card: 'red_card',
-  penalty_miss: 'penalty_miss',
-  penalty_shootout_goal: 'penalty_shootout_goal',
-  penalty_shootout_miss: 'penalty_shootout_miss',
-  进球: 'goal',
-  '进球(点球)': 'penalty',
-  乌龙: 'own_goal',
-  乌龙球: 'own_goal',
-  黄牌: 'yellow_card',
-  红牌: 'red_card',
-  失点: 'penalty_miss',
-  点球罚丢: 'penalty_miss',
-  点球大战罚中: 'penalty_shootout_goal',
-  点球大战罚失: 'penalty_shootout_miss',
-  罚中: 'penalty_shootout_goal',
-  罚失: 'penalty_shootout_miss',
-};
-
-const asRecord = (value: unknown): JsonRecord | null =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : null;
-
-const text = (value: unknown): string | null => {
-  if (value === undefined || value === null) return null;
-  const normalized = String(value).trim();
-  return normalized || null;
-};
-
-const integer = (value: unknown): number | null => {
-  if (typeof value === 'number' && Number.isInteger(value)) return value;
-  const normalized = text(value);
-  return normalized && /^\d+$/.test(normalized) ? Number(normalized) : null;
-};
-
-const stableHash = (value: string, length = 24): string =>
-  createHash('sha256').update(value).digest('hex').slice(0, length);
 
 @Injectable()
 export class ImportService {
@@ -100,10 +30,10 @@ export class ImportService {
   ) {}
 
   async previewFiles(files: Express.Multer.File[]): Promise<ImportPreview> {
-    const normalized = this.normalizeFiles(files);
-    const records = this.countRecords(normalized);
-    const create = this.emptyCounts();
-    const update = this.emptyCounts();
+    const normalized = ImportParser.normalizeFiles(files);
+    const records = ImportParser.countRecords(normalized);
+    const create = ImportParser.emptyCounts();
+    const update = ImportParser.emptyCounts();
 
     if (normalized.errors.length === 0) {
       const [seasons, teams, players, matches] = await Promise.all([
@@ -178,7 +108,7 @@ export class ImportService {
     username: string,
     expectedDigest?: string,
   ): Promise<ImportExecutionResult> {
-    const normalized = this.normalizeFiles(files);
+    const normalized = ImportParser.normalizeFiles(files);
     if (normalized.errors.length > 0) {
       throw new BadRequestException(normalized.errors);
     }
@@ -186,8 +116,8 @@ export class ImportService {
       throw new BadRequestException('文件内容已发生变化，请重新预检后再导入');
     }
 
-    const created = this.emptyCounts();
-    const updated = this.emptyCounts();
+    const created = ImportParser.emptyCounts();
+    const updated = ImportParser.emptyCounts();
     const importedSeasons = new Map<string, string>();
     const undoPayload = this.emptyUndoPayload();
 
@@ -396,8 +326,8 @@ export class ImportService {
           throw new BadRequestException(`比赛关联数据不完整: ${matchInput.gameId}`);
         }
 
-        const status = this.resolveStatus(matchInput);
-        const matchDate = this.parseMatchDate(matchInput.date, matchInput.time);
+        const status = ImportWriter.resolveStatus(matchInput);
+        const matchDate = ImportWriter.parseMatchDate(matchInput.date, matchInput.time);
         const homeScore = matchInput.homeScore ?? 0;
         const awayScore = matchInput.awayScore ?? 0;
         const outcome =
@@ -415,7 +345,7 @@ export class ImportService {
             : outcome?.winnerTeamType === 'away'
               ? awayTeamId
               : null;
-        const competition = this.resolveCompetition(matchInput);
+        const competition = ImportWriter.resolveCompetition(matchInput);
         const matchData = {
           legacyGameId: matchInput.legacyGameId,
           homeTeamId,
@@ -441,7 +371,9 @@ export class ImportService {
           include: { goals: true, events: true },
         });
         if (existing) {
-          undoPayload.updated.matches.push(this.captureMatchSnapshot(existing));
+          undoPayload.updated.matches.push(
+            ImportWriter.snapshotMatch(existing, existing.goals, existing.events),
+          );
         }
         const match = existing
           ? await tx.match.update({ where: { id: existing.id }, data: matchData })
@@ -461,7 +393,7 @@ export class ImportService {
             (event.teamType === 'home' ? matchInput.homeTeam : matchInput.awayTeam);
           const playerId = event.playerName
             ? playerIds.get(
-                this.playerKey(eventTeamName, event.playerName, matchInput.seasonName),
+                ImportParser.playerKey(eventTeamName, event.playerName, matchInput.seasonName),
               ) || null
             : null;
           return {
@@ -591,7 +523,7 @@ export class ImportService {
         await tx.matchEvent.deleteMany({ where: { matchId: snapshot.id } });
         await tx.match.update({
           where: { id: snapshot.id },
-          data: this.restoreMatchData(snapshot.data),
+          data: ImportWriter.restoreMatchData(snapshot.data),
         });
         if (snapshot.goals.length > 0) {
           await tx.goal.createMany({ data: snapshot.goals as any });
@@ -714,255 +646,6 @@ export class ImportService {
     };
   }
 
-  private normalizeFiles(files: Express.Multer.File[]): NormalizedPackage {
-    if (!files || files.length === 0) {
-      throw new BadRequestException('请选择至少一个 JSON 文件');
-    }
-    if (files.length > MAX_FILES) {
-      throw new BadRequestException(`一次最多上传 ${MAX_FILES} 个 JSON 文件`);
-    }
-
-    const sortedFiles = [...files].sort((left, right) =>
-      left.originalname.localeCompare(right.originalname, 'zh-CN'),
-    );
-    const digestBuilder = createHash('sha256');
-    for (const file of sortedFiles) {
-      digestBuilder.update(file.originalname);
-      digestBuilder.update(file.buffer);
-    }
-
-    const normalized: NormalizedPackage = {
-      digest: digestBuilder.digest('hex'),
-      files: [],
-      seasons: new Map(),
-      teams: new Map(),
-      players: new Map(),
-      matches: new Map(),
-      warnings: [],
-      errors: [],
-    };
-
-    for (const file of sortedFiles) {
-      if (!file.originalname.toLowerCase().endsWith('.json')) {
-        normalized.errors.push(`${file.originalname}: 只支持 .json 文件`);
-        continue;
-      }
-      if (file.size > MAX_FILE_BYTES) {
-        normalized.errors.push(`${file.originalname}: 文件超过 2MB 限制`);
-        continue;
-      }
-
-      let value: unknown;
-      try {
-        value = JSON.parse(file.buffer.toString('utf8'));
-      } catch {
-        normalized.errors.push(`${file.originalname}: JSON 格式无效或不是 UTF-8 编码`);
-        continue;
-      }
-      const document = asRecord(value);
-      if (!document) {
-        normalized.errors.push(`${file.originalname}: 顶层必须是 JSON 对象`);
-        continue;
-      }
-
-      if (Array.isArray(document.rawFiles) && Array.isArray(document.seasons)) {
-        normalized.files.push({ name: file.originalname, type: 'manifest' });
-        normalized.warnings.push(`${file.originalname}: 清单文件仅用于核对，不写入数据库`);
-        continue;
-      }
-      if (document.assignmentStatus === 'not_assigned_to_historical_season') {
-        normalized.files.push({ name: file.originalname, type: 'supplemental' });
-        this.readTeams(document.teams, null, normalized, file.originalname);
-        continue;
-      }
-
-      const season = asRecord(document.season);
-      const seasonName = text(season?.name);
-      if (!seasonName || !Array.isArray(document.teams) || !Array.isArray(document.matches)) {
-        normalized.errors.push(`${file.originalname}: 不是受支持的分赛季历史数据文件`);
-        continue;
-      }
-      if (normalized.seasons.has(seasonName)) {
-        normalized.errors.push(`${file.originalname}: 赛季 ${seasonName} 重复上传`);
-        continue;
-      }
-
-      normalized.files.push({ name: file.originalname, type: 'season', season: seasonName });
-      normalized.seasons.set(seasonName, { name: seasonName });
-      this.readTeams(document.teams, seasonName, normalized, file.originalname);
-      this.readMatches(document.matches, seasonName, normalized, file.originalname);
-    }
-
-    if (normalized.seasons.size === 0 && normalized.players.size === 0) {
-      normalized.errors.push('没有识别到可导入的赛季或球员数据');
-    }
-    if (normalized.players.size > 0) {
-      normalized.warnings.unshift(
-        '历史 JSON 不含真实学号；新建球员会使用稳定的 HIST- 占位学号，后续可在球员管理中补录。',
-      );
-    }
-    return normalized;
-  }
-
-  private readTeams(
-    input: unknown,
-    seasonName: string | null,
-    normalized: NormalizedPackage,
-    fileName: string,
-  ) {
-    if (!Array.isArray(input)) {
-      normalized.errors.push(`${fileName}: teams 必须是数组`);
-      return;
-    }
-    for (const teamValue of input) {
-      const team = asRecord(teamValue);
-      const teamName = text(team?.name);
-      if (!teamName || !team) {
-        normalized.errors.push(`${fileName}: 存在缺少名称的球队`);
-        continue;
-      }
-      this.registerTeam(normalized, teamName, seasonName);
-      if (!Array.isArray(team.players)) continue;
-
-      for (const playerValue of team.players) {
-        const player = asRecord(playerValue);
-        const playerName = text(player?.name);
-        if (!playerName || !player) {
-          normalized.warnings.push(`${fileName}/${teamName}: 跳过缺少姓名的球员`);
-          continue;
-        }
-        const key = this.playerKey(teamName, playerName, seasonName);
-        let playerInput = normalized.players.get(key);
-        if (!playerInput) {
-          const jerseyNumbers = Array.isArray(player.jerseyNumbers)
-            ? player.jerseyNumbers.map(text).filter(Boolean)
-            : [text(player.jerseyNumber)].filter(Boolean);
-          const jerseyNumber = (jerseyNumbers[0] as string | undefined) || UNKNOWN_JERSEY;
-          if (jerseyNumber === UNKNOWN_JERSEY) {
-            normalized.warnings.push(`${teamName}/${playerName}: 缺少号码，将标记为“未记录”`);
-          }
-          playerInput = {
-            key,
-            legacyKey: `history:${stableHash(key)}`,
-            name: playerName,
-            teamName,
-            jerseyNumber,
-            seasonName,
-          };
-          normalized.players.set(key, playerInput);
-        }
-      }
-    }
-  }
-
-  private readMatches(
-    input: unknown,
-    seasonName: string,
-    normalized: NormalizedPackage,
-    fileName: string,
-  ) {
-    if (!Array.isArray(input)) {
-      normalized.errors.push(`${fileName}: matches 必须是数组`);
-      return;
-    }
-    for (const matchValue of input) {
-      const match = asRecord(matchValue);
-      const gameId = text(match?.gameId);
-      const homeTeam = text(match?.homeTeam);
-      const awayTeam = text(match?.awayTeam);
-      const date = text(match?.date);
-      if (!match || !gameId || !homeTeam || !awayTeam || !date) {
-        normalized.errors.push(`${fileName}: 存在缺少编号、球队或日期的比赛`);
-        continue;
-      }
-      const key = `${seasonName}\u0000${gameId}`;
-      if (normalized.matches.has(key)) {
-        normalized.errors.push(`${fileName}: 比赛 ${gameId} 重复`);
-        continue;
-      }
-
-      this.registerTeam(normalized, homeTeam, seasonName);
-      this.registerTeam(normalized, awayTeam, seasonName);
-      const penalty = asRecord(match.penaltyShootout);
-      const regularEvents = Array.isArray(match.events) ? match.events : [];
-      const shootoutEvents = Array.isArray(penalty?.events)
-        ? penalty.events
-        : Array.isArray(penalty?.kicks)
-          ? penalty.kicks
-          : [];
-      const events: NormalizedEvent[] = [];
-      for (const [index, eventValue] of [...regularEvents, ...shootoutEvents].entries()) {
-        const event = asRecord(eventValue);
-        const rawType = text(event?.eventType);
-        const fromShootout = index >= regularEvents.length;
-        const scored = event?.scored;
-        const mappedType = rawType
-          ? HISTORY_EVENT_TYPES[rawType]
-          : fromShootout && typeof scored === 'boolean'
-            ? scored
-              ? 'penalty_shootout_goal'
-              : 'penalty_shootout_miss'
-            : null;
-        const teamType = event?.teamType;
-        if (!event || !mappedType || (teamType !== 'home' && teamType !== 'away')) {
-          normalized.warnings.push(`${seasonName}/${gameId}: 跳过无法识别的第 ${index + 1} 条事件`);
-          continue;
-        }
-        const isShootout = fromShootout || mappedType.startsWith('penalty_shootout_');
-        const shootoutOrder = isShootout
-          ? integer(event.shootoutOrder ?? event.order) ||
-            events.filter((item) => item.phase === 'SHOOTOUT').length + 1
-          : null;
-        events.push({
-          eventId: text(event.eventId) || `${key}:${index + 1}`,
-          eventTime: text(event.time) || '未记录',
-          eventType: mappedType,
-          phase: isShootout ? 'SHOOTOUT' : 'REGULAR',
-          shootoutRound: isShootout
-            ? integer(event.shootoutRound ?? event.round) || Math.ceil(shootoutOrder! / 2)
-            : null,
-          shootoutOrder,
-          teamType,
-          teamName: text(event.teamName) || (teamType === 'home' ? homeTeam : awayTeam),
-          playerName: text(event.playerName),
-          jerseyNumber: text(event.jerseyNumber),
-        });
-      }
-
-      normalized.matches.set(key, {
-        key,
-        legacyGameId: `history:${stableHash(key)}`,
-        gameId,
-        seasonName,
-        date,
-        time: text(match.time),
-        round: text(match.round),
-        group: text(match.group),
-        homeTeam,
-        awayTeam,
-        homeScore: integer(match.homeScore),
-        awayScore: integer(match.awayScore),
-        homePenaltyScore: integer(penalty?.homeScore),
-        awayPenaltyScore: integer(penalty?.awayScore),
-        events,
-      });
-    }
-  }
-
-  private countRecords(normalized: NormalizedPackage): ImportEntityCounts {
-    return {
-      seasons: normalized.seasons.size,
-      teams: normalized.teams.size,
-      players: normalized.players.size,
-      matches: normalized.matches.size,
-      events: [...normalized.matches.values()].reduce((sum, match) => sum + match.events.length, 0),
-    };
-  }
-
-  private emptyCounts(): ImportEntityCounts {
-    return { seasons: 0, teams: 0, players: 0, matches: 0, events: 0 };
-  }
-
   private emptyUndoPayload(): ImportUndoPayload {
     return {
       affectedSeasonIds: [],
@@ -981,127 +664,5 @@ export class ImportService {
         matches: [],
       },
     };
-  }
-
-  private captureMatchSnapshot(match: JsonRecord): MatchUndoSnapshot {
-    return {
-      id: match.id,
-      data: {
-        legacyGameId: match.legacyGameId,
-        homeTeamId: match.homeTeamId,
-        awayTeamId: match.awayTeamId,
-        homeScore: match.homeScore,
-        awayScore: match.awayScore,
-        homePenaltyScore: match.homePenaltyScore,
-        awayPenaltyScore: match.awayPenaltyScore,
-        winnerTeamId: match.winnerTeamId,
-        decidedBy: match.decidedBy,
-        matchDate: match.matchDate.toISOString(),
-        location: match.location,
-        status: match.status,
-        seasonId: match.seasonId,
-        stage: match.stage,
-        groupName: match.groupName,
-        knockoutRound: match.knockoutRound,
-        deletedAt: match.deletedAt?.toISOString() || null,
-      },
-      goals: (match.goals || []).map((goal: JsonRecord) => ({
-        matchId: match.id,
-        playerId: goal.playerId,
-        playerName: goal.playerName,
-        jerseyNumber: goal.jerseyNumber,
-        goalTime: goal.goalTime,
-        teamType: goal.teamType,
-      })),
-      events: (match.events || []).map((event: JsonRecord) => ({
-        matchId: match.id,
-        eventTime: event.eventTime,
-        eventType: event.eventType,
-        phase: event.phase,
-        shootoutRound: event.shootoutRound,
-        shootoutOrder: event.shootoutOrder,
-        playerId: event.playerId,
-        playerName: event.playerName,
-        jerseyNumber: event.jerseyNumber,
-        subPlayerId: event.subPlayerId,
-        subPlayerName: event.subPlayerName,
-        subJerseyNumber: event.subJerseyNumber,
-        assistPlayerId: event.assistPlayerId,
-        assistPlayerName: event.assistPlayerName,
-        assistJerseyNumber: event.assistJerseyNumber,
-        description: event.description,
-        teamType: event.teamType,
-      })),
-    };
-  }
-
-  private restoreMatchData(data: JsonRecord): JsonRecord {
-    return {
-      ...data,
-      matchDate: new Date(data.matchDate),
-      deletedAt: data.deletedAt ? new Date(data.deletedAt) : null,
-    };
-  }
-
-  private playerKey(teamName: string, playerName: string, seasonName: string | null): string {
-    return `${seasonName || '未归季'}\u0000${teamName}\u0000${playerName}`;
-  }
-
-  private registerTeam(
-    normalized: NormalizedPackage,
-    teamName: string,
-    seasonName: string | null,
-  ): void {
-    let team = normalized.teams.get(teamName);
-    if (!team) {
-      team = { name: teamName, seasonNames: new Set() };
-      normalized.teams.set(teamName, team);
-    }
-    if (seasonName) {
-      team.seasonNames.add(seasonName);
-    }
-  }
-
-  private parseMatchDate(date: string, time: string | null): Date {
-    const dateMatch = date.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日$/);
-    if (!dateMatch) throw new BadRequestException(`无法识别比赛日期: ${date}`);
-    const timeMatch = (time || '').match(/(\d{1,2}):(\d{2})/);
-    const hour = timeMatch ? Number(timeMatch[1]) : 0;
-    const minute = timeMatch ? Number(timeMatch[2]) : 0;
-    const [, year, month, day] = dateMatch;
-    return new Date(
-      `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+08:00`,
-    );
-  }
-
-  private resolveStatus(match: NormalizedMatch): string {
-    const note = `${match.time || ''} ${match.round || ''}`;
-    if (match.homeScore === null || match.awayScore === null) {
-      return note.includes('弃权') ? 'cancelled' : 'scheduled';
-    }
-    return 'finished';
-  }
-
-  private resolveCompetition(match: NormalizedMatch): {
-    stage: string;
-    groupName: string | null;
-    knockoutRound: string | null;
-  } {
-    const round = match.round || '';
-    const inferredGroup = match.group || round.match(/小组赛\s*([A-Z])组/i)?.[1] || null;
-    if (inferredGroup || round.includes('小组')) {
-      return { stage: 'GROUP', groupName: inferredGroup, knockoutRound: null };
-    }
-    if (/决赛|排位赛|淘汰赛|1\/4/.test(round)) {
-      let knockoutRound = 'PLACEMENT';
-      if (round.includes('1/4')) knockoutRound = 'QUARTER_FINAL';
-      else if (round.includes('半决赛')) knockoutRound = 'SEMI_FINAL';
-      else if (round === '决赛') knockoutRound = 'FINAL';
-      else if (/三四名/.test(round)) knockoutRound = 'THIRD_PLACE';
-      else if (/五六名/.test(round)) knockoutRound = '5TH';
-      else if (/七八名/.test(round)) knockoutRound = '7TH';
-      return { stage: 'KNOCKOUT', groupName: null, knockoutRound };
-    }
-    return { stage: 'LEAGUE', groupName: null, knockoutRound: null };
   }
 }

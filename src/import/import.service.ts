@@ -4,8 +4,27 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { resolveMatchOutcome } from '../match/match-outcome';
+import {
+  ImportEntityCounts,
+  ImportExecutionResult,
+  ImportPreview,
+  ImportUndoPayload,
+  JsonRecord,
+  LastImportBatch,
+  MatchUndoSnapshot,
+  NormalizedEvent,
+  NormalizedMatch,
+  NormalizedPackage,
+  UndoImportResult,
+} from './import.types';
 
-type JsonRecord = Record<string, any>;
+export type {
+  ImportEntityCounts,
+  ImportExecutionResult,
+  ImportPreview,
+  LastImportBatch,
+  UndoImportResult,
+} from './import.types';
 
 const DEFAULT_IMPORT_TRANSACTION_TIMEOUT_MS = 240_000;
 const MAX_IMPORT_TRANSACTION_TIMEOUT_MS = 240_000;
@@ -23,152 +42,6 @@ const getImportTransactionOptions = () => {
     timeout,
   };
 };
-
-interface NormalizedSeason {
-  name: string;
-}
-
-interface NormalizedTeam {
-  name: string;
-  seasonNames: Set<string>;
-}
-
-interface NormalizedPlayer {
-  key: string;
-  legacyKey: string;
-  name: string;
-  teamName: string;
-  jerseyNumber: string;
-  seasonName: string | null;
-}
-
-interface NormalizedEvent {
-  eventId: string;
-  eventTime: string;
-  eventType: string;
-  phase: 'REGULAR' | 'SHOOTOUT';
-  shootoutRound: number | null;
-  shootoutOrder: number | null;
-  teamType: 'home' | 'away';
-  teamName: string;
-  playerName: string | null;
-  jerseyNumber: string | null;
-}
-
-interface NormalizedMatch {
-  key: string;
-  legacyGameId: string;
-  gameId: string;
-  seasonName: string;
-  date: string;
-  time: string | null;
-  round: string | null;
-  group: string | null;
-  homeTeam: string;
-  awayTeam: string;
-  homeScore: number | null;
-  awayScore: number | null;
-  homePenaltyScore: number | null;
-  awayPenaltyScore: number | null;
-  events: NormalizedEvent[];
-}
-
-interface NormalizedPackage {
-  digest: string;
-  files: Array<{
-    name: string;
-    type: 'season' | 'supplemental' | 'manifest';
-    season?: string;
-  }>;
-  seasons: Map<string, NormalizedSeason>;
-  teams: Map<string, NormalizedTeam>;
-  players: Map<string, NormalizedPlayer>;
-  matches: Map<string, NormalizedMatch>;
-  warnings: string[];
-  errors: string[];
-}
-
-export interface ImportEntityCounts {
-  seasons: number;
-  teams: number;
-  players: number;
-  matches: number;
-  events: number;
-}
-
-export interface ImportPreview {
-  digest: string;
-  canImport: boolean;
-  files: NormalizedPackage['files'];
-  records: ImportEntityCounts;
-  create: ImportEntityCounts;
-  update: ImportEntityCounts;
-  warnings: string[];
-  errors: string[];
-}
-
-export interface ImportExecutionResult {
-  digest: string;
-  created: ImportEntityCounts;
-  updated: ImportEntityCounts;
-  warnings: string[];
-}
-
-export interface LastImportBatch {
-  id: string;
-  digest: string;
-  username: string;
-  status: string;
-  summary: ImportExecutionResult;
-  createdAt: Date;
-}
-
-interface MatchUndoSnapshot {
-  id: string;
-  data: JsonRecord;
-  goals: JsonRecord[];
-  events: JsonRecord[];
-}
-
-interface ImportUndoPayload {
-  affectedSeasonIds: string[];
-  created: {
-    seasonIds: string[];
-    teamIds: string[];
-    profileIds: string[];
-    playerIds: string[];
-    rosterLinkIds: string[];
-    matchIds: string[];
-  };
-  updated: {
-    teams: Array<{ id: string; deletedAt: string | null }>;
-    players: Array<{
-      id: string;
-      name: string;
-      jerseyNumber: string;
-      teamId: string;
-      deletedAt: string | null;
-    }>;
-    rosterLinks: Array<{
-      id: string;
-      teamId: string;
-      playerName?: string;
-      jerseyNumber?: string;
-      playerPhoto?: string | null;
-    }>;
-    matches: MatchUndoSnapshot[];
-  };
-}
-
-export interface UndoImportResult {
-  batchId: string;
-  affectedSeasons: number;
-  restoredMatches: number;
-  deletedMatches: number;
-  restoredPlayers: number;
-  deletedPlayers: number;
-  warnings: string[];
-}
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;

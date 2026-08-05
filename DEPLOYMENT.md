@@ -48,6 +48,7 @@ git push -u origin main
 **重要提示：**
 - `JWT_SECRET` 必须设置为强随机字符串
 - `DATABASE_URL` 和 `DIRECT_URL` 必须同时配置到需要部署的 Vercel 环境（Production、Preview）
+- Neon 集成仅提供 `DATABASE_URL_UNPOOLED` 时，Vercel 构建脚本会将其作为当前项目的 `DIRECT_URL` 使用
 - 不要在代码中硬编码敏感信息
 - 生产环境必须使用真实的数据库连接字符串
 

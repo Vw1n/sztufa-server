@@ -31,7 +31,7 @@ git push -u origin main
 3. 导航到 Storage 标签
 4. 点击 "Create Database"
 5. 选择 "Postgres" 并创建数据库
-6. 复制生成的 `DATABASE_URL`
+6. 复制生成的连接池地址 `DATABASE_URL` 和直连地址 `DIRECT_URL`
 
 ### 3. 配置环境变量
 
@@ -39,13 +39,15 @@ git push -u origin main
 
 | 变量名 | 说明 | 示例值 |
 |--------|------|--------|
-| `DATABASE_URL` | PostgreSQL 数据库连接字符串 | `postgresql://user:password@host:port/database?schema=public` |
+| `DATABASE_URL` | 应用运行时 PostgreSQL 连接字符串；数据库提供连接池时使用连接池地址 | `postgresql://user:password@pool-host:port/database?schema=public` |
+| `DIRECT_URL` | Prisma Migration 使用的非连接池直连地址；无连接池时可与 `DATABASE_URL` 相同 | `postgresql://user:password@direct-host:port/database?schema=public` |
 | `JWT_SECRET` | JWT 密钥（必须修改） | `your-super-secret-jwt-key-change-in-production` |
 | `JWT_EXPIRES_IN` | JWT 过期时间 | `3600s` |
 | `NODE_ENV` | 运行环境 | `production` |
 
 **重要提示：**
 - `JWT_SECRET` 必须设置为强随机字符串
+- `DATABASE_URL` 和 `DIRECT_URL` 必须同时配置到需要部署的 Vercel 环境（Production、Preview）
 - 不要在代码中硬编码敏感信息
 - 生产环境必须使用真实的数据库连接字符串
 

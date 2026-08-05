@@ -35,6 +35,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sztufa_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/sztufa_test
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sztufa_test
       ALLOWED_TEST_DB_HOSTS: localhost,127.0.0.1
 

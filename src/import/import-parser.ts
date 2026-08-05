@@ -44,8 +44,8 @@ export const asRecord = (value: unknown): JsonRecord | null =>
 
 export const text = (value: unknown): string | null => {
   if (value === undefined || value === null) return null;
-  const normalized = String(value).trim();
-  return normalized || null;
+  const normalizedText = String(value).trim();
+  return normalizedText || null;
 };
 
 export const integer = (value: unknown): number | null => {
@@ -83,13 +83,11 @@ export class ImportParser {
   }
 
   static playerKey(teamName: string, playerName: string, seasonName: string | null): string {
-    return seasonName
-      ? `${seasonName}::${teamName}::${playerName}`
-      : `supplemental::${teamName}::${playerName}`;
+    return `${seasonName || '未归季'}\u0000${teamName}\u0000${playerName}`;
   }
 
   static matchKey(gameId: string, seasonName: string): string {
-    return `${seasonName}::${gameId}`;
+    return `${seasonName}\u0000${gameId}`;
   }
 
   static normalizeFiles(files: Express.Multer.File[]): NormalizedPackage {
@@ -176,178 +174,181 @@ export class ImportParser {
     }
     if (normalized.players.size > 0) {
       normalized.warnings.unshift(
-        'HIST-前缀为自动化生成的补全学号，避免因历史名单无学号而破坏现有系统约束',
+        '历史 JSON 不含真实学号；新建球员会使用稳定的 HIST- 占位学号，后续可在球员管理中补录。',
       );
     }
 
     return normalized;
   }
 
+  private static registerTeam(
+    normalized: NormalizedPackage,
+    teamName: string,
+    seasonName: string | null,
+  ): void {
+    let team = normalized.teams.get(teamName);
+    if (!team) {
+      team = { name: teamName, seasonNames: new Set() };
+      normalized.teams.set(teamName, team);
+    }
+    if (seasonName) {
+      team.seasonNames.add(seasonName);
+    }
+  }
+
   private static readTeams(
-    rawTeams: unknown,
+    input: unknown,
     seasonName: string | null,
     normalized: NormalizedPackage,
-    filename: string,
+    fileName: string,
   ): void {
-    if (!Array.isArray(rawTeams)) return;
+    if (!Array.isArray(input)) {
+      normalized.errors.push(`${fileName}: teams 必须是数组`);
+      return;
+    }
 
-    for (const rawTeam of rawTeams) {
-      const record = asRecord(rawTeam);
-      const teamName = text(record?.name);
-      if (!teamName) {
-        normalized.warnings.push(`${filename}: 存在没有名称的球队记录，已跳过`);
+    for (const teamValue of input) {
+      const team = asRecord(teamValue);
+      const teamName = text(team?.name);
+      if (!teamName || !team) {
+        normalized.errors.push(`${fileName}: 存在缺少名称的球队`);
         continue;
       }
 
-      const existingTeam = normalized.teams.get(teamName) || {
-        name: teamName,
-        seasonNames: new Set<string>(),
-      };
-      if (seasonName) existingTeam.seasonNames.add(seasonName);
-      normalized.teams.set(teamName, existingTeam);
+      this.registerTeam(normalized, teamName, seasonName);
+      if (!Array.isArray(team.players)) continue;
 
-      if (Array.isArray(record?.players)) {
-        for (const rawPlayer of record.players) {
-          const playerRecord = asRecord(rawPlayer);
-          const playerName = text(playerRecord?.name);
-          if (!playerName) continue;
+      for (const playerValue of team.players) {
+        const player = asRecord(playerValue);
+        const playerName = text(player?.name);
+        if (!playerName || !player) {
+          normalized.warnings.push(`${fileName}/${teamName}: 跳过缺少姓名的球员`);
+          continue;
+        }
 
-          const jerseyNumbers = Array.isArray(playerRecord?.jerseyNumbers)
-            ? playerRecord.jerseyNumbers.map(text).filter(Boolean)
-            : [];
-          const jerseyNumber = jerseyNumbers[0] || UNKNOWN_JERSEY;
+        const key = this.playerKey(teamName, playerName, seasonName);
+        let playerInput = normalized.players.get(key);
+        if (!playerInput) {
+          const jerseyNumbers = Array.isArray(player.jerseyNumbers)
+            ? player.jerseyNumbers.map(text).filter(Boolean)
+            : [text(player.jerseyNumber)].filter(Boolean);
+          const jerseyNumber = (jerseyNumbers[0] as string | undefined) || UNKNOWN_JERSEY;
+          if (jerseyNumber === UNKNOWN_JERSEY) {
+            normalized.warnings.push(`${teamName}/${playerName}: 缺少号码，将标记为“未记录”`);
+          }
 
-          const pKey = this.playerKey(teamName, playerName, seasonName);
-          const legacyKey = seasonName
-            ? `history:${seasonName}:${teamName}:${playerName}`
-            : `history:supplemental:${teamName}:${playerName}`;
-
-          const playerObj: NormalizedPlayer = {
-            key: pKey,
-            legacyKey,
+          playerInput = {
+            key,
+            legacyKey: `history:${stableHash(key)}`,
             name: playerName,
             teamName,
-            jerseyNumber: String(jerseyNumber),
+            jerseyNumber,
             seasonName,
           };
-          normalized.players.set(pKey, playerObj);
+          normalized.players.set(key, playerInput);
         }
       }
     }
   }
 
   private static readMatches(
-    rawMatches: unknown[],
+    input: unknown,
     seasonName: string,
     normalized: NormalizedPackage,
-    filename: string,
+    fileName: string,
   ): void {
-    for (const rawMatch of rawMatches) {
-      const matchRecord = asRecord(rawMatch);
-      const gameId = text(matchRecord?.gameId);
-      const homeTeam = text(matchRecord?.homeTeam);
-      const awayTeam = text(matchRecord?.awayTeam);
-      const date = text(matchRecord?.date);
+    if (!Array.isArray(input)) {
+      normalized.errors.push(`${fileName}: matches 必须是数组`);
+      return;
+    }
 
-      if (!gameId || !homeTeam || !awayTeam || !date) {
-        normalized.warnings.push(`${filename}: 存在关键属性缺失的比赛记录，已跳过`);
+    for (const matchValue of input) {
+      const match = asRecord(matchValue);
+      const gameId = text(match?.gameId);
+      const homeTeam = text(match?.homeTeam);
+      const awayTeam = text(match?.awayTeam);
+      const date = text(match?.date);
+
+      if (!match || !gameId || !homeTeam || !awayTeam || !date) {
+        normalized.errors.push(`${fileName}: 存在缺少编号、球队或日期的比赛`);
         continue;
       }
 
-      const legacyGameId = `history:${seasonName}:${gameId}`;
-      const mKey = this.matchKey(gameId, seasonName);
-      if (normalized.matches.has(mKey)) {
-        normalized.warnings.push(`${filename}: 比赛 ${gameId} 在赛季 ${seasonName} 中重复，已跳过`);
+      const key = `${seasonName}\u0000${gameId}`;
+      if (normalized.matches.has(key)) {
+        normalized.errors.push(`${fileName}: 比赛 ${gameId} 重复`);
         continue;
       }
+
+      this.registerTeam(normalized, homeTeam, seasonName);
+      this.registerTeam(normalized, awayTeam, seasonName);
+
+      const penalty = asRecord(match.penaltyShootout);
+      const regularEvents = Array.isArray(match.events) ? match.events : [];
+      const shootoutEvents = Array.isArray(penalty?.events)
+        ? penalty.events
+        : Array.isArray(penalty?.kicks)
+          ? penalty.kicks
+          : [];
 
       const events: NormalizedEvent[] = [];
-      if (Array.isArray(matchRecord?.events)) {
-        this.readEvents(matchRecord.events, false, homeTeam, awayTeam, events);
-      }
-      const penaltyShootout = asRecord(matchRecord?.penaltyShootout);
-      if (penaltyShootout && Array.isArray(penaltyShootout.kicks)) {
-        this.readEvents(penaltyShootout.kicks, true, homeTeam, awayTeam, events);
+      for (const [index, eventValue] of [...regularEvents, ...shootoutEvents].entries()) {
+        const event = asRecord(eventValue);
+        const rawType = text(event?.eventType);
+        const fromShootout = index >= regularEvents.length;
+        const scored = event?.scored;
+        const mappedType = rawType
+          ? HISTORY_EVENT_TYPES[rawType]
+          : fromShootout && typeof scored === 'boolean'
+            ? scored
+              ? 'penalty_shootout_goal'
+              : 'penalty_shootout_miss'
+            : null;
+        const teamType = event?.teamType;
+        if (!event || !mappedType || (teamType !== 'home' && teamType !== 'away')) {
+          normalized.warnings.push(`${seasonName}/${gameId}: 跳过无法识别的第 ${index + 1} 条事件`);
+          continue;
+        }
+
+        const isShootout = fromShootout || mappedType.startsWith('penalty_shootout_');
+        const shootoutOrder = isShootout
+          ? integer(event.shootoutOrder ?? event.order) ||
+            events.filter((item) => item.phase === 'SHOOTOUT').length + 1
+          : null;
+
+        events.push({
+          eventId: text(event.eventId) || `${key}:${index + 1}`,
+          eventTime: text(event.time) || '未记录',
+          eventType: mappedType,
+          phase: isShootout ? 'SHOOTOUT' : 'REGULAR',
+          shootoutRound: isShootout
+            ? integer(event.shootoutRound ?? event.round) || Math.ceil(shootoutOrder! / 2)
+            : null,
+          shootoutOrder,
+          teamType,
+          teamName: text(event.teamName) || (teamType === 'home' ? homeTeam : awayTeam),
+          playerName: text(event.playerName),
+          jerseyNumber: text(event.jerseyNumber),
+        });
       }
 
-      const normalizedMatch: NormalizedMatch = {
-        key: mKey,
-        legacyGameId,
+      normalized.matches.set(key, {
+        key,
+        legacyGameId: `history:${stableHash(key)}`,
         gameId,
         seasonName,
         date,
-        time: text(matchRecord?.time),
-        round: text(matchRecord?.round),
-        group: text(matchRecord?.group),
+        time: text(match.time),
+        round: text(match.round),
+        group: text(match.group),
         homeTeam,
         awayTeam,
-        homeScore: integer(matchRecord?.homeScore),
-        awayScore: integer(matchRecord?.awayScore),
-        homePenaltyScore: integer(penaltyShootout?.homeScore),
-        awayPenaltyScore: integer(penaltyShootout?.awayScore),
+        homeScore: integer(match.homeScore),
+        awayScore: integer(match.awayScore),
+        homePenaltyScore: integer(penalty?.homeScore),
+        awayPenaltyScore: integer(penalty?.awayScore),
         events,
-      };
-      normalized.matches.set(mKey, normalizedMatch);
+      });
     }
-  }
-
-  private static readEvents(
-    rawEvents: unknown[],
-    isShootout: boolean,
-    homeTeam: string,
-    awayTeam: string,
-    target: NormalizedEvent[],
-  ): void {
-    for (const rawEvent of rawEvents) {
-      const record = asRecord(rawEvent);
-      if (!record) continue;
-
-      const event = this.normalizeEvent(record, isShootout, homeTeam, awayTeam);
-      if (event) target.push(event);
-    }
-  }
-
-  private static normalizeEvent(
-    record: JsonRecord,
-    isShootout: boolean,
-    homeTeam: string,
-    awayTeam: string,
-  ): NormalizedEvent | null {
-    const rawType = text(record.eventType);
-    let eventType: string | null = null;
-
-    if (isShootout) {
-      const scored = record.scored === true;
-      eventType = scored ? 'penalty_shootout_goal' : 'penalty_shootout_miss';
-    } else if (rawType) {
-      eventType = HISTORY_EVENT_TYPES[rawType.toLowerCase()] || HISTORY_EVENT_TYPES[rawType] || null;
-    }
-
-    if (!eventType) return null;
-
-    const teamTypeRaw = text(record.teamType);
-    let teamType: 'home' | 'away' = 'home';
-    let teamName = homeTeam;
-
-    if (teamTypeRaw === 'away' || text(record.teamName) === awayTeam) {
-      teamType = 'away';
-      teamName = awayTeam;
-    }
-
-    const eventId = text(record.eventId) || stableHash(`${teamName}:${eventType}:${record.time || ''}`);
-    const eventTime = text(record.time) || (isShootout ? '点球大战' : '0');
-
-    return {
-      eventId,
-      eventTime,
-      eventType,
-      phase: isShootout ? 'SHOOTOUT' : 'REGULAR',
-      shootoutRound: integer(record.shootoutRound ?? record.round),
-      shootoutOrder: integer(record.shootoutOrder ?? record.order),
-      teamType,
-      teamName,
-      playerName: text(record.playerName),
-      jerseyNumber: text(record.jerseyNumber),
-    };
   }
 }

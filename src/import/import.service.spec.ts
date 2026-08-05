@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { ImportService } from './import.service';
+import { ImportWriter } from './import-writer';
 
 const counts = {
   seasons: 1,
@@ -372,5 +374,217 @@ describe('ImportService', () => {
       '撤销历史 JSON 导入批次 batch-1',
       tx,
     );
+  });
+
+  it('使用 SHA-256 稳定摘要生成 legacyKey 与 legacyGameId，确保跨重构持久化身份一致', async () => {
+    const prisma = createReadPrisma();
+    const preview = await createService(prisma).previewFiles([asUpload('2023.json')]);
+
+    expect(preview.canImport).toBe(true);
+    const playerQuery = prisma.player.findMany.mock.calls[0][0];
+    const matchQuery = prisma.match.findMany.mock.calls[0][0];
+
+    const expectedPlayerHash = `history:${createHash('sha256').update('2023 校长杯\u0000甲队\u0000张三').digest('hex').slice(0, 24)}`;
+    const expectedMatchHash = `history:${createHash('sha256').update('2023 校长杯\u00002023-01').digest('hex').slice(0, 24)}`;
+
+    expect(playerQuery.where.legacyKey.in[0]).toBe(expectedPlayerHash);
+    expect(matchQuery.where.legacyGameId.in[0]).toBe(expectedMatchHash);
+  });
+
+  it('兼性支持 penaltyShootout.events 格式与单值 jerseyNumber，并拒绝非法 teamType 事件', async () => {
+    const prisma = createReadPrisma();
+    const legacyDoc = {
+      schemaVersion: 2,
+      season: { name: '2023 校长杯' },
+      teams: [
+        {
+          name: '甲队',
+          players: [{ name: '李四', jerseyNumber: '10' }], // 单值 jerseyNumber
+        },
+        { name: '乙队', players: [] },
+      ],
+      matches: [
+        {
+          gameId: '2023-02',
+          date: '2023年3月2日',
+          time: '19:00',
+          round: '小组赛 B组',
+          group: 'B',
+          homeTeam: '甲队',
+          awayTeam: '乙队',
+          homeScore: 1,
+          awayScore: 1,
+          penaltyShootout: {
+            homeScore: 3,
+            awayScore: 2,
+            events: [ // 兼容 events 字段
+              {
+                eventId: 'ps-1',
+                teamType: 'home',
+                playerName: '李四',
+                jerseyNumber: '10',
+                scored: true,
+                round: 1,
+                order: 1,
+              },
+            ],
+          },
+          events: [
+            {
+              eventId: 'invalid-event',
+              eventType: '进球',
+              teamType: 'invalid_team_type', // 非法 teamType，应跳过并警告
+              playerName: '未知玩家',
+            },
+          ],
+        },
+      ],
+    };
+
+    const preview = await createService(prisma).previewFiles([
+      asUpload('2023-legacy.json', legacyDoc),
+    ]);
+
+    expect(preview.canImport).toBe(true);
+    expect(preview.records.players).toBe(1);
+    expect(preview.records.events).toBe(1); // 包含了点球 shootout 1 条，非法的 1 条被跳过
+    expect(preview.warnings).toContain('2023 校长杯/2023-02: 跳过无法识别的第 1 条事件');
+  });
+
+  it('在 teams 或 matches 格式错误及关键属性缺失时正确收集错误而非静默装载', async () => {
+    const prisma = createReadPrisma();
+    const badDoc = {
+      schemaVersion: 2,
+      season: { name: '2023 校长杯' },
+      teams: 'invalid_not_array', // 非法 teams 结构
+      matches: [
+        {
+          gameId: '2023-03',
+          // 缺失 homeTeam, awayTeam, date
+        },
+      ],
+    };
+
+    const preview = await createService(prisma).previewFiles([asUpload('bad.json', badDoc)]);
+
+    expect(preview.canImport).toBe(false);
+    expect(preview.errors).toContain('bad.json: 不是受支持的分赛季历史数据文件');
+  });
+
+  it('在撤销覆盖更新比赛时使用 ImportWriter.snapshotMatch 生成快照，完整还原 deletedAt、助攻、换人及空描述字段', async () => {
+    const existingMatch = {
+      id: 'match-100',
+      legacyGameId: 'history:hash123',
+      homeTeamId: 'team-a',
+      awayTeamId: 'team-b',
+      homeScore: 2,
+      awayScore: 1,
+      homePenaltyScore: null,
+      awayPenaltyScore: null,
+      winnerTeamId: 'team-a',
+      decidedBy: 'REGULAR',
+      matchDate: new Date('2023-03-01T10:00:00.000Z'),
+      location: '主球场',
+      status: 'finished',
+      seasonId: 'season-1',
+      stage: 'GROUP',
+      groupName: 'A',
+      knockoutRound: null,
+      knockoutMatchIndex: null,
+      mvpPlayerId: null,
+      deletedAt: new Date('2023-03-02T10:00:00.000Z'),
+      goals: [
+        {
+          matchId: 'match-100',
+          playerId: 'p1',
+          playerName: '张三',
+          jerseyNumber: '9',
+          goalTime: '15',
+          teamType: 'home',
+        },
+      ],
+      events: [
+        {
+          matchId: 'match-100',
+          eventTime: '70',
+          eventType: 'substitution',
+          phase: 'REGULAR',
+          shootoutRound: null,
+          shootoutOrder: null,
+          playerId: 'p1',
+          playerName: '张三',
+          jerseyNumber: '9',
+          subPlayerId: 'p2',
+          subPlayerName: '李四',
+          subJerseyNumber: '10',
+          assistPlayerId: 'p3',
+          assistPlayerName: '王五',
+          assistJerseyNumber: '8',
+          description: '', // 空字符串描述，防止被转为 null 导致 Prisma 非空约束违反
+          teamType: 'home',
+        },
+      ],
+    };
+
+    // 使用 ImportWriter.snapshotMatch() 真实构造 snapshot
+    const generatedSnapshot = ImportWriter.snapshotMatch(
+      existingMatch,
+      existingMatch.goals,
+      existingMatch.events,
+    );
+
+    const undoPayload = {
+      affectedSeasonIds: ['season-1'],
+      created: { seasonIds: [], teamIds: [], profileIds: [], playerIds: [], rosterLinkIds: [], matchIds: [] },
+      updated: {
+        teams: [],
+        players: [],
+        rosterLinks: [],
+        matches: [generatedSnapshot],
+      },
+    };
+
+    const tx = {
+      goal: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), createMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      matchEvent: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), createMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      match: { update: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      seasonTeamPlayer: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      seasonTeamProfile: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      player: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), update: jest.fn() },
+      team: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), update: jest.fn() },
+      season: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      historyImportBatch: { update: jest.fn().mockResolvedValue({}) },
+    };
+
+    const prisma = {
+      historyImportBatch: { findFirst: jest.fn().mockResolvedValue({ id: 'batch-2', undoPayload }) },
+      season: { findUnique: jest.fn().mockResolvedValue({ id: 'season-1' }) },
+      $transaction: jest.fn((work: (client: typeof tx) => Promise<void>) => work(tx)),
+    };
+
+    const auditLog = { log: jest.fn().mockResolvedValue(undefined) };
+    const seasonStatistics = { computeAndCache: jest.fn().mockResolvedValue({ success: true }) };
+    const service = new ImportService(prisma as any, seasonStatistics as any, auditLog as any);
+
+    const result = await service.undoLastImport('admin');
+
+    expect(result.restoredMatches).toBe(1);
+    expect(tx.match.update).toHaveBeenCalledWith({
+      where: { id: 'match-100' },
+      data: expect.objectContaining({
+        deletedAt: new Date('2023-03-02T10:00:00.000Z'),
+      }),
+    });
+    expect(tx.matchEvent.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          subPlayerId: 'p2',
+          subPlayerName: '李四',
+          assistPlayerId: 'p3',
+          assistPlayerName: '王五',
+          description: '', // 校验字符串保留为 '' 非 null
+        }),
+      ]),
+    });
   });
 });

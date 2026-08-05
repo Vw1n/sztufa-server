@@ -77,12 +77,7 @@ export class ImportWriter {
     const awayScore = match.awayScore ?? 0;
     const outcome =
       status === 'finished'
-        ? resolveMatchOutcome(
-            homeScore,
-            awayScore,
-            match.homePenaltyScore,
-            match.awayPenaltyScore,
-          )
+        ? resolveMatchOutcome(homeScore, awayScore, match.homePenaltyScore, match.awayPenaltyScore)
         : null;
     const winnerTeamId =
       outcome?.winnerTeamType === 'home'
@@ -121,7 +116,11 @@ export class ImportWriter {
     };
   }
 
-  static snapshotMatch(existing: JsonRecord, goals: JsonRecord[], events: JsonRecord[]): MatchUndoSnapshot {
+  static snapshotMatch(
+    existing: JsonRecord,
+    goals: JsonRecord[],
+    events: JsonRecord[],
+  ): MatchUndoSnapshot {
     return {
       id: String(existing.id),
       data: {
@@ -134,9 +133,10 @@ export class ImportWriter {
         awayPenaltyScore: existing.awayPenaltyScore,
         winnerTeamId: existing.winnerTeamId,
         decidedBy: existing.decidedBy,
-        matchDate: typeof existing.matchDate === 'object' && existing.matchDate instanceof Date
-          ? existing.matchDate.toISOString()
-          : String(existing.matchDate),
+        matchDate:
+          typeof existing.matchDate === 'object' && existing.matchDate instanceof Date
+            ? existing.matchDate.toISOString()
+            : String(existing.matchDate),
         location: existing.location,
         status: existing.status,
         seasonId: existing.seasonId,
@@ -162,8 +162,14 @@ export class ImportWriter {
         eventTime: String(event.eventTime || ''),
         eventType: String(event.eventType),
         phase: String(event.phase || 'REGULAR'),
-        shootoutRound: event.shootoutRound !== null && event.shootoutRound !== undefined ? Number(event.shootoutRound) : null,
-        shootoutOrder: event.shootoutOrder !== null && event.shootoutOrder !== undefined ? Number(event.shootoutOrder) : null,
+        shootoutRound:
+          event.shootoutRound !== null && event.shootoutRound !== undefined
+            ? Number(event.shootoutRound)
+            : null,
+        shootoutOrder:
+          event.shootoutOrder !== null && event.shootoutOrder !== undefined
+            ? Number(event.shootoutOrder)
+            : null,
         playerId: event.playerId ? String(event.playerId) : null,
         playerName: event.playerName ? String(event.playerName) : null,
         jerseyNumber: event.jerseyNumber ? String(event.jerseyNumber) : null,

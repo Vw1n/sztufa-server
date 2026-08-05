@@ -1,13 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { createHash } from 'crypto';
-import {
-  ImportEntityCounts,
-  JsonRecord,
-  NormalizedEvent,
-  NormalizedMatch,
-  NormalizedPackage,
-  NormalizedPlayer,
-} from './import.types';
+import { ImportEntityCounts, JsonRecord, NormalizedEvent, NormalizedPackage } from './import.types';
 
 export const MAX_FILES = 10;
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;

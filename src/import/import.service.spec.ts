@@ -417,7 +417,8 @@ describe('ImportService', () => {
           penaltyShootout: {
             homeScore: 3,
             awayScore: 2,
-            events: [ // 兼容 events 字段
+            events: [
+              // 兼容 events 字段
               {
                 eventId: 'ps-1',
                 teamType: 'home',
@@ -535,7 +536,14 @@ describe('ImportService', () => {
 
     const undoPayload = {
       affectedSeasonIds: ['season-1'],
-      created: { seasonIds: [], teamIds: [], profileIds: [], playerIds: [], rosterLinkIds: [], matchIds: [] },
+      created: {
+        seasonIds: [],
+        teamIds: [],
+        profileIds: [],
+        playerIds: [],
+        rosterLinkIds: [],
+        matchIds: [],
+      },
       updated: {
         teams: [],
         players: [],
@@ -545,9 +553,18 @@ describe('ImportService', () => {
     };
 
     const tx = {
-      goal: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), createMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      matchEvent: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), createMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      match: { update: jest.fn().mockResolvedValue({}), deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      goal: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      matchEvent: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      match: {
+        update: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       seasonTeamPlayer: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       seasonTeamProfile: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       player: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }), update: jest.fn() },
@@ -557,7 +574,9 @@ describe('ImportService', () => {
     };
 
     const prisma = {
-      historyImportBatch: { findFirst: jest.fn().mockResolvedValue({ id: 'batch-2', undoPayload }) },
+      historyImportBatch: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'batch-2', undoPayload }),
+      },
       season: { findUnique: jest.fn().mockResolvedValue({ id: 'season-1' }) },
       $transaction: jest.fn((work: (client: typeof tx) => Promise<void>) => work(tx)),
     };

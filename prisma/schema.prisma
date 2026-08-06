@@ -279,6 +279,7 @@ model SeasonTeamProfile {
   homeJersey      String?
   awayJersey      String?
   gender          String
+  isRegistered    Boolean  @default(false)
   season          Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   team            Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())

@@ -71,7 +71,7 @@ export class TeamController {
       if (!req.user.teamId) {
         throw new ForbiddenException('教练账号未绑定球队，无权访问管理数据');
       }
-      const singleTeam = await this.teamQueryService.findOne(req.user.teamId);
+      const singleTeam = await this.teamQueryService.findOne(req.user.teamId, seasonId);
       return {
         data: [singleTeam],
         total: 1,

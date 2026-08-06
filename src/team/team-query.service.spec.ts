@@ -20,7 +20,7 @@ describe('TeamQueryService', () => {
     prisma.team.count.mockResolvedValue(1);
 
     await expect(service.findAll(2, 20, 'season-1', 'MALE')).resolves.toEqual({
-      data: [{ id: 'team-1' }],
+      data: [{ id: 'team-1', players: [] }],
       total: 1,
       page: 2,
       limit: 20,
@@ -31,20 +31,63 @@ describe('TeamQueryService', () => {
         skip: 20,
         take: 20,
         include: expect.objectContaining({
-          players: {
-            where: {
-              deletedAt: null,
-              seasonPlayers: { some: { seasonId: 'season-1' } },
-            },
+          players: false,
+          seasonPlayers: {
+            where: { seasonId: 'season-1', player: { deletedAt: null } },
+            include: { player: true },
           },
           groupTeams: { where: { seasonId: 'season-1' } },
           seasonProfiles: { where: { seasonId: 'season-1' } },
         }),
         where: {
           deletedAt: null,
-          seasonProfiles: { some: { seasonId: 'season-1', gender: 'MALE' } },
+          seasonProfiles: {
+            some: { seasonId: 'season-1', gender: 'MALE', isRegistered: true },
+          },
         },
       }),
+    );
+  });
+
+  it('returns players from the selected team roster instead of the global team relation', async () => {
+    const { service, prisma } = createService();
+    prisma.team.findMany.mockResolvedValue([
+      {
+        id: 'team-1',
+        players: [{ id: 'wrong-player', name: 'Wrong Team Player' }],
+        seasonPlayers: [
+          {
+            teamId: 'team-1',
+            playerName: 'Season Player',
+            jerseyNumber: '9',
+            playerPhoto: 'season.webp',
+            player: {
+              id: 'season-player',
+              name: 'Global Name',
+              jerseyNumber: '99',
+              photo: 'global.webp',
+              teamId: 'other-team',
+            },
+          },
+        ],
+        seasonProfiles: [],
+      },
+    ]);
+    prisma.team.count.mockResolvedValue(1);
+
+    const result = await service.findAll(1, 10, 'season-1', 'MALE');
+
+    expect(result.data[0].players).toEqual([
+      expect.objectContaining({
+        id: 'season-player',
+        name: 'Season Player',
+        jerseyNumber: '9',
+        photo: 'season.webp',
+        teamId: 'team-1',
+      }),
+    ]);
+    expect(result.data[0].players).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'wrong-player' })]),
     );
   });
 

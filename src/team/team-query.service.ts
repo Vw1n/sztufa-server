@@ -11,17 +11,15 @@ export class TeamQueryService {
     const skip = (pageNum - 1) * limitNum;
 
     const where: any = { deletedAt: null };
-    if (gender && gender !== 'all') {
-      where.gender = gender;
-    }
     if (seasonId && seasonId !== 'all') {
-      where.OR = [
-        { groupTeams: { some: { seasonId } } },
-        { seasonProfiles: { some: { seasonId } } },
-        { seasonPlayers: { some: { seasonId } } },
-        { homeMatches: { some: { seasonId } } },
-        { awayMatches: { some: { seasonId } } },
-      ];
+      where.seasonProfiles = {
+        some: {
+          seasonId,
+          ...(gender && gender !== 'all' ? { gender } : {}),
+        },
+      };
+    } else if (gender && gender !== 'all') {
+      where.gender = gender;
     }
 
     const [teams, total] = await Promise.all([

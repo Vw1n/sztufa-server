@@ -84,7 +84,11 @@ export class TeamService {
         // selected season. Only duplicate participation in that season is a
         // conflict.
         const existingTeam = await tx.team.findFirst({
-          where: { teamName: teamData.teamName },
+          where: {
+            seasonProfiles: {
+              some: { seasonId, teamName: teamData.teamName },
+            },
+          },
         });
         if (existingTeam) {
           const alreadyInTargetSeason = await tx.team.findFirst({
@@ -105,12 +109,7 @@ export class TeamService {
           }
         }
 
-        const team = existingTeam
-          ? await tx.team.update({
-              where: { id: existingTeam.id },
-              data: { ...teamData, deletedAt: null },
-            })
-          : await tx.team.create({ data: teamData });
+        const team = await tx.team.create({ data: teamData });
 
         await tx.seasonTeamProfile.create({
           data: {
@@ -132,33 +131,25 @@ export class TeamService {
         });
 
         for (const player of normalizedPlayers) {
-          const existingPlayer = await tx.player.findFirst({
+          const existingPlayer = await tx.seasonTeamPlayer.findFirst({
             where: {
-              OR: [
-                { studentId: player.studentId },
-                { studentId: { startsWith: `${player.studentId}_deleted_` } },
-              ],
+              seasonId,
+              player: { studentId: player.studentId, deletedAt: null },
             },
-            orderBy: { createdAt: 'desc' },
+            select: { id: true },
           });
 
-          const savedPlayer = existingPlayer
-            ? await tx.player.update({
-                where: { id: existingPlayer.id },
-                data: {
-                  ...player,
-                  photo: player.photo || existingPlayer.photo || null,
-                  teamId: team.id,
-                  deletedAt: null,
-                },
-              })
-            : await tx.player.create({
-                data: {
-                  ...player,
-                  photo: player.photo || null,
-                  teamId: team.id,
-                },
-              });
+          if (existingPlayer) {
+            throw new ConflictException(`球员学号已存在于所选赛季: ${player.studentId}`);
+          }
+
+          const savedPlayer = await tx.player.create({
+            data: {
+              ...player,
+              photo: player.photo || null,
+              teamId: team.id,
+            },
+          });
 
           await this.teamRosterService.registerPlayer(tx, targetSeason.id, team.id, savedPlayer);
         }
@@ -295,27 +286,21 @@ export class TeamService {
             throw new BadRequestException(`球员 ${normalizedDto.name} 不属于当前球队`);
           }
 
-          const conflictingStudent = await tx.player.findFirst({
+          const conflictingStudent = await tx.seasonTeamPlayer.findFirst({
             where: {
-              id: existingById ? { not: existingById.id } : undefined,
-              deletedAt: null,
-              studentId: normalizedDto.studentId,
+              seasonId,
+              playerId: existingById ? { not: existingById.id } : undefined,
+              player: {
+                deletedAt: null,
+                studentId: normalizedDto.studentId,
+              },
             },
           });
           if (conflictingStudent) {
             throw new ConflictException(`学号 ${normalizedDto.studentId} 已被其他在籍球员使用`);
           }
 
-          const restorableByStudentId = existingById
-            ? null
-            : await tx.player.findFirst({
-                where: {
-                  studentId: { startsWith: `${normalizedDto.studentId}_deleted_` },
-                  deletedAt: { not: null },
-                },
-                orderBy: { createdAt: 'desc' },
-              });
-          const existingPlayer = existingById || restorableByStudentId;
+          const existingPlayer = existingById;
 
           if (existingPlayer) {
             // 恢复或更新已有球员

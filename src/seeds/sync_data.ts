@@ -60,7 +60,7 @@ async function main() {
     if (team.players && team.players.length > 0) {
       for (const player of team.players) {
         await prisma.player.upsert({
-          where: { studentId: player.studentId },
+          where: { id: player.id },
           update: {
             name: player.name,
             jerseyNumber: player.jerseyNumber,

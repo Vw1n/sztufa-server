@@ -149,7 +149,7 @@ export class ImportService {
 
       const teamIds = new Map<string, string>();
       for (const teamInput of normalized.teams.values()) {
-        const existing = await tx.team.findUnique({ where: { teamName: teamInput.name } });
+        const existing = await tx.team.findFirst({ where: { teamName: teamInput.name } });
         if (existing) {
           undoPayload.updated.teams.push({
             id: existing.id,

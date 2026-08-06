@@ -16,7 +16,6 @@ export class TeamQueryService {
         some: {
           seasonId,
           isRegistered: true,
-          ...(gender && gender !== 'all' ? { gender } : {}),
         },
       };
     } else if (gender && gender !== 'all') {

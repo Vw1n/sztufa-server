@@ -14,7 +14,7 @@ describe('TeamQueryService', () => {
     return { service: new TeamQueryService(prisma), prisma };
   };
 
-  it('keeps pagination, gender and season filters unchanged', async () => {
+  it('uses season registration as the source of truth instead of legacy team gender', async () => {
     const { service, prisma } = createService();
     prisma.team.findMany.mockResolvedValue([{ id: 'team-1' }]);
     prisma.team.count.mockResolvedValue(1);
@@ -42,7 +42,7 @@ describe('TeamQueryService', () => {
         where: {
           deletedAt: null,
           seasonProfiles: {
-            some: { seasonId: 'season-1', gender: 'MALE', isRegistered: true },
+            some: { seasonId: 'season-1', isRegistered: true },
           },
         },
       }),

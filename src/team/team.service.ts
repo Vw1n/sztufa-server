@@ -112,6 +112,25 @@ export class TeamService {
             })
           : await tx.team.create({ data: teamData });
 
+        await tx.seasonTeamProfile.create({
+          data: {
+            seasonId: targetSeason.id,
+            teamId: team.id,
+            teamName: teamData.teamName,
+            teamDoctor: teamData.teamDoctor,
+            headCoach: teamData.headCoach,
+            teamLeader: teamData.teamLeader,
+            coachPhone: teamData.coachPhone,
+            leaderPhone: teamData.leaderPhone,
+            homeJerseyColor: teamData.homeJerseyColor,
+            awayJerseyColor: teamData.awayJerseyColor,
+            teamLogo: teamData.teamLogo,
+            homeJersey: teamData.homeJersey,
+            awayJersey: teamData.awayJersey,
+            gender: teamData.gender || 'MALE',
+          },
+        });
+
         for (const player of normalizedPlayers) {
           const existingPlayer = await tx.player.findFirst({
             where: {
@@ -185,7 +204,7 @@ export class TeamService {
       }
     }
 
-    const { players = [], deletePlayerIds = [], ...teamData } = dto;
+    const { players = [], deletePlayerIds = [], seasonId, ...teamData } = dto;
 
     // 校验球员数据
     const studentIds = new Set<string>();
@@ -207,68 +226,54 @@ export class TeamService {
     }
 
     // 查找当前活跃赛季，用于名册同步
-    const activeSeasons = await this.prisma.season.findMany({ where: { status: 'active' } });
+    const targetSeason = await this.prisma.season.findUnique({ where: { id: seasonId } });
+    if (!targetSeason) {
+      throw new NotFoundException('所选赛季不存在');
+    }
 
     return this.prisma.$transaction(
       async (tx) => {
         // 1. 更新球队基本信息
-        const updatedTeam = await tx.team.update({
-          where: { id: teamId },
-          data: teamData,
-        });
-
-        // 球队录入页当前编辑的是活跃赛季资料，同步更新对应赛季快照。
-        await tx.seasonTeamProfile.updateMany({
-          where: {
+        // Team is only the stable identity. Editable presentation data belongs
+        // to one season and must never be propagated to another season.
+        const profileData = { ...team, ...teamData };
+        const updatedProfile = await tx.seasonTeamProfile.upsert({
+          where: { seasonId_teamId: { seasonId, teamId } },
+          create: {
+            seasonId,
             teamId,
-            season: { status: 'active' },
+            teamName: profileData.teamName,
+            teamDoctor: profileData.teamDoctor,
+            headCoach: profileData.headCoach,
+            teamLeader: profileData.teamLeader,
+            coachPhone: profileData.coachPhone,
+            leaderPhone: profileData.leaderPhone,
+            homeJerseyColor: profileData.homeJerseyColor,
+            awayJerseyColor: profileData.awayJerseyColor,
+            teamLogo: profileData.teamLogo,
+            homeJersey: profileData.homeJersey,
+            awayJersey: profileData.awayJersey,
+            gender: profileData.gender,
           },
-          data: {
-            teamName: updatedTeam.teamName,
-            teamDoctor: updatedTeam.teamDoctor,
-            headCoach: updatedTeam.headCoach,
-            teamLeader: updatedTeam.teamLeader,
-            coachPhone: updatedTeam.coachPhone,
-            leaderPhone: updatedTeam.leaderPhone,
-            homeJerseyColor: updatedTeam.homeJerseyColor,
-            awayJerseyColor: updatedTeam.awayJerseyColor,
-            teamLogo: updatedTeam.teamLogo,
-            homeJersey: updatedTeam.homeJersey,
-            awayJersey: updatedTeam.awayJersey,
-            gender: updatedTeam.gender,
-          },
+          update: teamData,
         });
+        const updatedTeam = { ...team, ...updatedProfile };
 
         // Remove stale roster entries when a team's gender changes.
-        for (const season of activeSeasons) {
-          if (!isTeamGenderCompatibleWithSeason(season.name, updatedTeam.gender)) {
-            await tx.seasonTeamPlayer.deleteMany({
-              where: { seasonId: season.id, teamId },
-            });
-          }
+        if (!isTeamGenderCompatibleWithSeason(targetSeason.name, updatedTeam.gender)) {
+          await tx.seasonTeamPlayer.deleteMany({ where: { seasonId, teamId } });
         }
 
         const auditDiffs: string[] = [];
 
         // 2. 删除球员
         if (deletePlayerIds.length > 0) {
-          const timestamp = Date.now();
           for (const playerId of deletePlayerIds) {
             const player = await tx.player.findUnique({ where: { id: playerId } });
             if (player && player.teamId === teamId && player.deletedAt === null) {
-              await tx.player.update({
-                where: { id: playerId },
-                data: {
-                  deletedAt: new Date(),
-                  studentId: `${player.studentId}_deleted_${timestamp}`,
-                },
-              });
-              // 同步移除赛季名册
-              for (const season of activeSeasons) {
-                await tx.seasonTeamPlayer.deleteMany({
-                  where: { seasonId: season.id, playerId },
-                });
-              }
+              // Removing a player from a season must preserve their identity
+              // and every roster snapshot belonging to other seasons.
+              await tx.seasonTeamPlayer.deleteMany({ where: { seasonId, teamId, playerId } });
               auditDiffs.push(`删除球员: ${player.name}`);
             }
           }
@@ -330,14 +335,11 @@ export class TeamService {
             });
 
             // 同步赛季名册
-            for (const season of activeSeasons) {
-              if (!isTeamGenderCompatibleWithSeason(season.name, updatedTeam.gender)) {
-                continue;
-              }
+            if (isTeamGenderCompatibleWithSeason(targetSeason.name, updatedTeam.gender)) {
               await tx.seasonTeamPlayer.upsert({
-                where: { seasonId_playerId: { seasonId: season.id, playerId: existingPlayer.id } },
+                where: { seasonId_playerId: { seasonId, playerId: existingPlayer.id } },
                 create: {
-                  seasonId: season.id,
+                  seasonId,
                   teamId,
                   playerId: existingPlayer.id,
                   playerName: normalizedDto.name,
@@ -374,14 +376,11 @@ export class TeamService {
             });
 
             // 同步赛季名册
-            for (const season of activeSeasons) {
-              if (!isTeamGenderCompatibleWithSeason(season.name, updatedTeam.gender)) {
-                continue;
-              }
+            if (isTeamGenderCompatibleWithSeason(targetSeason.name, updatedTeam.gender)) {
               await tx.seasonTeamPlayer.upsert({
-                where: { seasonId_playerId: { seasonId: season.id, playerId: newPlayer.id } },
+                where: { seasonId_playerId: { seasonId, playerId: newPlayer.id } },
                 create: {
-                  seasonId: season.id,
+                  seasonId,
                   teamId,
                   playerId: newPlayer.id,
                   playerName: newPlayer.name,

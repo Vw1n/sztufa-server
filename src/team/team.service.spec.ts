@@ -19,6 +19,7 @@ describe('TeamService.createWithPlayers', () => {
         update: jest.fn(),
       },
       seasonTeamPlayer: { upsert: jest.fn() },
+      seasonTeamProfile: { create: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     const prisma: any = {
@@ -272,12 +273,12 @@ describe('TeamService.updateWithPlayers', () => {
       team: { update: jest.fn(), findUnique: jest.fn() },
       player: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
       seasonTeamPlayer: { upsert: jest.fn(), deleteMany: jest.fn() },
-      seasonTeamProfile: { updateMany: jest.fn() },
+      seasonTeamProfile: { upsert: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     const prisma: any = {
       team: { findUnique: jest.fn(), findFirst: jest.fn() },
-      season: { findMany: jest.fn() },
+      season: { findUnique: jest.fn() },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     const service = new TeamService(
@@ -292,9 +293,11 @@ describe('TeamService.updateWithPlayers', () => {
   it('updates an existing player by ID when the student ID changes', async () => {
     const { service, prisma, tx } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team', deletedAt: null });
-    prisma.season.findMany.mockResolvedValue([]);
-    tx.team.update.mockResolvedValue({
-      id: 'team-1',
+    prisma.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026 男子组' });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({
+      id: 'profile-1',
+      seasonId: 'season-1',
+      teamId: 'team-1',
       teamName: 'Team',
       teamDoctor: 'Doctor',
       headCoach: 'Coach',
@@ -325,6 +328,7 @@ describe('TeamService.updateWithPlayers', () => {
     await service.updateWithPlayers(
       'team-1',
       {
+        seasonId: 'season-1',
         players: [{ id: 'player-1', name: 'Player', studentId: 'new-id', jerseyNumber: '10' }],
       },
       'coach',
@@ -338,10 +342,9 @@ describe('TeamService.updateWithPlayers', () => {
       }),
     );
     expect(tx.player.create).not.toHaveBeenCalled();
-    expect(tx.seasonTeamProfile.updateMany).toHaveBeenCalledWith(
+    expect(tx.seasonTeamProfile.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { teamId: 'team-1', season: { status: 'active' } },
-        data: expect.objectContaining({ headCoach: 'Coach', homeJerseyColor: 'Red' }),
+        where: { seasonId_teamId: { seasonId: 'season-1', teamId: 'team-1' } },
       }),
     );
   });
@@ -351,7 +354,7 @@ describe('TeamService.updateWithPlayers', () => {
     prisma.team.findUnique.mockResolvedValue({ id: 'team-2', teamName: 'Other', deletedAt: null });
 
     await expect(
-      service.updateWithPlayers('team-2', { players: [] }, 'coach', {
+      service.updateWithPlayers('team-2', { seasonId: 'season-1', players: [] }, 'coach', {
         role: 'coach',
         teamId: 'team-1',
       }),

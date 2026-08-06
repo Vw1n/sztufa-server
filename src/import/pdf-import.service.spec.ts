@@ -24,16 +24,23 @@ describe('PdfImportService', () => {
         update: jest.fn(async () => ({})),
       },
       $transaction: jest.fn(async (cb) => cb(prismaMock)),
+      season: {
+        findUnique: jest.fn(async () => ({ id: 'season-1', name: '2026 男子组' })),
+      },
       team: {
+        findFirst: jest.fn(async () => null),
         findUnique: jest.fn(async () => null),
         create: jest.fn(async () => ({ id: 't1', teamName: '测试球队' })),
         update: jest.fn(async () => ({ id: 't1' })),
       },
       player: {
+        findFirst: jest.fn(async () => null),
         findUnique: jest.fn(async () => null),
         create: jest.fn(async () => ({ id: 'p1' })),
         update: jest.fn(async () => ({ id: 'p1' })),
       },
+      seasonTeamProfile: { create: jest.fn(async () => ({ id: 'profile-1' })) },
+      seasonTeamPlayer: { create: jest.fn(async () => ({ id: 'roster-1' })) },
     };
 
     uploadServiceMock = {
@@ -174,6 +181,7 @@ describe('PdfImportService', () => {
   describe('commitPdfBatch - 并发抢占与安全白名单校验', () => {
     it('超越当前批次范围的 S3 Key 应该被强行拒绝，且在抢占状态前报错', async () => {
       const dto = {
+        seasonId: 'season-1',
         teams: [
           {
             teamName: { value: '测试球队', confidence: 1.0 },
@@ -204,6 +212,7 @@ describe('PdfImportService', () => {
 
     it('未经人工确认且包含低置信度字段时，应拦截拒绝提交且不抢占状态', async () => {
       const dto = {
+        seasonId: 'season-1',
         teams: [
           {
             teamName: { value: '测试球队', confidence: 1.0 },
@@ -240,6 +249,7 @@ describe('PdfImportService', () => {
       prismaMock.pdfImportBatch.updateMany.mockResolvedValue({ count: 0 });
 
       const dto = {
+        seasonId: 'season-1',
         teams: [
           {
             teamName: { value: '测试球队', confidence: 1.0 },
@@ -260,10 +270,11 @@ describe('PdfImportService', () => {
     });
 
     it('DB 事务执行失败且 S3 清理异常时，应将批次标记为 FAILED 且 cleanupRequired = true', async () => {
-      prismaMock.team.findUnique.mockRejectedValue(new Error('Prisma 写入死锁'));
+      prismaMock.team.findFirst.mockRejectedValue(new Error('Prisma 写入死锁'));
       uploadServiceMock.deleteByPrefix.mockRejectedValueOnce(new Error('S3 物理清理 503 超时'));
 
       const dto = {
+        seasonId: 'season-1',
         teams: [
           {
             teamName: { value: '测试球队', confidence: 1.0 },

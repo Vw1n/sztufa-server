@@ -290,6 +290,14 @@ export class PdfImportService {
     dto: PdfCommitRequestDto,
   ): Promise<PdfCommitResponseDto> {
     const teams = dto.teams || [];
+    if (!dto.seasonId) {
+      throw new BadRequestException('提交 PDF 报名数据必须指定赛季');
+    }
+    const seasonId = dto.seasonId;
+    const targetSeason = await this.prisma.season.findUnique({ where: { id: seasonId } });
+    if (!targetSeason) {
+      throw new BadRequestException('所选赛季不存在');
+    }
     if (teams.length === 0) {
       throw new BadRequestException('提交的球队数据不能为空');
     }
@@ -379,7 +387,12 @@ export class PdfImportService {
           const teamName = teamDto.teamName.value?.trim();
           if (!teamName) continue;
 
-          let team = await tx.team.findUnique({ where: { teamName } });
+          let team = await tx.team.findFirst({
+            where: { seasonProfiles: { some: { seasonId, teamName } } },
+          });
+          if (team) {
+            throw new ConflictException(`球队已存在于所选赛季: ${teamName}`);
+          }
           if (!team) {
             team = await tx.team.create({
               data: {
@@ -415,6 +428,25 @@ export class PdfImportService {
             });
           }
 
+          await tx.seasonTeamProfile.create({
+            data: {
+              seasonId,
+              teamId: team.id,
+              teamName,
+              headCoach: teamDto.headCoach.value || null,
+              coachPhone: teamDto.coachPhone.value || null,
+              teamLeader: teamDto.teamLeader.value || null,
+              leaderPhone: teamDto.leaderPhone.value || null,
+              teamDoctor: teamDto.teamDoctor.value || null,
+              homeJerseyColor: teamDto.homeJerseyColor.value || '白色',
+              awayJerseyColor: teamDto.awayJerseyColor.value || '黑色',
+              teamLogo: teamDto.logo?.value || null,
+              homeJersey: teamDto.homeJerseyPhoto?.value || null,
+              awayJersey: teamDto.awayJerseyPhoto?.value || null,
+              gender: targetSeason.name.includes('女') ? 'FEMALE' : 'MALE',
+            },
+          });
+
           for (const pDto of teamDto.players) {
             const studentId = pDto.studentId.value?.trim();
             const name = pDto.name.value?.trim();
@@ -423,12 +455,12 @@ export class PdfImportService {
 
             if (!studentId || !name) continue;
 
-            const existingPlayer = await tx.player.findUnique({
-              where: { studentId },
+            const existingPlayer = await tx.player.findFirst({
+              where: { studentId, seasonPlayers: { some: { seasonId } } },
             });
 
             if (!existingPlayer) {
-              await tx.player.create({
+              const createdPlayer = await tx.player.create({
                 data: {
                   name,
                   studentId,
@@ -437,17 +469,19 @@ export class PdfImportService {
                   teamId: team.id,
                 },
               });
-              createdPlayersCount++;
-            } else {
-              await tx.player.update({
-                where: { id: existingPlayer.id },
+              await tx.seasonTeamPlayer.create({
                 data: {
-                  name,
-                  jerseyNumber,
-                  photo: photo || existingPlayer.photo,
+                  seasonId,
                   teamId: team.id,
+                  playerId: createdPlayer.id,
+                  playerName: name,
+                  jerseyNumber,
+                  playerPhoto: photo,
                 },
               });
+              createdPlayersCount++;
+            } else {
+              throw new ConflictException(`球员学号已存在于所选赛季: ${studentId}`);
             }
           }
         }

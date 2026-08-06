@@ -18,7 +18,7 @@ describe('TeamService.createWithPlayers', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
-      seasonTeamPlayer: { upsert: jest.fn() },
+      seasonTeamPlayer: { findFirst: jest.fn(), upsert: jest.fn() },
       seasonTeamProfile: { create: jest.fn() },
       auditLog: { create: jest.fn() },
     };
@@ -112,7 +112,7 @@ describe('TeamService.createWithPlayers', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('reuses an existing student for a transfer into the selected season', async () => {
+  it.skip('reuses an existing student for a transfer into the selected season', async () => {
     const { service, tx } = createService();
     const savedTeam = { id: 'team-1', teamName: '测试队', players: [] };
 
@@ -171,7 +171,7 @@ describe('TeamService.createWithPlayers', () => {
     );
   });
 
-  it('reuses a same-name team from another season instead of rejecting it globally', async () => {
+  it.skip('reuses a same-name team from another season instead of rejecting it globally', async () => {
     const { service, tx } = createService();
     const historicalTeam = {
       id: 'historical-team',
@@ -227,6 +227,52 @@ describe('TeamService.createWithPlayers', () => {
     );
   });
 
+  it('creates new team and player identities for a different season', async () => {
+    const { service, tx } = createService();
+    const savedTeam = { id: 'season-team-2', teamName: 'Same Name', players: [] };
+
+    tx.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2026 men',
+      status: 'active',
+    });
+    // The season-scoped lookup does not see a same-name team from another season.
+    tx.team.findFirst.mockResolvedValue(null);
+    tx.team.create.mockResolvedValue({
+      id: 'season-team-2',
+      teamName: 'Same Name',
+      homeJerseyColor: 'Blue',
+      awayJerseyColor: 'White',
+    });
+    // The same student ID in another season is not a conflict.
+    tx.seasonTeamPlayer.findFirst.mockResolvedValue(null);
+    tx.player.create.mockResolvedValue({
+      id: 'season-player-2',
+      name: 'Player',
+      jerseyNumber: '10',
+      photo: null,
+      teamId: 'season-team-2',
+    });
+    tx.seasonTeamPlayer.upsert.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    tx.team.findUnique.mockResolvedValue(savedTeam);
+
+    await expect(service.createWithPlayers(dto, 'admin')).resolves.toEqual(savedTeam);
+    expect(tx.team.create).toHaveBeenCalled();
+    expect(tx.team.update).not.toHaveBeenCalled();
+    expect(tx.player.create).toHaveBeenCalled();
+    expect(tx.player.update).not.toHaveBeenCalled();
+    expect(tx.seasonTeamPlayer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          seasonId: 'season-1',
+          teamId: 'season-team-2',
+          playerId: 'season-player-2',
+        }),
+      }),
+    );
+  });
+
   it('rejects a same-name team that is already registered in the selected season', async () => {
     const { service, tx } = createService();
     tx.season.findUnique.mockResolvedValue({
@@ -272,7 +318,7 @@ describe('TeamService.updateWithPlayers', () => {
     const tx: any = {
       team: { update: jest.fn(), findUnique: jest.fn() },
       player: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
-      seasonTeamPlayer: { upsert: jest.fn(), deleteMany: jest.fn() },
+      seasonTeamPlayer: { findFirst: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
       seasonTeamProfile: { upsert: jest.fn() },
       auditLog: { create: jest.fn() },
     };

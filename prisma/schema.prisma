@@ -10,7 +10,7 @@ datasource db {
 
 model Team {
   id              String    @id @default(cuid())
-  teamName        String    @unique
+  teamName        String
   teamDoctor      String?
   headCoach       String?
   teamLeader      String?
@@ -40,7 +40,7 @@ model Team {
 model Player {
   id                  String  @id @default(cuid())
   name                String
-  studentId           String  @unique
+  studentId           String
   legacyKey           String? @unique
   jerseyNumber        String
   photo               String?

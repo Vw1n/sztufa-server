@@ -476,6 +476,7 @@ export class PdfImportService {
                   teamId: team.id,
                   playerId: createdPlayer.id,
                   playerName: name,
+                  studentId,
                   jerseyNumber,
                   playerPhoto: photo,
                 },

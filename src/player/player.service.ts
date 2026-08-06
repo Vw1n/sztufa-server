@@ -19,6 +19,7 @@ export class PlayerService {
     id: string;
     teamId: string;
     name: string;
+    studentId: string;
     jerseyNumber: string;
     photo: string | null;
   }): Promise<void> {
@@ -49,12 +50,14 @@ export class PlayerService {
           teamId,
           playerId,
           playerName: player.name,
+          studentId: player.studentId,
           jerseyNumber: player.jerseyNumber,
           playerPhoto: player.photo,
         },
         update: {
           teamId,
           playerName: player.name,
+          studentId: player.studentId,
           jerseyNumber: player.jerseyNumber,
           playerPhoto: player.photo,
         },

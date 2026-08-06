@@ -12,12 +12,13 @@ export class TeamQueryService {
 
     const where: any = { deletedAt: null };
     if (seasonId && seasonId !== 'all') {
-      where.seasonProfiles = {
-        some: {
-          seasonId,
-          isRegistered: true,
-        },
-      };
+      where.OR = [
+        { seasonProfiles: { some: { seasonId, isRegistered: true } } },
+        { seasonPlayers: { some: { seasonId } } },
+        { groupTeams: { some: { seasonId } } },
+        { homeMatches: { some: { seasonId } } },
+        { awayMatches: { some: { seasonId } } },
+      ];
     } else if (gender && gender !== 'all') {
       where.gender = gender;
     }
@@ -28,10 +29,7 @@ export class TeamQueryService {
         take: limitNum,
         where,
         include: {
-          players:
-            seasonId && seasonId !== 'all'
-              ? false
-              : { where: { deletedAt: null } },
+          players: seasonId && seasonId !== 'all' ? false : { where: { deletedAt: null } },
           seasonPlayers:
             seasonId && seasonId !== 'all'
               ? {
@@ -55,6 +53,7 @@ export class TeamQueryService {
         baseTeam.players = (seasonPlayers || []).map((roster: any) => ({
           ...roster.player,
           name: roster.playerName,
+          studentId: roster.studentId,
           jerseyNumber: roster.jerseyNumber,
           photo: roster.playerPhoto,
           teamId: roster.teamId,
@@ -110,6 +109,7 @@ export class TeamQueryService {
       players: (seasonPlayers || []).map((roster: any) => ({
         ...roster.player,
         name: roster.playerName,
+        studentId: roster.studentId,
         jerseyNumber: roster.jerseyNumber,
         photo: roster.playerPhoto,
         teamId: roster.teamId,

@@ -322,6 +322,7 @@ model SeasonTeamPlayer {
   teamId       String
   playerId     String
   playerName   String
+  studentId    String
   jerseyNumber String
   playerPhoto  String?
   season       Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)

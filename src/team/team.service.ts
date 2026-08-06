@@ -292,10 +292,8 @@ export class TeamService {
             where: {
               seasonId,
               playerId: existingById ? { not: existingById.id } : undefined,
-              player: {
-                deletedAt: null,
-                studentId: normalizedDto.studentId,
-              },
+              studentId: normalizedDto.studentId,
+              player: { deletedAt: null },
             },
           });
           if (conflictingStudent) {
@@ -309,14 +307,9 @@ export class TeamService {
             await tx.player.update({
               where: { id: existingPlayer.id },
               data: {
-                name: normalizedDto.name,
-                studentId: normalizedDto.studentId,
-                jerseyNumber: normalizedDto.jerseyNumber,
-                photo: normalizedDto.photo ?? existingPlayer.photo ?? null,
                 status: normalizedDto.status || 'active',
                 yellowCards: normalizedDto.yellowCards ?? existingPlayer.yellowCards,
                 redCards: normalizedDto.redCards ?? existingPlayer.redCards,
-                teamId: teamId,
                 deletedAt: null,
               },
             });
@@ -330,12 +323,14 @@ export class TeamService {
                   teamId,
                   playerId: existingPlayer.id,
                   playerName: normalizedDto.name,
+                  studentId: normalizedDto.studentId,
                   jerseyNumber: normalizedDto.jerseyNumber,
                   playerPhoto: normalizedDto.photo ?? existingPlayer.photo ?? null,
                 },
                 update: {
                   teamId,
                   playerName: normalizedDto.name,
+                  studentId: normalizedDto.studentId,
                   jerseyNumber: normalizedDto.jerseyNumber,
                   playerPhoto: normalizedDto.photo ?? existingPlayer.photo ?? null,
                 },
@@ -371,12 +366,14 @@ export class TeamService {
                   teamId,
                   playerId: newPlayer.id,
                   playerName: newPlayer.name,
+                  studentId: newPlayer.studentId,
                   jerseyNumber: newPlayer.jerseyNumber,
                   playerPhoto: newPlayer.photo,
                 },
                 update: {
                   teamId,
                   playerName: newPlayer.name,
+                  studentId: newPlayer.studentId,
                   jerseyNumber: newPlayer.jerseyNumber,
                   playerPhoto: newPlayer.photo,
                 },

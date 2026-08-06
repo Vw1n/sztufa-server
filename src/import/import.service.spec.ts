@@ -198,6 +198,7 @@ describe('ImportService', () => {
       },
       team: {
         findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn(({ data }: any) =>
           Promise.resolve({ id: data.teamName === '甲队' ? 'team-a' : 'team-b' }),
         ),

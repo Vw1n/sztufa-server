@@ -30,6 +30,7 @@ export class TeamRosterService {
     player: {
       id: string;
       name: string;
+      studentId: string;
       jerseyNumber: string;
       photo: string | null;
     },
@@ -41,12 +42,14 @@ export class TeamRosterService {
         teamId,
         playerId: player.id,
         playerName: player.name,
+        studentId: player.studentId,
         jerseyNumber: player.jerseyNumber,
         playerPhoto: player.photo,
       },
       update: {
         teamId,
         playerName: player.name,
+        studentId: player.studentId,
         jerseyNumber: player.jerseyNumber,
         playerPhoto: player.photo,
       },
@@ -82,6 +85,7 @@ export class TeamRosterService {
     const players = rosterRecords.map((record) => ({
       ...record.player,
       name: record.playerName,
+      studentId: record.studentId,
       jerseyNumber: record.jerseyNumber,
       photo: record.playerPhoto,
       teamId: record.teamId,

@@ -14,7 +14,7 @@ describe('TeamQueryService', () => {
     return { service: new TeamQueryService(prisma), prisma };
   };
 
-  it('uses season registration as the source of truth instead of legacy team gender', async () => {
+  it('uses explicit registration and historical season participation instead of legacy team gender', async () => {
     const { service, prisma } = createService();
     prisma.team.findMany.mockResolvedValue([{ id: 'team-1' }]);
     prisma.team.count.mockResolvedValue(1);
@@ -41,9 +41,13 @@ describe('TeamQueryService', () => {
         }),
         where: {
           deletedAt: null,
-          seasonProfiles: {
-            some: { seasonId: 'season-1', isRegistered: true },
-          },
+          OR: [
+            { seasonProfiles: { some: { seasonId: 'season-1', isRegistered: true } } },
+            { seasonPlayers: { some: { seasonId: 'season-1' } } },
+            { groupTeams: { some: { seasonId: 'season-1' } } },
+            { homeMatches: { some: { seasonId: 'season-1' } } },
+            { awayMatches: { some: { seasonId: 'season-1' } } },
+          ],
         },
       }),
     );

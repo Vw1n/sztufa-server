@@ -58,6 +58,7 @@ describe('TeamRosterService', () => {
 
     await service.registerPlayer(tx, 'season-1', 'team-1', {
       id: 'player-1',
+      studentId: '20260001',
       name: '张三',
       jerseyNumber: '9',
       photo: 'player.webp',
@@ -69,12 +70,14 @@ describe('TeamRosterService', () => {
         seasonId: 'season-1',
         teamId: 'team-1',
         playerId: 'player-1',
+        studentId: '20260001',
         playerName: '张三',
         jerseyNumber: '9',
         playerPhoto: 'player.webp',
       },
       update: {
         teamId: 'team-1',
+        studentId: '20260001',
         playerName: '张三',
         jerseyNumber: '9',
         playerPhoto: 'player.webp',

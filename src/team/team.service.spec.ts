@@ -336,7 +336,7 @@ describe('TeamService.updateWithPlayers', () => {
     return { service, prisma, tx };
   };
 
-  it('updates an existing player by ID when the student ID changes', async () => {
+  it('updates only the selected season snapshot when player details change', async () => {
     const { service, prisma, tx } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team', deletedAt: null });
     prisma.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026 男子组' });
@@ -384,7 +384,13 @@ describe('TeamService.updateWithPlayers', () => {
     expect(tx.player.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'player-1' },
-        data: expect.objectContaining({ studentId: 'new-id' }),
+        data: expect.not.objectContaining({ studentId: 'new-id' }),
+      }),
+    );
+    expect(tx.seasonTeamPlayer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { seasonId_playerId: { seasonId: 'season-1', playerId: 'player-1' } },
+        update: expect.objectContaining({ studentId: 'new-id' }),
       }),
     );
     expect(tx.player.create).not.toHaveBeenCalled();

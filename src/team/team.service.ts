@@ -127,6 +127,7 @@ export class TeamService {
             homeJersey: teamData.homeJersey,
             awayJersey: teamData.awayJersey,
             gender: teamData.gender || 'MALE',
+            isRegistered: true,
           },
         });
 
@@ -245,8 +246,9 @@ export class TeamService {
             homeJersey: profileData.homeJersey,
             awayJersey: profileData.awayJersey,
             gender: profileData.gender,
+            isRegistered: true,
           },
-          update: teamData,
+          update: { ...teamData, isRegistered: true },
         });
         const updatedTeam = { ...team, ...updatedProfile };
 

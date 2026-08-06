@@ -15,6 +15,7 @@ export class TeamQueryService {
       where.seasonProfiles = {
         some: {
           seasonId,
+          isRegistered: true,
           ...(gender && gender !== 'all' ? { gender } : {}),
         },
       };
@@ -28,12 +29,20 @@ export class TeamQueryService {
         take: limitNum,
         where,
         include: {
-          players: {
-            where: {
-              deletedAt: null,
-              ...(seasonId && seasonId !== 'all' ? { seasonPlayers: { some: { seasonId } } } : {}),
-            },
-          },
+          players:
+            seasonId && seasonId !== 'all'
+              ? false
+              : { where: { deletedAt: null } },
+          seasonPlayers:
+            seasonId && seasonId !== 'all'
+              ? {
+                  where: {
+                    seasonId,
+                    player: { deletedAt: null },
+                  },
+                  include: { player: true },
+                }
+              : false,
           groupTeams: seasonId && seasonId !== 'all' ? { where: { seasonId } } : true,
           ...(seasonId && seasonId !== 'all' ? { seasonProfiles: { where: { seasonId } } } : {}),
         },
@@ -42,7 +51,16 @@ export class TeamQueryService {
       this.prisma.team.count({ where }),
     ]);
     const data = teams.map((team: any) => {
-      const { seasonProfiles, ...baseTeam } = team;
+      const { seasonProfiles, seasonPlayers, ...baseTeam } = team;
+      if (seasonId && seasonId !== 'all') {
+        baseTeam.players = (seasonPlayers || []).map((roster: any) => ({
+          ...roster.player,
+          name: roster.playerName,
+          jerseyNumber: roster.jerseyNumber,
+          photo: roster.playerPhoto,
+          teamId: roster.teamId,
+        }));
+      }
       const profile = seasonProfiles?.[0];
       if (!profile) return baseTeam;
       return {
@@ -64,15 +82,40 @@ export class TeamQueryService {
     return { data, total, page: pageNum, limit: limitNum };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, seasonId?: string) {
     const team = await this.prisma.team.findUnique({
       where: { id },
-      include: { players: { where: { deletedAt: null } }, groupTeams: true },
+      include: {
+        players: seasonId ? false : { where: { deletedAt: null } },
+        seasonPlayers: seasonId
+          ? {
+              where: { seasonId, player: { deletedAt: null } },
+              include: { player: true },
+            }
+          : false,
+        seasonProfiles: seasonId ? { where: { seasonId } } : false,
+        groupTeams: seasonId ? { where: { seasonId } } : true,
+      },
     });
     if (!team || team.deletedAt !== null) {
       throw new NotFoundException('球队不存在');
     }
-    return team;
+    if (!seasonId) return team;
+
+    const { seasonPlayers, seasonProfiles, ...baseTeam } = team as any;
+    const profile = seasonProfiles?.[0];
+    return {
+      ...baseTeam,
+      ...(profile || {}),
+      id: team.id,
+      players: (seasonPlayers || []).map((roster: any) => ({
+        ...roster.player,
+        name: roster.playerName,
+        jerseyNumber: roster.jerseyNumber,
+        photo: roster.playerPhoto,
+        teamId: roster.teamId,
+      })),
+    };
   }
 
   async searchByName(name: string) {

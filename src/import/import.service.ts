@@ -217,8 +217,9 @@ export class ImportService {
               homeJersey: null,
               awayJersey: null,
               gender: seasonName.includes('女') ? 'FEMALE' : 'MALE',
+              isRegistered: true,
             },
-            update: {},
+            update: { isRegistered: true },
           });
           if (!existingProfile) {
             undoPayload.created.profileIds.push(profile.id);

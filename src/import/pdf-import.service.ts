@@ -444,6 +444,7 @@ export class PdfImportService {
               homeJersey: teamDto.homeJerseyPhoto?.value || null,
               awayJersey: teamDto.awayJerseyPhoto?.value || null,
               gender: targetSeason.name.includes('女') ? 'FEMALE' : 'MALE',
+              isRegistered: true,
             },
           });
 

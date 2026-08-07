@@ -26,7 +26,11 @@ export class UploadService {
   private readonly s3Client: S3Client;
 
   getUserTempPrefix(username: string): string {
-    const hash = crypto.createHash('sha256').update(username || 'anonymous').digest('hex').slice(0, 12);
+    const hash = crypto
+      .createHash('sha256')
+      .update(username || 'anonymous')
+      .digest('hex')
+      .slice(0, 12);
     return `temp/user_${hash}/`;
   }
 
@@ -151,7 +155,7 @@ export class UploadService {
   extractKeyFromUrl(urlOrKey: string): string {
     if (!urlOrKey) return '';
     const baseUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
-    if (urlOrKey.startsWith(baseUrl)) {
+    if (baseUrl && urlOrKey.startsWith(`${baseUrl}/`)) {
       return urlOrKey.substring(baseUrl.length + 1);
     }
     return urlOrKey;
@@ -176,8 +180,6 @@ export class UploadService {
       );
     }
   }
-
-
 
   async uploadBuffer(buffer: Buffer, key: string, contentType = 'image/webp'): Promise<string> {
     if (!process.env.R2_BUCKET_NAME || !process.env.R2_PUBLIC_URL) {
@@ -351,9 +353,13 @@ export class UploadService {
       }
 
       const [teamRef, playerRef, profileRef, seasonPlayerRef] = await Promise.all([
-        this.prisma.team.findFirst({ where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] } }),
+        this.prisma.team.findFirst({
+          where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] },
+        }),
         this.prisma.player.findFirst({ where: { photo: key } }),
-        this.prisma.seasonTeamProfile.findFirst({ where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] } }),
+        this.prisma.seasonTeamProfile.findFirst({
+          where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] },
+        }),
         this.prisma.seasonTeamPlayer.findFirst({ where: { playerPhoto: key } }),
       ]);
 
@@ -369,7 +375,7 @@ export class UploadService {
             break;
           }
         }
-      } catch (_e) {}
+      } catch {}
 
       if (!teamRef && !playerRef && !profileRef && !seasonPlayerRef && !isReferencedInDrafts) {
         try {

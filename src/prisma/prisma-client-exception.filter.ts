@@ -10,7 +10,10 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
-    this.logger.error(`Prisma Known Request Error [${exception.code}]: ${exception.message}`, exception.stack);
+    this.logger.error(
+      `Prisma Known Request Error [${exception.code}]: ${exception.message}`,
+      exception.stack,
+    );
 
     switch (exception.code) {
       case 'P2002': {
@@ -79,4 +82,3 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
     }
   }
 }
-

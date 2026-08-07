@@ -319,7 +319,11 @@ export class PdfImportService {
       this.validateFieldConfidence(team.awayJerseyColor, '客队球衣颜色', isSuperAdmin);
 
       for (const player of team.players) {
-        this.validateFieldConfidence(player.name, `球员姓名 (${player.name?.value || '未知'})`, isSuperAdmin);
+        this.validateFieldConfidence(
+          player.name,
+          `球员姓名 (${player.name?.value || '未知'})`,
+          isSuperAdmin,
+        );
         this.validateFieldConfidence(
           player.studentId,
           `学号 (${player.studentId?.value || '未知'})`,
@@ -330,7 +334,11 @@ export class PdfImportService {
           `球衣号码 (${player.name?.value || '未知'})`,
           isSuperAdmin,
         );
-        this.validateFieldConfidence(player.photo, `照片 (${player.name?.value || '未知'})`, isSuperAdmin);
+        this.validateFieldConfidence(
+          player.photo,
+          `照片 (${player.name?.value || '未知'})`,
+          isSuperAdmin,
+        );
 
         const photoUrl = player.photo.value;
         if (photoUrl) {
@@ -431,7 +439,9 @@ export class PdfImportService {
           });
 
           for (const pDto of teamDto.players) {
-            const studentId = pDto.studentId.value?.trim() || `PDF_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const studentId =
+              pDto.studentId.value?.trim() ||
+              `PDF_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const name = pDto.name.value?.trim() || '未命名球员';
             const jerseyNumber = pDto.jerseyNumber.value?.trim() || '0';
             const photo = pDto.photo.value || null;

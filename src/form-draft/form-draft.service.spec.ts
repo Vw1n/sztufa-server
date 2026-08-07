@@ -63,7 +63,12 @@ describe('FormDraftService', () => {
   });
 
   it('should save raw payload as draft without materializing', async () => {
-    const mockDraft = { id: 'draft-1', formType: 'TEAM', payload: { teamName: '' }, status: 'DRAFT' };
+    const mockDraft = {
+      id: 'draft-1',
+      formType: 'TEAM',
+      payload: { teamName: '' },
+      status: 'DRAFT',
+    };
     prisma.adminFormDraft.create.mockResolvedValue(mockDraft);
 
     const res = await service.saveDraft({ formType: 'TEAM', payload: { teamName: '' } }, 'admin');

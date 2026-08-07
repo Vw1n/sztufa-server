@@ -5,6 +5,8 @@ import {
   UploadedFile,
   UseGuards,
   BadRequestException,
+  Body,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import multer from 'multer';
@@ -43,7 +45,7 @@ export class UploadController {
       },
     }),
   )
-  async uploadFile(@UploadedFile() file: Express.Multer.File) {
+  async uploadFile(@UploadedFile() file: Express.Multer.File, @Request() req: any) {
     if (!file) {
       throw new BadRequestException('请选择要上传的文件');
     }
@@ -53,11 +55,20 @@ export class UploadController {
       throw new BadRequestException('只能上传图片文件');
     }
 
-    const url = await this.uploadService.uploadImage(file);
+    const username = req.user?.username || 'anonymous';
+    const url = await this.uploadService.uploadImage(file, username);
     return {
       statusCode: 201,
       message: '图片上传成功',
       data: { url },
     };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post('cleanup-temp')
+  async cleanupTemp(@Body('keys') keys: string[], @Request() req: any) {
+    const username = req.user?.username || 'admin';
+    return this.uploadService.cleanupTempKeys(keys || [], username);
   }
 }

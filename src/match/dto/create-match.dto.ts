@@ -38,14 +38,15 @@ const isShootoutEvent = (eventType: MatchEventType): boolean =>
   eventType === MatchEventType.PenaltyShootoutMiss;
 
 export class MatchEventDto {
-  @ApiProperty({ description: '事件时间', example: "35'" })
+  @ApiProperty({ description: '事件时间', example: "35'", required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  eventTime: string;
+  eventTime?: string;
 
-  @ApiProperty({ enum: MatchEventType, description: '事件类型' })
+  @ApiProperty({ enum: MatchEventType, description: '事件类型', required: false })
+  @IsOptional()
   @IsEnum(MatchEventType)
-  eventType: MatchEventType;
+  eventType?: MatchEventType;
 
   @ApiProperty({ enum: MatchEventPhase, required: false, default: MatchEventPhase.Regular })
   @IsOptional()
@@ -53,24 +54,28 @@ export class MatchEventDto {
   phase?: MatchEventPhase;
 
   @ApiProperty({ description: '点球大战轮次', required: false, minimum: 1 })
-  @ValidateIf((event: MatchEventDto) => isShootoutEvent(event.eventType))
+  @ValidateIf((event: MatchEventDto) => !!event.eventType && isShootoutEvent(event.eventType))
+  @IsNotEmpty({ message: '点球大战轮次不能为空' })
   @IsInt()
   @Min(1)
   shootoutRound?: number;
 
   @ApiProperty({ description: '点球大战全局罚球顺序', required: false, minimum: 1 })
-  @ValidateIf((event: MatchEventDto) => isShootoutEvent(event.eventType))
+  @ValidateIf((event: MatchEventDto) => !!event.eventType && isShootoutEvent(event.eventType))
+  @IsNotEmpty({ message: '点球大战顺序不能为空' })
   @IsInt()
   @Min(1)
   shootoutOrder?: number;
 
-  @ApiProperty({ description: '事件描述' })
+  @ApiProperty({ description: '事件描述', required: false })
+  @IsOptional()
   @IsString()
-  description: string;
+  description?: string;
 
-  @ApiProperty({ enum: ['home', 'away'], description: '事件归属方' })
+  @ApiProperty({ enum: ['home', 'away'], description: '事件归属方', required: false })
+  @IsOptional()
   @IsIn(['home', 'away'])
-  teamType: 'home' | 'away';
+  teamType?: 'home' | 'away';
 
   @IsOptional()
   @IsString()
@@ -110,13 +115,15 @@ export class MatchEventDto {
 }
 
 export class CreateMatchDto {
-  @ApiProperty({ description: '主队ID' })
+  @ApiProperty({ description: '主队ID', required: false })
+  @IsOptional()
   @IsString()
-  homeTeamId: string;
+  homeTeamId?: string;
 
-  @ApiProperty({ description: '客队ID' })
+  @ApiProperty({ description: '客队ID', required: false })
+  @IsOptional()
   @IsString()
-  awayTeamId: string;
+  awayTeamId?: string;
 
   @ApiProperty({ description: '主队比分', example: 2, required: false })
   @IsOptional()
@@ -142,13 +149,15 @@ export class CreateMatchDto {
   @Min(0)
   awayPenaltyScore?: number | null;
 
-  @ApiProperty({ description: '比赛日期时间', example: '2024-01-15T14:00:00' })
+  @ApiProperty({ description: '比赛日期时间', example: '2024-01-15T14:00:00', required: false })
+  @IsOptional()
   @IsDateString()
-  matchDate: string;
+  matchDate?: string;
 
-  @ApiProperty({ description: '比赛地点', example: '学校足球场' })
+  @ApiProperty({ description: '比赛地点', example: '学校足球场', required: false })
+  @IsOptional()
   @IsString()
-  location: string;
+  location?: string;
 
   @ApiProperty({ description: '比赛状态', example: 'scheduled', required: false })
   @IsOptional()
@@ -210,17 +219,20 @@ export class CreateMatchDto {
 }
 
 export class MatchLineupDto {
-  @ApiProperty({ description: '球员ID' })
+  @ApiProperty({ description: '球员ID', required: false })
+  @IsOptional()
   @IsString()
-  playerId: string;
+  playerId?: string;
 
-  @ApiProperty({ description: '归属方', example: 'home' })
+  @ApiProperty({ description: '归属方', example: 'home', required: false })
+  @IsOptional()
   @IsString()
   @IsIn(['home', 'away'])
-  teamType: 'home' | 'away';
+  teamType?: 'home' | 'away';
 
-  @ApiProperty({ description: '阵容类型', example: 'starting' })
+  @ApiProperty({ description: '阵容类型', example: 'starting', required: false })
+  @IsOptional()
   @IsString()
   @IsIn(['starting', 'substitute'])
-  lineupType: 'starting' | 'substitute';
+  lineupType?: 'starting' | 'substitute';
 }

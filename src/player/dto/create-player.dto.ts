@@ -23,6 +23,11 @@ export class CreatePlayerDto {
   @IsString()
   teamId: string;
 
+  @ApiProperty({ description: '所属赛季ID', required: false })
+  @IsOptional()
+  @IsString()
+  seasonId?: string;
+
   @ApiProperty({ description: '球员状态', required: false, example: 'active' })
   @IsOptional()
   @IsString()

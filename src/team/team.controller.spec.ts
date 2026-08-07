@@ -52,7 +52,7 @@ describe('TeamController', () => {
     it('教练角色必须只能查到本队且 total 为 1', async () => {
       const req = { user: { role: 'coach', teamId: 'coach_team_1' } };
       const res = await controller.findAdminAll(1, 10, undefined, undefined, req);
-      expect(teamQueryService.findOne).toHaveBeenCalledWith('coach_team_1');
+      expect(teamQueryService.findOne).toHaveBeenCalledWith('coach_team_1', undefined);
       expect(res.data.length).toBe(1);
       expect(res.total).toBe(1);
       expect(res.data[0].id).toBe('coach_team_1');

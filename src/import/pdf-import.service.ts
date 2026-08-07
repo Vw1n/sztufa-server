@@ -302,28 +302,35 @@ export class PdfImportService {
       throw new BadRequestException('提交的球队数据不能为空');
     }
 
+    const user = this.prisma?.user
+      ? await this.prisma.user.findUnique({ where: { username }, select: { role: true } })
+      : null;
+    const isSuperAdmin = user?.role === 'super_admin';
+
     const tempPrefix = `temp/pdf/${batchId}/`;
 
     for (const team of teams) {
-      this.validateFieldConfidence(team.teamName, '球队名称');
-      this.validateFieldConfidence(team.headCoach, '主教练姓名');
-      this.validateFieldConfidence(team.coachPhone, '教练电话');
-      this.validateFieldConfidence(team.teamLeader, '领队姓名');
-      this.validateFieldConfidence(team.leaderPhone, '领队电话');
-      this.validateFieldConfidence(team.homeJerseyColor, '主队球衣颜色');
-      this.validateFieldConfidence(team.awayJerseyColor, '客队球衣颜色');
+      this.validateFieldConfidence(team.teamName, '球队名称', isSuperAdmin);
+      this.validateFieldConfidence(team.headCoach, '主教练姓名', isSuperAdmin);
+      this.validateFieldConfidence(team.coachPhone, '教练电话', isSuperAdmin);
+      this.validateFieldConfidence(team.teamLeader, '领队姓名', isSuperAdmin);
+      this.validateFieldConfidence(team.leaderPhone, '领队电话', isSuperAdmin);
+      this.validateFieldConfidence(team.homeJerseyColor, '主队球衣颜色', isSuperAdmin);
+      this.validateFieldConfidence(team.awayJerseyColor, '客队球衣颜色', isSuperAdmin);
 
       for (const player of team.players) {
-        this.validateFieldConfidence(player.name, `球员姓名 (${player.name.value || '未知'})`);
+        this.validateFieldConfidence(player.name, `球员姓名 (${player.name?.value || '未知'})`, isSuperAdmin);
         this.validateFieldConfidence(
           player.studentId,
-          `学号 (${player.studentId.value || '未知'})`,
+          `学号 (${player.studentId?.value || '未知'})`,
+          isSuperAdmin,
         );
         this.validateFieldConfidence(
           player.jerseyNumber,
-          `球衣号码 (${player.name.value || '未知'})`,
+          `球衣号码 (${player.name?.value || '未知'})`,
+          isSuperAdmin,
         );
-        this.validateFieldConfidence(player.photo, `照片 (${player.name.value || '未知'})`);
+        this.validateFieldConfidence(player.photo, `照片 (${player.name?.value || '未知'})`, isSuperAdmin);
 
         const photoUrl = player.photo.value;
         if (photoUrl) {
@@ -384,49 +391,24 @@ export class PdfImportService {
 
       await this.prisma.$transaction(async (tx) => {
         for (const teamDto of teams) {
-          const teamName = teamDto.teamName.value?.trim();
-          if (!teamName) continue;
+          const teamName = teamDto.teamName.value?.trim() || '未命名球队';
 
-          let team = await tx.team.findFirst({
-            where: { seasonProfiles: { some: { seasonId, teamName } } },
+          const team = await tx.team.create({
+            data: {
+              teamName,
+              headCoach: teamDto.headCoach.value || null,
+              coachPhone: teamDto.coachPhone.value || null,
+              teamLeader: teamDto.teamLeader.value || null,
+              leaderPhone: teamDto.leaderPhone.value || null,
+              teamDoctor: teamDto.teamDoctor.value || null,
+              homeJerseyColor: teamDto.homeJerseyColor.value || '白色',
+              awayJerseyColor: teamDto.awayJerseyColor.value || '黑色',
+              teamLogo: teamDto.logo?.value || null,
+              homeJersey: teamDto.homeJerseyPhoto?.value || null,
+              awayJersey: teamDto.awayJerseyPhoto?.value || null,
+            },
           });
-          if (team) {
-            throw new ConflictException(`球队已存在于所选赛季: ${teamName}`);
-          }
-          if (!team) {
-            team = await tx.team.create({
-              data: {
-                teamName,
-                headCoach: teamDto.headCoach.value || null,
-                coachPhone: teamDto.coachPhone.value || null,
-                teamLeader: teamDto.teamLeader.value || null,
-                leaderPhone: teamDto.leaderPhone.value || null,
-                teamDoctor: teamDto.teamDoctor.value || null,
-                homeJerseyColor: teamDto.homeJerseyColor.value || '白色',
-                awayJerseyColor: teamDto.awayJerseyColor.value || '黑色',
-                teamLogo: teamDto.logo?.value || null,
-                homeJersey: teamDto.homeJerseyPhoto?.value || null,
-                awayJersey: teamDto.awayJerseyPhoto?.value || null,
-              },
-            });
-            createdTeamsCount++;
-          } else {
-            await tx.team.update({
-              where: { id: team.id },
-              data: {
-                headCoach: teamDto.headCoach.value || team.headCoach,
-                coachPhone: teamDto.coachPhone.value || team.coachPhone,
-                teamLeader: teamDto.teamLeader.value || team.teamLeader,
-                leaderPhone: teamDto.leaderPhone.value || team.leaderPhone,
-                teamDoctor: teamDto.teamDoctor.value || team.teamDoctor,
-                homeJerseyColor: teamDto.homeJerseyColor.value || team.homeJerseyColor,
-                awayJerseyColor: teamDto.awayJerseyColor.value || team.awayJerseyColor,
-                teamLogo: teamDto.logo?.value || team.teamLogo,
-                homeJersey: teamDto.homeJerseyPhoto?.value || team.homeJersey,
-                awayJersey: teamDto.awayJerseyPhoto?.value || team.awayJersey,
-              },
-            });
-          }
+          createdTeamsCount++;
 
           await tx.seasonTeamProfile.create({
             data: {
@@ -449,42 +431,33 @@ export class PdfImportService {
           });
 
           for (const pDto of teamDto.players) {
-            const studentId = pDto.studentId.value?.trim();
-            const name = pDto.name.value?.trim();
+            const studentId = pDto.studentId.value?.trim() || `PDF_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const name = pDto.name.value?.trim() || '未命名球员';
             const jerseyNumber = pDto.jerseyNumber.value?.trim() || '0';
             const photo = pDto.photo.value || null;
 
-            if (!studentId || !name) continue;
-
-            const existingPlayer = await tx.player.findFirst({
-              where: { studentId, seasonPlayers: { some: { seasonId } } },
+            const createdPlayer = await tx.player.create({
+              data: {
+                name,
+                studentId,
+                jerseyNumber,
+                photo,
+                teamId: team.id,
+              },
             });
 
-            if (!existingPlayer) {
-              const createdPlayer = await tx.player.create({
-                data: {
-                  name,
-                  studentId,
-                  jerseyNumber,
-                  photo,
-                  teamId: team.id,
-                },
-              });
-              await tx.seasonTeamPlayer.create({
-                data: {
-                  seasonId,
-                  teamId: team.id,
-                  playerId: createdPlayer.id,
-                  playerName: name,
-                  studentId,
-                  jerseyNumber,
-                  playerPhoto: photo,
-                },
-              });
-              createdPlayersCount++;
-            } else {
-              throw new ConflictException(`球员学号已存在于所选赛季: ${studentId}`);
-            }
+            await tx.seasonTeamPlayer.create({
+              data: {
+                seasonId,
+                teamId: team.id,
+                playerId: createdPlayer.id,
+                playerName: name,
+                studentId,
+                jerseyNumber,
+                playerPhoto: photo,
+              },
+            });
+            createdPlayersCount++;
           }
         }
 
@@ -631,8 +604,12 @@ export class PdfImportService {
     };
   }
 
-  private validateFieldConfidence(field: ParsedFieldDto<any> | undefined, fieldName: string) {
-    if (!field) return;
+  private validateFieldConfidence(
+    field: ParsedFieldDto<any> | undefined,
+    fieldName: string,
+    isSuperAdmin = false,
+  ) {
+    if (!field || isSuperAdmin) return;
     if (field.confidence < 0.8 && !field.manuallyConfirmed) {
       throw new BadRequestException(
         `字段 "${fieldName}" 的匹配置信度较低 (${field.confidence})，请人工核对并勾选确认后提交`,

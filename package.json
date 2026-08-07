@@ -25,10 +25,15 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node src/seeds/seed.ts",
-    "cleanup:season-gender-rosters": "ts-node scripts/cleanup-season-gender-rosters.ts"
+    "baseline:preserve-v1": "node -e \"const fs = require('fs'); if (!fs.existsSync('scripts/baseline-v1-pre-draft.json')) { fs.copyFileSync('scripts/pre-migration-baseline.json', 'scripts/baseline-v1-pre-draft.json', fs.constants.COPYFILE_EXCL); console.log('[BASELINE V1 LOCKED] baseline-v1-pre-draft.json 首次只读锁存完成'); } else { console.log('[BASELINE V1 LOCKED] baseline-v1-pre-draft.json 已锁定存在，禁止覆盖'); }\"",
+    "baseline:capture-v2": "ts-node scripts/capture-data-baseline.ts --output baseline-v2-before-v8.json",
+    "baseline:compare-v1": "ts-node scripts/compare-data-baseline.ts --input baseline-v1-pre-draft.json",
+    "baseline:compare-v2": "ts-node scripts/compare-data-baseline.ts --input baseline-v2-before-v8.json",
+    "baseline:capture": "ts-node scripts/capture-data-baseline.ts",
+    "baseline:compare": "ts-node scripts/compare-data-baseline.ts"
   },
   "overrides": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "4.3.1"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1076.0",
@@ -91,7 +96,11 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
+    "rootDir": ".",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/scripts"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "testPathIgnorePatterns": [
       "\\.integration\\.spec\\.ts$",
@@ -101,9 +110,9 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "src/**/*.(t|j)s"
     ],
-    "coverageDirectory": "../coverage",
+    "coverageDirectory": "./coverage",
     "testEnvironment": "node"
   }
 }

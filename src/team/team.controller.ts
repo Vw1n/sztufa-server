@@ -42,7 +42,7 @@ export class TeamController {
   @ApiOperation({ summary: '在单个事务中创建球队及全部球员' })
   createWithPlayers(@Body() dto: CreateTeamWithPlayersDto, @Req() req: any) {
     const username = req.user?.username || 'admin';
-    return this.teamService.createWithPlayers(dto, username);
+    return this.teamService.createWithPlayers(dto, username, req.user);
   }
 
   @ApiBearerAuth()

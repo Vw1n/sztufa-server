@@ -28,14 +28,14 @@ export class MatchService {
     private readonly predictionService: PredictionService,
   ) {}
 
-  async create(createMatchDto: CreateMatchDto, username: string) {
+  async createMatchCore(tx: any, createMatchDto: CreateMatchDto) {
     if (createMatchDto.homeTeamId === createMatchDto.awayTeamId) {
       throw new BadRequestException('主队和客队不能是同一支球队');
     }
 
     const [homeTeam, awayTeam] = await Promise.all([
-      this.prisma.team.findUnique({ where: { id: createMatchDto.homeTeamId } }),
-      this.prisma.team.findUnique({ where: { id: createMatchDto.awayTeamId } }),
+      tx.team.findUnique({ where: { id: createMatchDto.homeTeamId } }),
+      tx.team.findUnique({ where: { id: createMatchDto.awayTeamId } }),
     ]);
 
     if (!homeTeam) {
@@ -45,14 +45,30 @@ export class MatchService {
       throw new NotFoundException('客队不存在');
     }
 
-    // 获取当前活跃赛季并进行关联
     let seasonId = createMatchDto.seasonId;
     if (!seasonId) {
-      const activeSeason = await this.prisma.season.findFirst({
+      const activeSeason = await tx.season.findFirst({
         where: { status: 'active' },
         orderBy: { createdAt: 'desc' },
       });
       seasonId = activeSeason ? activeSeason.id : undefined;
+    }
+
+    if (seasonId) {
+      const [homeProfile, awayProfile] = await Promise.all([
+        tx.seasonTeamProfile.findUnique({
+          where: { seasonId_teamId: { seasonId, teamId: createMatchDto.homeTeamId! } },
+        }),
+        tx.seasonTeamProfile.findUnique({
+          where: { seasonId_teamId: { seasonId, teamId: createMatchDto.awayTeamId! } },
+        }),
+      ]);
+      if (!homeProfile) {
+        throw new BadRequestException('主队在所选赛季中未登记或不存在');
+      }
+      if (!awayProfile) {
+        throw new BadRequestException('客队在所选赛季中未登记或不存在');
+      }
     }
 
     const { goals, events, lineups, ...matchData } = createMatchDto;
@@ -77,67 +93,86 @@ export class MatchService {
           ? createMatchDto.awayTeamId
           : null;
 
-    const { match } = await this.prisma.$transaction(async (tx) => {
-      const createdMatch = await tx.match.create({
-        data: {
-          ...matchData,
-          homeScore: outcome.homeScore,
-          awayScore: outcome.awayScore,
-          homePenaltyScore: outcome.homePenaltyScore,
-          awayPenaltyScore: outcome.awayPenaltyScore,
-          winnerTeamId,
-          decidedBy: outcome.decidedBy,
-          seasonId,
-        },
-        include: { homeTeam: true, awayTeam: true },
-      });
-
-      const validatedLineups = lineups?.length
-        ? await this.matchDataWriter.writeLineups(
-            tx,
-            createdMatch.id,
-            createdMatch.homeTeamId,
-            createdMatch.awayTeamId,
-            lineups,
-          )
-        : [];
-      await this.matchDataWriter.writeEvents(tx, createdMatch.id, events || []);
-      await this.matchDataWriter.writeGoals(tx, createdMatch.id, events, goals);
-
-      if (createdMatch.status === 'finished') {
-        await this.predictionService.settleMatchPredictions(createdMatch.id, tx);
-      }
-
-      return { match: createdMatch, validLineups: validatedLineups };
+    const createdMatch = await tx.match.create({
+      data: {
+        ...matchData,
+        homeTeamId: createMatchDto.homeTeamId!,
+        awayTeamId: createMatchDto.awayTeamId!,
+        matchDate: createMatchDto.matchDate ? new Date(createMatchDto.matchDate) : new Date(),
+        location: createMatchDto.location || '',
+        homeScore: outcome.homeScore,
+        awayScore: outcome.awayScore,
+        homePenaltyScore: outcome.homePenaltyScore,
+        awayPenaltyScore: outcome.awayPenaltyScore,
+        winnerTeamId,
+        decidedBy: outcome.decidedBy,
+        seasonId,
+      },
+      include: { homeTeam: true, awayTeam: true },
     });
 
-    // 同步本场比赛受影响和停赛球员的红黄牌与可用状态
-    await this.playerCardSyncService.syncMatchPlayers(
-      match.id,
-      match.homeTeamId,
-      match.awayTeamId,
-      match.status,
-      events || [],
-      this.prisma,
-    );
+    const validatedLineups = lineups?.length
+      ? await this.matchDataWriter.writeLineups(
+          tx,
+          createdMatch.id,
+          createdMatch.homeTeamId,
+          createdMatch.awayTeamId,
+          lineups,
+        )
+      : [];
+    await this.matchDataWriter.writeEvents(tx, createdMatch.id, events || []);
+    await this.matchDataWriter.writeGoals(tx, createdMatch.id, events, goals);
 
-    // 记录审计日志
-    await this.auditLogService.log(
-      username,
-      'CREATE_MATCH',
-      `录入比赛: "${homeTeam.teamName} vs ${awayTeam.teamName}" (比分: ${outcome.homeScore}:${outcome.awayScore})`,
-    );
+    return { match: createdMatch, validLineups: validatedLineups, events: events || [] };
+  }
 
-    const result = await this.matchQuery.findDetails(match.id);
+  async afterMatchCommitted(matchId: string, username: string, events: any[] = []) {
+    try {
+      const match = await this.prisma.match.findUnique({
+        where: { id: matchId },
+        include: { homeTeam: true, awayTeam: true },
+      });
+      if (!match) return;
 
-    if (result && result.seasonId && result.status === 'finished') {
-      const cacheResult = await this.seasonStatistics.computeAndCache(result.seasonId);
-      if (!cacheResult.success) {
-        console.error(`[Match Create] 积分榜缓存更新失败: ${cacheResult.error}`);
+      if (match.status === 'finished') {
+        await this.predictionService.settleMatchPredictions(match.id, this.prisma);
       }
+
+      await this.playerCardSyncService.syncMatchPlayers(
+        match.id,
+        match.homeTeamId,
+        match.awayTeamId,
+        match.status,
+        events,
+        this.prisma,
+      );
+
+      await this.auditLogService.log(
+        username,
+        'CREATE_MATCH',
+        `录入比赛: "${match.homeTeam?.teamName || ''} vs ${match.awayTeam?.teamName || ''}" (比分: ${match.homeScore}:${match.awayScore})`,
+      );
+
+      if (match.seasonId) {
+        await this.seasonStatistics.computeAndCache(match.seasonId);
+      }
+    } catch (err) {
+      console.error(`[afterMatchCommitted Error] Failed for match ${matchId}:`, err);
+    }
+  }
+
+  async create(createMatchDto: CreateMatchDto, username: string, txParam?: any) {
+    if (txParam) {
+      const res = await this.createMatchCore(txParam, createMatchDto);
+      return res.match;
     }
 
-    return result;
+    const result = await this.prisma.$transaction(async (innerTx) => {
+      return this.createMatchCore(innerTx, createMatchDto);
+    });
+
+    await this.afterMatchCommitted(result.match.id, username, result.events);
+    return this.matchQuery.findDetails(result.match.id);
   }
 
   async findAll(
@@ -166,8 +201,8 @@ export class MatchService {
     return this.matchQuery.findOne(id);
   }
 
-  async update(id: string, updateMatchDto: UpdateMatchDto, username: string) {
-    const match = await this.prisma.match.findUnique({
+  async updateMatchCore(tx: any, id: string, updateMatchDto: UpdateMatchDto, username: string) {
+    const match = await tx.match.findUnique({
       where: { id },
       include: { homeTeam: true, awayTeam: true, events: true },
     });
@@ -175,27 +210,28 @@ export class MatchService {
       throw new NotFoundException('比赛不存在');
     }
 
+    const seasonId = updateMatchDto.seasonId || match.seasonId;
     const finalHomeTeamId = updateMatchDto.homeTeamId || match.homeTeamId;
     const finalAwayTeamId = updateMatchDto.awayTeamId || match.awayTeamId;
     if (finalHomeTeamId === finalAwayTeamId) {
       throw new BadRequestException('主队和客队不能是同一支球队');
     }
 
-    if (updateMatchDto.homeTeamId) {
-      const homeTeam = await this.prisma.team.findUnique({
-        where: { id: updateMatchDto.homeTeamId },
-      });
-      if (!homeTeam) {
-        throw new NotFoundException('主队不存在');
-      }
-    }
+    if (tx.seasonTeamProfile?.findUnique) {
+      const [homeProfile, awayProfile] = await Promise.all([
+        tx.seasonTeamProfile.findUnique({
+          where: { seasonId_teamId: { seasonId, teamId: finalHomeTeamId } },
+        }),
+        tx.seasonTeamProfile.findUnique({
+          where: { seasonId_teamId: { seasonId, teamId: finalAwayTeamId } },
+        }),
+      ]);
 
-    if (updateMatchDto.awayTeamId) {
-      const awayTeam = await this.prisma.team.findUnique({
-        where: { id: updateMatchDto.awayTeamId },
-      });
-      if (!awayTeam) {
-        throw new NotFoundException('客队不存在');
+      if (!homeProfile) {
+        throw new BadRequestException(`主队 (${finalHomeTeamId}) 在比赛赛季中未建立报名档案`);
+      }
+      if (!awayProfile) {
+        throw new BadRequestException(`客队 (${finalAwayTeamId}) 在比赛赛季中未建立报名档案`);
       }
     }
 
@@ -213,8 +249,6 @@ export class MatchService {
         : preserveStoredPenalty
           ? match.awayPenaltyScore
           : null;
-    // Historical JSON matches can have a final score without event details.
-    // An empty events array must not recalculate that score as 0:0.
     const outcome =
       events && hasOutcomeEvents(events)
         ? calculateMatchOutcome(events, homePenaltyScore, awayPenaltyScore)
@@ -231,54 +265,66 @@ export class MatchService {
           ? finalAwayTeamId
           : null;
 
-    const updatedMatch = await this.prisma.$transaction(async (tx) => {
-      await tx.match.update({
-        where: { id },
-        data: {
-          ...matchData,
-          homeScore: outcome.homeScore,
-          awayScore: outcome.awayScore,
-          homePenaltyScore: outcome.homePenaltyScore,
-          awayPenaltyScore: outcome.awayPenaltyScore,
-          winnerTeamId,
-          decidedBy: outcome.decidedBy,
-        },
-      });
-
-      if (lineups !== undefined) {
-        await this.matchDataWriter.replaceLineups(
-          tx,
-          id,
-          finalHomeTeamId,
-          finalAwayTeamId,
-          lineups,
-        );
-      }
-
-      if (events !== undefined) {
-        await this.matchDataWriter.replaceEvents(tx, id, events);
-      }
-
-      if (events !== undefined || goals !== undefined) {
-        await this.matchDataWriter.replaceGoals(tx, id, events, goals);
-      }
-
-      const curMatch = await tx.match.findUnique({ where: { id } });
-      if (curMatch && curMatch.status === 'finished') {
-        await this.predictionService.settleMatchPredictions(id, tx);
-      } else if (curMatch && (curMatch.status === 'cancelled' || curMatch.status === 'void')) {
-        await this.predictionService.voidMatchPredictions(id, username, tx);
-      }
-
-      return curMatch;
+    await tx.match.update({
+      where: { id },
+      data: {
+        ...matchData,
+        seasonId,
+        homeTeamId: finalHomeTeamId,
+        awayTeamId: finalAwayTeamId,
+        homeScore: outcome.homeScore,
+        awayScore: outcome.awayScore,
+        homePenaltyScore: outcome.homePenaltyScore,
+        awayPenaltyScore: outcome.awayPenaltyScore,
+        winnerTeamId,
+        decidedBy: outcome.decidedBy,
+      },
     });
 
-    if (!updatedMatch) {
+    if (lineups !== undefined) {
+      await this.matchDataWriter.replaceLineups(tx, id, finalHomeTeamId, finalAwayTeamId, lineups);
+    }
+
+    if (events !== undefined) {
+      await this.matchDataWriter.replaceEvents(tx, id, events);
+    }
+
+    if (events !== undefined || goals !== undefined) {
+      await this.matchDataWriter.replaceGoals(tx, id, events, goals);
+    }
+
+    const curMatch = await tx.match.findUnique({ where: { id } });
+    if (curMatch && curMatch.status === 'finished') {
+      await this.predictionService.settleMatchPredictions(id, tx);
+    } else if (curMatch && (curMatch.status === 'cancelled' || curMatch.status === 'void')) {
+      await this.predictionService.voidMatchPredictions(id, username, tx);
+    }
+
+    return { match: curMatch, oldMatch: match, events: events ?? match.events };
+  }
+
+  async update(id: string, updateMatchDto: UpdateMatchDto, username: string, txParam?: any) {
+    if (txParam) {
+      const res = await this.updateMatchCore(txParam, id, updateMatchDto, username);
+      return res.match;
+    }
+
+    const txResult = await this.prisma.$transaction(
+      async (tx) => this.updateMatchCore(tx, id, updateMatchDto, username),
+      { timeout: 30000 },
+    );
+
+    if (!txResult?.match) {
       throw new NotFoundException('同步更新比赛时失败，未找到该场比赛信息');
     }
 
+    const updatedMatch = txResult.match;
+    const match = txResult.oldMatch;
+    const events = txResult.events;
+    const { lineups } = updateMatchDto;
+
     // 重新计算并同步所有受影响球员和需解禁停赛球员的状态
-    const effectiveEvents = events ?? match.events;
+    const effectiveEvents = events;
     await this.playerCardSyncService.syncMatchPlayers(
       id,
       updatedMatch.homeTeamId,
@@ -288,20 +334,20 @@ export class MatchService {
       this.prisma,
     );
 
-    if (events !== undefined) {
+    if (updateMatchDto.events !== undefined) {
       const currentPlayerIds = new Set(
-        effectiveEvents.flatMap((event) =>
+        effectiveEvents.flatMap((event: any) =>
           [event.playerId, event.subPlayerId, event.assistPlayerId].filter(Boolean),
         ),
       );
       const previousPlayerIds = new Set(
-        match.events.flatMap((event) =>
+        match.events.flatMap((event: any) =>
           [event.playerId, event.subPlayerId, event.assistPlayerId].filter(Boolean),
         ),
       );
       for (const playerId of previousPlayerIds) {
         if (!currentPlayerIds.has(playerId)) {
-          await this.playerCardSyncService.syncPlayerCards(playerId, this.prisma);
+          await this.playerCardSyncService.syncPlayerCards(String(playerId), this.prisma);
         }
       }
     }
@@ -326,7 +372,7 @@ export class MatchService {
     if (updateMatchDto.status !== undefined && updateMatchDto.status !== match.status) {
       diffs.push(`状态: ${match.status}->${updateMatchDto.status}`);
     }
-    if (events !== undefined) {
+    if (updateMatchDto.events !== undefined) {
       diffs.push(`更新事件(${events.length}个)`);
     }
     if (lineups !== undefined) {
@@ -342,16 +388,16 @@ export class MatchService {
 
     await this.auditLogService.log(username, 'UPDATE_MATCH', details);
 
-    const result = await this.matchQuery.findDetails(id);
+    const queryResult = await this.matchQuery.findDetails(id);
 
-    if (result && result.seasonId) {
-      const cacheResult = await this.seasonStatistics.computeAndCache(result.seasonId);
+    if (queryResult && queryResult.seasonId) {
+      const cacheResult = await this.seasonStatistics.computeAndCache(queryResult.seasonId);
       if (!cacheResult.success) {
         console.error(`[Match Update] 积分榜缓存更新失败: ${cacheResult.error}`);
       }
     }
 
-    return result;
+    return queryResult;
   }
 
   async remove(id: string, username: string) {

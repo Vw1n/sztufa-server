@@ -16,13 +16,47 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import sharp from 'sharp';
+import * as crypto from 'crypto';
+
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
   private readonly s3Client: S3Client;
 
-  constructor() {
+  getUserTempPrefix(username: string): string {
+    const hash = crypto
+      .createHash('sha256')
+      .update(username || 'anonymous')
+      .digest('hex')
+      .slice(0, 12);
+    return `temp/user_${hash}/`;
+  }
+
+  async uploadImage(file: Express.Multer.File, username: string = 'anonymous'): Promise<string> {
+    this.validateImageMagicBytes(file.buffer);
+    let compressedBuffer: Buffer;
+    try {
+      compressedBuffer = await sharp(file.buffer)
+        .rotate()
+        .resize({ width: 1200, withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+    } catch (error) {
+      this.logger.error(
+        `图片处理失败: name=${file.originalname}, type=${file.mimetype}, size=${file.size}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new UnprocessableEntityException('图片无法解析或格式不受支持，请更换图片后重试');
+    }
+
+    const prefix = this.getUserTempPrefix(username);
+    const fileKey = `${prefix}${Date.now()}-${Math.random().toString(36).substring(2, 8)}.webp`;
+    return this.uploadBuffer(compressedBuffer, fileKey, 'image/webp');
+  }
+
+  constructor(private readonly prisma: PrismaService) {
     const requiredConfig = [
       'R2_ENDPOINT',
       'R2_ACCESS_KEY_ID',
@@ -121,7 +155,7 @@ export class UploadService {
   extractKeyFromUrl(urlOrKey: string): string {
     if (!urlOrKey) return '';
     const baseUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
-    if (urlOrKey.startsWith(baseUrl)) {
+    if (baseUrl && urlOrKey.startsWith(`${baseUrl}/`)) {
       return urlOrKey.substring(baseUrl.length + 1);
     }
     return urlOrKey;
@@ -145,27 +179,6 @@ export class UploadService {
         '不受支持的图片格式，文件头魔数校验失败 (仅支持 PNG, JPEG, GIF, WEBP)',
       );
     }
-  }
-
-  async uploadImage(file: Express.Multer.File): Promise<string> {
-    this.validateImageMagicBytes(file.buffer);
-    let compressedBuffer: Buffer;
-    try {
-      compressedBuffer = await sharp(file.buffer)
-        .rotate()
-        .resize({ width: 1200, withoutEnlargement: true })
-        .webp({ quality: 80 })
-        .toBuffer();
-    } catch (error) {
-      this.logger.error(
-        `图片处理失败: name=${file.originalname}, type=${file.mimetype}, size=${file.size}`,
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw new UnprocessableEntityException('图片无法解析或格式不受支持，请更换图片后重试');
-    }
-
-    const fileKey = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.webp`;
-    return this.uploadBuffer(compressedBuffer, fileKey, 'image/webp');
   }
 
   async uploadBuffer(buffer: Buffer, key: string, contentType = 'image/webp'): Promise<string> {
@@ -311,5 +324,69 @@ export class UploadService {
     } catch {
       return false;
     }
+  }
+
+  async cleanupTempKeys(
+    keys: string[],
+    username: string,
+    options?: { excludedDraftId?: string },
+  ): Promise<{ cleanedCount: number }> {
+    if (!keys || keys.length === 0) return { cleanedCount: 0 };
+    let cleanedCount = 0;
+    const userPrefix = this.getUserTempPrefix(username);
+
+    for (const rawUrl of keys) {
+      const key = this.extractKeyFromUrl(rawUrl);
+      if (!key || key.startsWith('http://') || key.startsWith('https://')) {
+        continue;
+      }
+
+      // 所有权校验：Key 必须属于当前用户的临时目录 (或通用 temp/ 前缀且当前为系统管理员)
+      // 注意：temp/user_ 前缀的路径是用户隔离目录，不受 legacy admin 规则豁免
+      const isUserTemp = key.startsWith(userPrefix);
+      const isLegacyTemp =
+        (key.startsWith('temp/') && !key.startsWith('temp/user_')) ||
+        key.startsWith('uploads/players/imports/');
+      if (!isUserTemp && !(isLegacyTemp && username === 'admin')) {
+        this.logger.warn(`拦截越权物理删除请求: username=${username}, key=${key}`);
+        continue;
+      }
+
+      const [teamRef, playerRef, profileRef, seasonPlayerRef] = await Promise.all([
+        this.prisma.team.findFirst({
+          where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] },
+        }),
+        this.prisma.player.findFirst({ where: { photo: key } }),
+        this.prisma.seasonTeamProfile.findFirst({
+          where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] },
+        }),
+        this.prisma.seasonTeamPlayer.findFirst({ where: { playerPhoto: key } }),
+      ]);
+
+      let isReferencedInDrafts = false;
+      try {
+        const otherDrafts = await this.prisma.adminFormDraft.findMany({
+          where: options?.excludedDraftId ? { id: { not: options.excludedDraftId } } : undefined,
+          select: { payload: true },
+        });
+        for (const draft of otherDrafts) {
+          if (JSON.stringify(draft.payload).includes(key)) {
+            isReferencedInDrafts = true;
+            break;
+          }
+        }
+      } catch {}
+
+      if (!teamRef && !playerRef && !profileRef && !seasonPlayerRef && !isReferencedInDrafts) {
+        try {
+          await this.deleteObject(key);
+          cleanedCount++;
+        } catch (err) {
+          this.logger.warn(`Failed to cleanup temp key=${key}: ${err}`);
+        }
+      }
+    }
+
+    return { cleanedCount };
   }
 }

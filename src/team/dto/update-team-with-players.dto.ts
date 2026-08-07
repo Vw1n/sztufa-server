@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { CreateTeamPlayerDto } from './create-team-player.dto';
 
 export class UpdateTeamPlayerItemDto extends CreateTeamPlayerDto {
@@ -14,10 +14,10 @@ export class UpdateTeamPlayerItemDto extends CreateTeamPlayerDto {
 }
 
 export class UpdateTeamWithPlayersDto {
-  @ApiProperty({ description: '本次修改所属的赛季 ID' })
+  @ApiProperty({ description: '本次修改所属的赛季 ID', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  seasonId: string;
+  seasonId?: string;
 
   @ApiProperty({ description: '球队名称', required: false })
   @IsOptional()

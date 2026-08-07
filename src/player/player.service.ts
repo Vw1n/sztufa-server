@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlayerDto } from './dto/create-player.dto';
 import { UpdatePlayerDto } from './dto/update-player.dto';
@@ -13,135 +18,170 @@ export class PlayerService {
   ) {}
 
   /**
-   * 将球员同步到所有活跃赛季的名册中
+   * 将球员同步到指定的单一目标赛季名册中
    */
-  private async syncPlayerToActiveSeasons(player: {
-    id: string;
-    teamId: string;
-    name: string;
-    studentId: string;
-    jerseyNumber: string;
-    photo: string | null;
-  }): Promise<void> {
+  /**
+   * 将球员同步到指定的单一目标赛季名册中
+   */
+  private async syncPlayerToSeason(
+    tx: any,
+    player: {
+      id: string;
+      teamId: string;
+      name: string;
+      studentId: string;
+      jerseyNumber: string;
+      photo?: string | null;
+    },
+    seasonId: string,
+  ): Promise<void> {
     const { id: playerId, teamId } = player;
-    const [activeSeasons, team] = await Promise.all([
-      this.prisma.season.findMany({ where: { status: 'active' } }),
-      this.prisma.team.findUnique({ where: { id: teamId }, select: { gender: true } }),
+    const runner = tx || this.prisma;
+    const [season, team] = await Promise.all([
+      runner.season.findUnique({ where: { id: seasonId } }),
+      runner.team.findUnique({ where: { id: teamId }, select: { gender: true } }),
     ]);
-    if (!team) {
+
+    if (!season || !team) {
+      throw new BadRequestException('目标赛季或球队不存在');
+    }
+
+    if (!isTeamGenderCompatibleWithSeason(season.name, team.gender)) {
+      await runner.seasonTeamPlayer.deleteMany({
+        where: { seasonId: season.id, playerId },
+      });
       return;
     }
-    for (const season of activeSeasons) {
-      if (!isTeamGenderCompatibleWithSeason(season.name, team.gender)) {
-        await this.prisma.seasonTeamPlayer.deleteMany({
-          where: { seasonId: season.id, playerId },
-        });
-        continue;
-      }
-      await this.prisma.seasonTeamPlayer.upsert({
-        where: {
-          seasonId_playerId: {
-            seasonId: season.id,
-            playerId,
-          },
-        },
-        create: {
+
+    await runner.seasonTeamPlayer.upsert({
+      where: {
+        seasonId_playerId: {
           seasonId: season.id,
-          teamId,
           playerId,
-          playerName: player.name,
-          studentId: player.studentId,
-          jerseyNumber: player.jerseyNumber,
-          playerPhoto: player.photo,
         },
-        update: {
-          teamId,
-          playerName: player.name,
-          studentId: player.studentId,
-          jerseyNumber: player.jerseyNumber,
-          playerPhoto: player.photo,
-        },
-      });
-    }
+      },
+      create: {
+        seasonId: season.id,
+        teamId,
+        playerId,
+        playerName: player.name,
+        studentId: player.studentId,
+        jerseyNumber: player.jerseyNumber,
+        playerPhoto: player.photo,
+      },
+      update: {
+        teamId,
+        playerName: player.name,
+        studentId: player.studentId,
+        jerseyNumber: player.jerseyNumber,
+        playerPhoto: player.photo,
+      },
+    });
   }
 
   async create(createPlayerDto: CreatePlayerDto, username: string, userCtx?: any) {
-    if (userCtx && userCtx.role === 'coach') {
-      if (userCtx.teamId !== createPlayerDto.teamId) {
-        throw new ForbiddenException('您没有权限为其他球队创建或导入球员');
-      }
-    }
-
-    const team = await this.prisma.team.findUnique({
-      where: { id: createPlayerDto.teamId },
-    });
-    if (!team || team.deletedAt !== null) {
-      throw new NotFoundException('球队不存在');
-    }
-
-    // 检查学号是否已存在（包括可能已被软删除重命名学号的历史球员记录）
-    const existingPlayer = await this.prisma.player.findFirst({
-      where: {
-        OR: [
-          { studentId: createPlayerDto.studentId },
-          { studentId: { startsWith: `${createPlayerDto.studentId}_deleted_` } },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (existingPlayer) {
-      if (existingPlayer.deletedAt === null) {
-        if (userCtx && userCtx.role === 'coach') {
-          if (existingPlayer.teamId !== userCtx.teamId) {
-            throw new ForbiddenException(
-              '该学号的球员已归属于其他球队，您没有权限修改其信息或将其划归至本队',
-            );
-          }
+    return this.prisma.$transaction(async (tx) => {
+      if (userCtx && userCtx.role === 'coach') {
+        if (userCtx.teamId !== createPlayerDto.teamId) {
+          throw new ForbiddenException('您没有权限为其他球队创建或导入球员');
         }
       }
 
-      // 如果已存在，则根据主键 ID 更新/恢复球员信息，并写回正常学号
-      const updatedPlayer = await this.prisma.player.update({
-        where: { id: existingPlayer.id },
-        data: {
-          name: createPlayerDto.name,
-          studentId: createPlayerDto.studentId, // 恢复其真实的学号
-          jerseyNumber: createPlayerDto.jerseyNumber,
-          teamId: createPlayerDto.teamId,
-          photo: createPlayerDto.photo || existingPlayer.photo || undefined,
-          deletedAt: null, // 恢复软删除的球员
-        },
+      const isSuperAdmin = userCtx?.role === 'super_admin';
+
+      const team = await tx.team.findUnique({
+        where: { id: createPlayerDto.teamId },
+      });
+      if (!team || team.deletedAt !== null) {
+        throw new NotFoundException('球队不存在');
+      }
+
+      let targetSeasonId = createPlayerDto.seasonId;
+      if (!targetSeasonId) {
+        const activeSeason = await tx.season.findFirst({
+          where: { status: 'active' },
+          orderBy: { createdAt: 'desc' },
+        });
+        targetSeasonId = activeSeason?.id;
+      }
+
+      if (!targetSeasonId) {
+        throw new BadRequestException('无法确定目标赛季，无法创建球员');
+      }
+
+      const profile = await tx.seasonTeamProfile.findUnique({
+        where: { seasonId_teamId: { seasonId: targetSeasonId, teamId: createPlayerDto.teamId } },
+      });
+      if (!profile) {
+        throw new BadRequestException('球队在所选赛季中尚未注册');
+      }
+
+      if (!isSuperAdmin) {
+        const existingPlayer = await tx.player.findFirst({
+          where: {
+            OR: [
+              { studentId: createPlayerDto.studentId },
+              { studentId: { startsWith: `${createPlayerDto.studentId}_deleted_` } },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (existingPlayer) {
+          if (existingPlayer.deletedAt === null) {
+            if (userCtx && userCtx.role === 'coach') {
+              if (existingPlayer.teamId !== userCtx.teamId) {
+                throw new ForbiddenException(
+                  '该学号的球员已归属于其他球队，您没有权限修改其信息或将其划归至本队',
+                );
+              }
+            }
+          }
+
+          const updatedPlayer = await tx.player.update({
+            where: { id: existingPlayer.id },
+            data: {
+              name: createPlayerDto.name,
+              studentId: createPlayerDto.studentId,
+              jerseyNumber: createPlayerDto.jerseyNumber,
+              teamId: createPlayerDto.teamId,
+              photo: createPlayerDto.photo || existingPlayer.photo || undefined,
+              deletedAt: null,
+            },
+            include: { team: true },
+          });
+
+          await this.syncPlayerToSeason(tx, updatedPlayer, targetSeasonId);
+
+          await this.auditLogService.log(
+            username,
+            'UPDATE_PLAYER',
+            `导入/关联球员: "${createPlayerDto.name}" (学号: ${createPlayerDto.studentId})`,
+            tx,
+          );
+
+          return updatedPlayer;
+        }
+      }
+
+      const playerData = { ...createPlayerDto };
+      delete playerData.seasonId;
+      const newPlayer = await tx.player.create({
+        data: playerData,
         include: { team: true },
       });
 
-      // 自动同步绑定至所有当前活跃赛季
-      await this.syncPlayerToActiveSeasons(updatedPlayer);
+      await this.syncPlayerToSeason(tx, newPlayer, targetSeasonId);
 
       await this.auditLogService.log(
         username,
-        'UPDATE_PLAYER',
-        `导入/关联球员: "${createPlayerDto.name}" (学号: ${createPlayerDto.studentId})`,
+        'CREATE_PLAYER',
+        `新增球员: "${createPlayerDto.name}" (学号: ${createPlayerDto.studentId})`,
+        tx,
       );
 
-      return updatedPlayer;
-    }
-
-    const newPlayer = await this.prisma.player.create({
-      data: createPlayerDto,
-      include: { team: true },
+      return newPlayer;
     });
-
-    // 新增球员自动绑定至所有当前活跃赛季
-    await this.syncPlayerToActiveSeasons(newPlayer);
-
-    await this.auditLogService.log(
-      username,
-      'CREATE_PLAYER',
-      `新增球员: "${createPlayerDto.name}" (学号: ${createPlayerDto.studentId})`,
-    );
-
-    return newPlayer;
   }
 
   async findAll(teamId?: string, page: number = 1, limit: number = 10) {
@@ -175,7 +215,12 @@ export class PlayerService {
     return player;
   }
 
-  async update(id: string, updatePlayerDto: UpdatePlayerDto, username: string, userCtx?: any) {
+  async update(
+    id: string,
+    updatePlayerDto: UpdatePlayerDto & { seasonId?: string },
+    username: string,
+    userCtx?: any,
+  ) {
     const player = await this.prisma.player.findUnique({ where: { id } });
     if (!player || player.deletedAt !== null) {
       throw new NotFoundException('球员不存在');
@@ -199,20 +244,24 @@ export class PlayerService {
       }
     }
 
+    const { seasonId, ...updateData } = updatePlayerDto;
     const updatedPlayer = await this.prisma.player.update({
       where: { id },
-      data: updatePlayerDto,
+      data: updateData,
       include: { team: true },
     });
 
-    // 如果队籍发生迁移，同步更新当前活跃赛季名册信息
-    if (
-      updatePlayerDto.teamId !== undefined ||
-      updatePlayerDto.name !== undefined ||
-      updatePlayerDto.jerseyNumber !== undefined ||
-      updatePlayerDto.photo !== undefined
-    ) {
-      await this.syncPlayerToActiveSeasons(updatedPlayer);
+    let targetSeasonId = seasonId;
+    if (!targetSeasonId) {
+      const activeSeason = await this.prisma.season.findFirst({
+        where: { status: 'active' },
+        orderBy: { createdAt: 'desc' },
+      });
+      targetSeasonId = activeSeason?.id;
+    }
+
+    if (targetSeasonId) {
+      await this.syncPlayerToSeason(null, updatedPlayer, targetSeasonId);
     }
 
     const diffs: string[] = [];

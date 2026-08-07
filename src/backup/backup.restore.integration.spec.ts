@@ -334,6 +334,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         seasonId: season1.id,
         teamId: team1.id,
         playerId: player1.id,
+        studentId: player1.studentId,
         playerName: '张三',
         jerseyNumber: '10',
       },

@@ -2,8 +2,8 @@ import { BadRequestException } from '@nestjs/common';
 import { MatchEventPhase, MatchEventType } from './dto/create-match.dto';
 
 type MatchEventLike = {
-  eventType: string;
-  teamType: string;
+  eventType?: string;
+  teamType?: string;
   phase?: string | null;
 };
 

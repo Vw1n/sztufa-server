@@ -63,26 +63,32 @@ export class MatchDataWriterService {
   }
 
   async writeEvents(tx: any, matchId: string, events: MatchEventInput[]) {
-    if (events.length === 0) return;
-    const shootoutOrders = events
+    const validEvents = (events || []).filter(
+      (e) => e && (e.eventTime || e.eventType || e.description),
+    );
+    if (validEvents.length === 0) return;
+
+    const shootoutOrders = validEvents
       .filter((event) => isShootoutEvent(event.eventType))
-      .map((event) => event.shootoutOrder);
+      .map((event) => event.shootoutOrder)
+      .filter((order) => order !== undefined && order !== null);
+
     if (new Set(shootoutOrders).size !== shootoutOrders.length) {
       throw new BadRequestException('点球大战罚球顺序不能重复');
     }
 
     await tx.matchEvent.createMany({
-      data: events.map((event) => ({
+      data: validEvents.map((event) => ({
         matchId,
-        eventTime: event.eventTime,
-        eventType: event.eventType,
+        eventTime: event.eventTime || '',
+        eventType: event.eventType || 'goal',
         phase: isShootoutEvent(event.eventType)
           ? MatchEventPhase.Shootout
           : event.phase || MatchEventPhase.Regular,
         shootoutRound: isShootoutEvent(event.eventType) ? event.shootoutRound : null,
         shootoutOrder: isShootoutEvent(event.eventType) ? event.shootoutOrder : null,
-        description: event.description,
-        teamType: event.teamType,
+        description: event.description || '',
+        teamType: event.teamType || 'home',
         playerId: event.playerId || null,
         playerName: event.playerName || null,
         jerseyNumber: event.jerseyNumber || null,
@@ -118,32 +124,35 @@ export class MatchDataWriterService {
             goal.eventType === 'own_goal'
               ? `${goal.playerName || '未记录球员'} (乌龙)`
               : goal.eventType === 'penalty'
-                ? `${goal.playerName} (点球)`
+                ? `${goal.playerName || '未记录球员'} (点球)`
                 : goal.playerName || '',
           jerseyNumber: goal.jerseyNumber || '',
-          goalTime: goal.eventTime,
+          goalTime: goal.eventTime || '',
           teamType:
             goal.eventType === 'own_goal'
               ? goal.teamType === 'home'
                 ? 'away'
                 : 'home'
-              : goal.teamType,
+              : goal.teamType || 'home',
           playerId: goal.playerId || null,
         })),
       });
       return;
     }
     if (goals && goals.length > 0) {
-      await tx.goal.createMany({
-        data: goals.map((goal) => ({
-          matchId,
-          playerName: goal.playerName,
-          jerseyNumber: goal.jerseyNumber,
-          goalTime: goal.goalTime,
-          teamType: goal.teamType,
-          playerId: goal.playerId || null,
-        })),
-      });
+      const validGoals = goals.filter((g) => g && (g.playerName || g.goalTime));
+      if (validGoals.length > 0) {
+        await tx.goal.createMany({
+          data: validGoals.map((goal) => ({
+            matchId,
+            playerName: goal.playerName || '',
+            jerseyNumber: goal.jerseyNumber || '',
+            goalTime: goal.goalTime || '',
+            teamType: goal.teamType || 'home',
+            playerId: goal.playerId || null,
+          })),
+        });
+      }
     }
   }
 

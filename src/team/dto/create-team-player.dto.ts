@@ -2,17 +2,20 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateTeamPlayerDto {
-  @ApiProperty({ description: '球员姓名', example: '张三' })
+  @ApiProperty({ description: '球员姓名', example: '张三', required: false })
+  @IsOptional()
   @IsString()
-  name: string;
+  name?: string;
 
-  @ApiProperty({ description: '学号', example: '20210001' })
+  @ApiProperty({ description: '学号', example: '20210001', required: false })
+  @IsOptional()
   @IsString()
-  studentId: string;
+  studentId?: string;
 
-  @ApiProperty({ description: '球衣号码', example: '10' })
+  @ApiProperty({ description: '球衣号码', example: '10', required: false })
+  @IsOptional()
   @IsString()
-  jerseyNumber: string;
+  jerseyNumber?: string;
 
   @ApiProperty({ description: '球员照片 URL', required: false })
   @IsOptional()

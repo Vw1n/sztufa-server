@@ -286,7 +286,9 @@ model SeasonTeamProfile {
   updatedAt       DateTime @updatedAt
 
   @@unique([seasonId, teamId])
+  @@unique([teamId], map: "SeasonTeamProfile_teamId_one_season_key")
   @@index([seasonId])
+  @@index([seasonId, isRegistered])
   @@index([teamId])
 }
 
@@ -332,6 +334,7 @@ model SeasonTeamPlayer {
 
   @@unique([seasonId, playerId])
   @@index([seasonId])
+  @@index([seasonId, studentId])
   @@index([teamId])
   @@index([playerId])
 }
@@ -392,4 +395,21 @@ model PdfImportBatch {
   @@index([username, status])
   @@index([expiresAt])
   @@index([fileHash])
+}
+
+model AdminFormDraft {
+  id               String   @id @default(cuid())
+  formType         String
+  payload          Json
+  seasonId         String?
+  officialRecordId String?
+  status           String   @default("DRAFT")
+  lastError        String?
+  username         String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([formType, status, updatedAt])
+  @@index([username, updatedAt])
+  @@index([officialRecordId])
 }

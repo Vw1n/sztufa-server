@@ -401,6 +401,52 @@ describe('TeamService.updateWithPlayers', () => {
     );
   });
 
+  it('allows updating team with existing player from another team/season and updating season jersey number', async () => {
+    const { service, prisma, tx } = createService();
+    prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team A', deletedAt: null });
+    prisma.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2026 男子组' });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({
+      id: 'profile-1',
+      seasonId: 'season-1',
+      teamId: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+    });
+    tx.player.findUnique.mockResolvedValue({
+      id: 'player-2',
+      teamId: 'team-other', // Historical team was team-other
+      studentId: '20230099',
+      photo: null,
+      yellowCards: 0,
+      redCards: 0,
+      deletedAt: null,
+    });
+    tx.seasonTeamPlayer.findFirst.mockResolvedValue(null);
+    tx.player.update.mockResolvedValue({ id: 'player-2' });
+    tx.auditLog.create.mockResolvedValue({});
+    tx.team.findUnique.mockResolvedValue({ id: 'team-1', players: [{ id: 'player-2' }] });
+
+    await service.updateWithPlayers(
+      'team-1',
+      {
+        seasonId: 'season-1',
+        players: [{ id: 'player-2', name: '刘哲玮', studentId: '20230099', jerseyNumber: '99' }],
+      },
+      'admin',
+      { role: 'super_admin' },
+    );
+
+    expect(tx.seasonTeamPlayer.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { seasonId_playerId: { seasonId: 'season-1', playerId: 'player-2' } },
+        create: expect.objectContaining({
+          teamId: 'team-1',
+          jerseyNumber: '99',
+        }),
+      }),
+    );
+  });
+
   it('rejects a coach attempting to update another team', async () => {
     const { service, prisma } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-2', teamName: 'Other', deletedAt: null });
@@ -414,3 +460,4 @@ describe('TeamService.updateWithPlayers', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
+

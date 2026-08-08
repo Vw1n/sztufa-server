@@ -9,5 +9,6 @@ import { TeamRosterService } from './team-roster.service';
   imports: [AuditLogModule],
   controllers: [TeamController],
   providers: [TeamService, TeamQueryService, TeamRosterService],
+  exports: [TeamService],
 })
 export class TeamModule {}

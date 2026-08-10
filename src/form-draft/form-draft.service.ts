@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SaveFormDraftDto } from './dto/save-form-draft.dto';
 import { normalizeTeamPayload } from '../team/team-write-normalizer';
@@ -108,7 +108,11 @@ export class FormDraftService {
     return { success: true };
   }
 
-  private async cleanupUnreferencedDraftImages(payload: any, ownerUsername: string, currentDraftId: string) {
+  private async cleanupUnreferencedDraftImages(
+    payload: any,
+    ownerUsername: string,
+    currentDraftId: string,
+  ) {
     if (!payload || typeof payload !== 'object') return;
 
     const urlsOrKeys: string[] = [];
@@ -197,12 +201,9 @@ export class FormDraftService {
             createdTeamId = draft.officialRecordId;
           } else {
             const createDto: any = { seasonId, ...normalized };
-            const team = await this.teamService.createTeamCore(
-              tx,
-              createDto,
-              username,
-              { role: 'super_admin' },
-            );
+            const team = await this.teamService.createTeamCore(tx, createDto, username, {
+              role: 'super_admin',
+            });
             createdTeamId = team.id;
           }
 
@@ -249,7 +250,12 @@ export class FormDraftService {
               events: payloadAny?.events || [],
               goals: payloadAny?.goals || [],
             };
-            const updateRes = await this.matchService.updateMatchCore(tx, draft.officialRecordId, updateDto, username);
+            const updateRes = await this.matchService.updateMatchCore(
+              tx,
+              draft.officialRecordId,
+              updateDto,
+              username,
+            );
             createdMatchId = draft.officialRecordId;
             matchEvents = updateRes.events;
           } else {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { TeamStanding } from './league-standings.calculator';
+import { getCanonicalWinnerTeamId } from '../match/winner-team-id';
 
 @Injectable()
 export class CupStandingsCalculator {
@@ -82,36 +83,29 @@ export class CupStandingsCalculator {
   }
 
   private getPenaltyWinner(match: any): 'home' | 'away' | null {
-    if (
-      match.homePenaltyScore !== null &&
-      match.homePenaltyScore !== undefined &&
-      match.awayPenaltyScore !== null &&
-      match.awayPenaltyScore !== undefined
-    ) {
-      if (match.homePenaltyScore > match.awayPenaltyScore) return 'home';
-      if (match.awayPenaltyScore > match.homePenaltyScore) return 'away';
-    }
-    if (match.decidedBy === 'PENALTIES' && match.winnerTeamId) {
-      if (match.winnerTeamId === match.homeTeamId) return 'home';
-      if (match.winnerTeamId === match.awayTeamId) return 'away';
-    }
-    if (Array.isArray(match.events)) {
-      let homeShootout = 0;
-      let awayShootout = 0;
-      let hasShootoutEvent = false;
-      for (const e of match.events) {
-        if (e.eventType === 'penalty_shootout_goal') {
-          hasShootoutEvent = true;
-          if (e.teamType === 'home') homeShootout += 1;
-          if (e.teamType === 'away') awayShootout += 1;
-        } else if (e.eventType === 'penalty_shootout_miss') {
-          hasShootoutEvent = true;
-        }
-      }
-      if (hasShootoutEvent && homeShootout !== awayShootout) {
-        return homeShootout > awayShootout ? 'home' : 'away';
-      }
-    }
+    const isPenaltyMatch =
+      (match.homePenaltyScore !== null &&
+        match.homePenaltyScore !== undefined &&
+        match.awayPenaltyScore !== null &&
+        match.awayPenaltyScore !== undefined) ||
+      match.decidedBy === 'PENALTIES' ||
+      (Array.isArray(match.events) &&
+        match.events.some(
+          (e: any) =>
+            e.eventType === 'penalty_shootout_goal' || e.eventType === 'penalty_shootout_miss',
+        ));
+
+    if (!isPenaltyMatch) return null;
+
+    const matchForStandings = {
+      ...match,
+      winnerTeamId: match.decidedBy === 'PENALTIES' ? match.winnerTeamId : null,
+    };
+
+    const winnerId = getCanonicalWinnerTeamId(matchForStandings);
+    if (!winnerId) return null;
+    if (winnerId === match.homeTeamId) return 'home';
+    if (winnerId === match.awayTeamId) return 'away';
     return null;
   }
 

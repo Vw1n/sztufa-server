@@ -91,7 +91,12 @@ describe('checkPkSet', () => {
 // ─── checkEntityHashes ──────────────────────────────────────────────────────
 
 describe('checkEntityHashes', () => {
-  const row = { id: 'p-1', name: '张三', teamId: 'team-1', createdAt: new Date('2024-01-01T00:00:00Z') };
+  const row = {
+    id: 'p-1',
+    name: '张三',
+    teamId: 'team-1',
+    createdAt: new Date('2024-01-01T00:00:00Z'),
+  };
   const hash = computeCanonicalHash(row);
 
   it('记录未变更时哈希匹配，不报错', () => {
@@ -125,7 +130,12 @@ describe('checkEntityHashes', () => {
 
   it('快照中没有某条记录的哈希时跳过该条（当前有多余记录不报错）', () => {
     const errors: string[] = [];
-    const extra = { id: 'p-2', name: '王五', teamId: 'team-2', createdAt: new Date('2024-02-01T00:00:00Z') };
+    const extra = {
+      id: 'p-2',
+      name: '王五',
+      teamId: 'team-2',
+      createdAt: new Date('2024-02-01T00:00:00Z'),
+    };
     checkEntityHashes(errors, 'Player', [row, extra], { 'p-1': hash });
     expect(errors).toHaveLength(0);
   });
@@ -200,9 +210,7 @@ describe('checkMatchTeamForeignKeys', () => {
 // ─── checkGoalForeignKeys ───────────────────────────────────────────────────
 
 describe('checkGoalForeignKeys', () => {
-  const goalsMap = new Map([
-    ['g-1', { id: 'g-1', matchId: 'm-1', playerId: 'p-1' }],
-  ]);
+  const goalsMap = new Map([['g-1', { id: 'g-1', matchId: 'm-1', playerId: 'p-1' }]]);
 
   it('外键匹配时不报错', () => {
     const errors: string[] = [];
@@ -212,7 +220,9 @@ describe('checkGoalForeignKeys', () => {
 
   it('matchId 不匹配时报错', () => {
     const errors: string[] = [];
-    checkGoalForeignKeys(errors, goalsMap, [{ goalId: 'g-1', matchId: 'm-WRONG', playerId: 'p-1' }]);
+    checkGoalForeignKeys(errors, goalsMap, [
+      { goalId: 'g-1', matchId: 'm-WRONG', playerId: 'p-1' },
+    ]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('g-1');
     expect(errors[0]).toContain('matchId');
@@ -222,13 +232,13 @@ describe('checkGoalForeignKeys', () => {
 // ─── checkMatchEventForeignKeys ─────────────────────────────────────────────
 
 describe('checkMatchEventForeignKeys', () => {
-  const eventsMap = new Map([
-    ['e-1', { id: 'e-1', matchId: 'm-1', playerId: 'p-1' }],
-  ]);
+  const eventsMap = new Map([['e-1', { id: 'e-1', matchId: 'm-1', playerId: 'p-1' }]]);
 
   it('外键匹配时不报错', () => {
     const errors: string[] = [];
-    checkMatchEventForeignKeys(errors, eventsMap, [{ eventId: 'e-1', matchId: 'm-1', playerId: 'p-1' }]);
+    checkMatchEventForeignKeys(errors, eventsMap, [
+      { eventId: 'e-1', matchId: 'm-1', playerId: 'p-1' },
+    ]);
     expect(errors).toHaveLength(0);
   });
 
@@ -246,13 +256,13 @@ describe('checkMatchEventForeignKeys', () => {
 // ─── checkMatchLineupForeignKeys ─────────────────────────────────────────────
 
 describe('checkMatchLineupForeignKeys', () => {
-  const lineupsMap = new Map([
-    ['l-1', { id: 'l-1', matchId: 'm-1', playerId: 'p-1' }],
-  ]);
+  const lineupsMap = new Map([['l-1', { id: 'l-1', matchId: 'm-1', playerId: 'p-1' }]]);
 
   it('外键匹配时不报错', () => {
     const errors: string[] = [];
-    checkMatchLineupForeignKeys(errors, lineupsMap, [{ lineupId: 'l-1', matchId: 'm-1', playerId: 'p-1' }]);
+    checkMatchLineupForeignKeys(errors, lineupsMap, [
+      { lineupId: 'l-1', matchId: 'm-1', playerId: 'p-1' },
+    ]);
     expect(errors).toHaveLength(0);
   });
 
@@ -285,15 +295,11 @@ describe('checkMatchLineupForeignKeys', () => {
 // ─── checkPlayerTeamForeignKeys: 记录缺失时静默跳过 ────────────────────────────
 
 describe('checkPlayerTeamForeignKeys — 目标记录缺失行为', () => {
-  const playersMap = new Map([
-    ['p-1', { id: 'p-1', teamId: 'team-A' }],
-  ]);
+  const playersMap = new Map([['p-1', { id: 'p-1', teamId: 'team-A' }]]);
 
   it('快照引用的 playerId 不在当前数据库中时静默跳过', () => {
     const errors: string[] = [];
-    checkPlayerTeamForeignKeys(errors, playersMap, [
-      { playerId: 'p-not-exist', teamId: 'team-A' },
-    ]);
+    checkPlayerTeamForeignKeys(errors, playersMap, [{ playerId: 'p-not-exist', teamId: 'team-A' }]);
     // 目标记录缺失：由 checkPkSet 报告，此函数静默跳过
     expect(errors).toHaveLength(0);
   });
@@ -302,9 +308,7 @@ describe('checkPlayerTeamForeignKeys — 目标记录缺失行为', () => {
 // ─── checkGoalForeignKeys: 记录缺失时静默跳过 ────────────────────────────────
 
 describe('checkGoalForeignKeys — 目标记录缺失行为', () => {
-  const goalsMap = new Map([
-    ['g-1', { id: 'g-1', matchId: 'm-1', playerId: 'p-1' }],
-  ]);
+  const goalsMap = new Map([['g-1', { id: 'g-1', matchId: 'm-1', playerId: 'p-1' }]]);
 
   it('快照引用的 goalId 不在当前数据库中时静默跳过', () => {
     const errors: string[] = [];

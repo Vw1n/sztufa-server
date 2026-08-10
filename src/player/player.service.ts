@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlayerDto } from './dto/create-player.dto';
 import { UpdatePlayerDto } from './dto/update-player.dto';
@@ -159,7 +164,7 @@ export class PlayerService {
         }
       }
 
-      const { seasonId: dtoSeasonId, ...playerData } = createPlayerDto;
+      const { seasonId: _dtoSeasonId, ...playerData } = createPlayerDto;
       const newPlayer = await tx.player.create({
         data: playerData,
         include: { team: true },
@@ -209,7 +214,12 @@ export class PlayerService {
     return player;
   }
 
-  async update(id: string, updatePlayerDto: UpdatePlayerDto & { seasonId?: string }, username: string, userCtx?: any) {
+  async update(
+    id: string,
+    updatePlayerDto: UpdatePlayerDto & { seasonId?: string },
+    username: string,
+    userCtx?: any,
+  ) {
     const player = await this.prisma.player.findUnique({ where: { id } });
     if (!player || player.deletedAt !== null) {
       throw new NotFoundException('球员不存在');

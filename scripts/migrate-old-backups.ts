@@ -68,7 +68,9 @@ async function runCli() {
       counts[item.category as keyof typeof counts]++;
     });
     console.log(` - 活跃恢复目录 (private-backups/database/): ${counts.active} 个`);
-    console.log(` - 只读归档目录 (private-backups/legacy-archive/): ${counts['legacy-archive']} 个`);
+    console.log(
+      ` - 只读归档目录 (private-backups/legacy-archive/): ${counts['legacy-archive']} 个`,
+    );
     console.log(` - 异常隔离目录 (private-backups/quarantine/): ${counts.quarantine} 个`);
     return;
   }

@@ -112,6 +112,74 @@ describe('StandingsCalculators - Penalty Shootout Points', () => {
       expect(team1.points).toBe(2);
       expect(team2.points).toBe(0);
     });
+
+    it('awards 1 point each for regular draw with leftover winnerTeamId (not PENALTIES)', () => {
+      const matches = [
+        {
+          stage: 'LEAGUE',
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-2',
+          homeScore: 1,
+          awayScore: 1,
+          decidedBy: 'REGULAR',
+          winnerTeamId: 'team-1', // 残留的旧 winnerTeamId，但非点球战
+        },
+      ];
+      const standings = calculator.calculate(matches, teamsMap);
+      const team1 = standings.find((s) => s.teamId === 'team-1')!;
+      const team2 = standings.find((s) => s.teamId === 'team-2')!;
+
+      expect(team1.drawn).toBe(1);
+      expect(team1.points).toBe(1);
+      expect(team2.drawn).toBe(1);
+      expect(team2.points).toBe(1);
+    });
+
+    it('awards 1 point each for regular draw with homePenaltyScore=0 & awayPenaltyScore=0 + leftover winnerTeamId', () => {
+      const matches = [
+        {
+          stage: 'LEAGUE',
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-2',
+          homeScore: 1,
+          awayScore: 1,
+          homePenaltyScore: 0,
+          awayPenaltyScore: 0,
+          decidedBy: 'REGULAR',
+          winnerTeamId: 'team-1',
+        },
+      ];
+      const standings = calculator.calculate(matches, teamsMap);
+      const team1 = standings.find((s) => s.teamId === 'team-1')!;
+      const team2 = standings.find((s) => s.teamId === 'team-2')!;
+
+      expect(team1.points).toBe(1);
+      expect(team2.points).toBe(1);
+    });
+
+    it('awards 1 point each for regular draw with tied penalty shootout events + leftover winnerTeamId', () => {
+      const matches = [
+        {
+          stage: 'LEAGUE',
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-2',
+          homeScore: 0,
+          awayScore: 0,
+          decidedBy: 'REGULAR',
+          winnerTeamId: 'team-1',
+          events: [
+            { eventType: 'penalty_shootout_goal', teamType: 'home' },
+            { eventType: 'penalty_shootout_goal', teamType: 'away' },
+          ],
+        },
+      ];
+      const standings = calculator.calculate(matches, teamsMap);
+      const team1 = standings.find((s) => s.teamId === 'team-1')!;
+      const team2 = standings.find((s) => s.teamId === 'team-2')!;
+
+      expect(team1.points).toBe(1);
+      expect(team2.points).toBe(1);
+    });
   });
 
   describe('CupStandingsCalculator', () => {
@@ -163,6 +231,58 @@ describe('StandingsCalculators - Penalty Shootout Points', () => {
 
       expect(team1.points).toBe(2);
       expect(team2.points).toBe(0);
+    });
+
+    it('awards 1 point each in cup group stage for draw with 0:0 penalties and leftover winnerTeamId', async () => {
+      const mockPrisma: any = {
+        seasonGroupTeam: {
+          findMany: jest.fn().mockResolvedValue([
+            {
+              groupName: 'A',
+              teamId: 'team-1',
+              team: { id: 'team-1', teamName: 'Team 1', teamLogo: '', gender: 'MALE' },
+            },
+            {
+              groupName: 'A',
+              teamId: 'team-2',
+              team: { id: 'team-2', teamName: 'Team 2', teamLogo: '', gender: 'MALE' },
+            },
+          ]),
+        },
+      };
+
+      const calculator = new CupStandingsCalculator(mockPrisma);
+      const matches = [
+        {
+          stage: 'GROUP',
+          groupName: 'A',
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-2',
+          homeScore: 1,
+          awayScore: 1,
+          homePenaltyScore: 0,
+          awayPenaltyScore: 0,
+          decidedBy: 'REGULAR',
+          winnerTeamId: 'team-1',
+        },
+      ];
+
+      const result = await calculator.calculate(
+        'season-1',
+        'MALE',
+        matches,
+        new Map([
+          ['team-1', { id: 'team-1', teamName: 'Team 1', gender: 'MALE' }],
+          ['team-2', { id: 'team-2', teamName: 'Team 2', gender: 'MALE' }],
+        ]),
+      );
+
+      const groupA = result.groups['A'];
+      const team1 = groupA.find((s) => s.teamId === 'team-1')!;
+      const team2 = groupA.find((s) => s.teamId === 'team-2')!;
+
+      expect(team1.points).toBe(1);
+      expect(team2.points).toBe(1);
     });
   });
 });

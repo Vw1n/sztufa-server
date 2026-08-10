@@ -24,7 +24,11 @@ export class TeamService {
     private readonly seasonStatistics: SeasonStatisticsService,
   ) {}
 
-  async create(createTeamDto: CreateTeamDto, username: string = 'admin', userCtx?: { role?: string }) {
+  async create(
+    createTeamDto: CreateTeamDto,
+    username: string = 'admin',
+    userCtx?: { role?: string },
+  ) {
     if (userCtx?.role !== 'super_admin') {
       const existingTeam = await this.prisma.team.findFirst({
         where: { teamName: createTeamDto.teamName, deletedAt: null },
@@ -54,7 +58,11 @@ export class TeamService {
       if (!this.prisma?.team) return;
       const team = await this.prisma.team.findUnique({ where: { id: teamId } });
       if (team && this.auditLogService) {
-        await this.auditLogService.log(username, 'CREATE_TEAM', `创建/更新球队: "${team.teamName}"`);
+        await this.auditLogService.log(
+          username,
+          'CREATE_TEAM',
+          `创建/更新球队: "${team.teamName}"`,
+        );
       }
     } catch (err) {
       console.error(`[afterTeamCommitted Error] Failed for team ${teamId}:`, err);
@@ -272,7 +280,7 @@ export class TeamService {
     tx: any,
     teamId: string,
     dto: UpdateTeamWithPlayersDto,
-    username: string = 'admin',
+    _username: string = 'admin',
     userCtx?: { role?: string; teamId?: string },
     txParam?: any,
   ) {
@@ -367,7 +375,9 @@ export class TeamService {
       for (const playerId of deletePlayerIds) {
         const player = await tx.player.findUnique({ where: { id: playerId } });
         if (player && player.teamId === teamId && player.deletedAt === null) {
-          await tx.seasonTeamPlayer.deleteMany({ where: { seasonId: effectiveSeasonId, teamId, playerId } });
+          await tx.seasonTeamPlayer.deleteMany({
+            where: { seasonId: effectiveSeasonId, teamId, playerId },
+          });
           auditDiffs.push(`删除球员: ${player.name}`);
         }
       }
@@ -425,7 +435,9 @@ export class TeamService {
         const newPlayer = await tx.player.create({
           data: {
             name: normalizedDto.name || '未命名球员',
-            studentId: normalizedDto.studentId || `S_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            studentId:
+              normalizedDto.studentId ||
+              `S_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
             jerseyNumber: normalizedDto.jerseyNumber || '0',
             photo: normalizedDto.photo || null,
             teamId,

@@ -28,7 +28,7 @@ export class MatchService {
     private readonly predictionService: PredictionService,
   ) {}
 
-  async createMatchCore(tx: any, createMatchDto: CreateMatchDto, username: string) {
+  async createMatchCore(tx: any, createMatchDto: CreateMatchDto, _username: string) {
     if (createMatchDto.homeTeamId === createMatchDto.awayTeamId) {
       throw new BadRequestException('主队和客队不能是同一支球队');
     }
@@ -282,13 +282,7 @@ export class MatchService {
     });
 
     if (lineups !== undefined) {
-      await this.matchDataWriter.replaceLineups(
-        tx,
-        id,
-        finalHomeTeamId,
-        finalAwayTeamId,
-        lineups,
-      );
+      await this.matchDataWriter.replaceLineups(tx, id, finalHomeTeamId, finalAwayTeamId, lineups);
     }
 
     if (events !== undefined) {

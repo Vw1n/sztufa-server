@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ServiceUnavailableException,
   ConflictException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -190,7 +191,9 @@ export class BackupRestoreService {
       ) {
         throw err;
       }
-      throw new Error(`还原备份失败: ${err?.message || '未知错误'}`);
+      throw new InternalServerErrorException(
+        `数据库覆盖还原事务失败：${err?.message || '未知数据库错误'}`,
+      );
     } finally {
       if (parseResult) parseResult.cleanup();
     }

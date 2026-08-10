@@ -155,7 +155,7 @@ export class UploadService {
   extractKeyFromUrl(urlOrKey: string): string {
     if (!urlOrKey) return '';
     const baseUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
-    if (urlOrKey.startsWith(baseUrl)) {
+    if (baseUrl && urlOrKey.startsWith(`${baseUrl}/`)) {
       return urlOrKey.substring(baseUrl.length + 1);
     }
     return urlOrKey;

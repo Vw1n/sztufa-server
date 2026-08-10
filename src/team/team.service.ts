@@ -481,10 +481,10 @@ export class TeamService {
       throw new ForbiddenException('您没有权限修改其他球队的信息');
     }
     if (txParam) {
-      return this.updateWithPlayersCore(txParam, teamId, dto, username, userCtx);
+      return this.updateWithPlayersCore(txParam, teamId, dto, userCtx);
     }
     const result = await this.prisma.$transaction(
-      async (tx) => this.updateWithPlayersCore(tx, teamId, dto, username, userCtx),
+      async (tx) => this.updateWithPlayersCore(tx, teamId, dto, userCtx),
       { timeout: 30000 },
     );
     await this.afterTeamCommitted(result.id, username);

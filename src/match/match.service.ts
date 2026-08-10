@@ -28,7 +28,7 @@ export class MatchService {
     private readonly predictionService: PredictionService,
   ) {}
 
-  async createMatchCore(tx: any, createMatchDto: CreateMatchDto, _username: string) {
+  async createMatchCore(tx: any, createMatchDto: CreateMatchDto, _username: string = 'admin') {
     if (createMatchDto.homeTeamId === createMatchDto.awayTeamId) {
       throw new BadRequestException('主队和客队不能是同一支球队');
     }
@@ -163,12 +163,12 @@ export class MatchService {
 
   async create(createMatchDto: CreateMatchDto, username: string, txParam?: any) {
     if (txParam) {
-      const res = await this.createMatchCore(txParam, createMatchDto, username);
+      const res = await this.createMatchCore(txParam, createMatchDto);
       return res.match;
     }
 
     const result = await this.prisma.$transaction(async (innerTx) => {
-      return this.createMatchCore(innerTx, createMatchDto, username);
+      return this.createMatchCore(innerTx, createMatchDto);
     });
 
     await this.afterMatchCommitted(result.match.id, username, result.events);

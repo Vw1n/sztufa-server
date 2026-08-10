@@ -191,13 +191,9 @@ export class FormDraftService {
         await this.prisma.$transaction(async (tx) => {
           if (draft.officialRecordId) {
             const updateDto: any = { seasonId, ...normalized };
-            await this.teamService.updateWithPlayersCore(
-              tx,
-              draft.officialRecordId,
-              updateDto,
-              username,
-              { role: 'super_admin' },
-            );
+            await this.teamService.updateWithPlayersCore(tx, draft.officialRecordId, updateDto, {
+              role: 'super_admin',
+            });
             createdTeamId = draft.officialRecordId;
           } else {
             const createDto: any = { seasonId, ...normalized };
@@ -265,7 +261,7 @@ export class FormDraftService {
               events: payloadAny?.events || [],
               goals: payloadAny?.goals || [],
             };
-            const result = await this.matchService.createMatchCore(tx, createDto, username);
+            const result = await this.matchService.createMatchCore(tx, createDto);
             createdMatchId = result.match.id;
             matchEvents = result.events;
           }

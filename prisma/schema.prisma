@@ -286,7 +286,9 @@ model SeasonTeamProfile {
   updatedAt       DateTime @updatedAt
 
   @@unique([seasonId, teamId])
+  @@unique([teamId], map: "SeasonTeamProfile_teamId_one_season_key")
   @@index([seasonId])
+  @@index([seasonId, isRegistered])
   @@index([teamId])
 }
 
@@ -332,6 +334,7 @@ model SeasonTeamPlayer {
 
   @@unique([seasonId, playerId])
   @@index([seasonId])
+  @@index([seasonId, studentId])
   @@index([teamId])
   @@index([playerId])
 }
@@ -410,4 +413,3 @@ model AdminFormDraft {
   @@index([username, updatedAt])
   @@index([officialRecordId])
 }
-

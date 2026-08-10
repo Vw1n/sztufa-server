@@ -13,7 +13,8 @@ WITH evidenced_teams AS (
   SELECT evidence."seasonId", evidence."teamId"
   FROM evidenced_teams evidence
   JOIN "Team" team ON team."id" = evidence."teamId"
-  WHERE evidence."teamId" IS NOT NULL
+  WHERE evidence."seasonId" IS NOT NULL
+    AND evidence."teamId" IS NOT NULL
     AND team."deletedAt" IS NULL
 )
 INSERT INTO "SeasonTeamProfile" (

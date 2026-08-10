@@ -34,6 +34,7 @@ describe('TeamService.createWithPlayers', () => {
         auditLogService,
         new TeamRosterService(prisma),
         seasonStatistics,
+        {} as any,
       ),
       prisma,
       tx,
@@ -332,6 +333,7 @@ describe('TeamService.updateWithPlayers', () => {
       { log: jest.fn() } as any,
       new TeamRosterService(prisma),
       { computeAndCache: jest.fn() } as any,
+      {} as any,
     );
     return { service, prisma, tx };
   };

@@ -13,6 +13,7 @@ import { UpdateTeamWithPlayersDto } from './dto/update-team-with-players.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { TeamRosterService } from './team-roster.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
+import { SeasonLifecycleService } from '../season/season-lifecycle.service';
 import { isTeamGenderCompatibleWithSeason } from '../common/season-gender';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class TeamService {
     private readonly auditLogService: AuditLogService,
     private readonly teamRosterService: TeamRosterService,
     private readonly seasonStatistics: SeasonStatisticsService,
+    private readonly lifecycleService: SeasonLifecycleService,
   ) {}
 
   async create(
@@ -367,6 +369,9 @@ export class TeamService {
 
     if (targetSeason && !isTeamGenderCompatibleWithSeason(targetSeason.name, updatedTeam.gender)) {
       await tx.seasonTeamPlayer.deleteMany({ where: { seasonId: effectiveSeasonId, teamId } });
+    }
+    if (effectiveSeasonId && this.lifecycleService?.cleanStaleManualChampion) {
+      await this.lifecycleService.cleanStaleManualChampion(effectiveSeasonId, tx);
     }
 
     const auditDiffs: string[] = [];

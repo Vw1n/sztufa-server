@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { resolveMatchOutcome } from '../match/match-outcome';
+import { SeasonLifecycleService } from '../season/season-lifecycle.service';
 import {
   ImportExecutionResult,
   ImportPreview,
@@ -27,6 +28,7 @@ export class ImportService {
     private readonly prisma: PrismaService,
     private readonly seasonStatistics: SeasonStatisticsService,
     private readonly auditLogService: AuditLogService,
+    private readonly lifecycleService: SeasonLifecycleService,
   ) {}
 
   async previewFiles(files: Express.Multer.File[]): Promise<ImportPreview> {
@@ -476,6 +478,9 @@ export class ImportService {
       }
     }
     for (const [seasonId, seasonName] of importedSeasons) {
+      if (this.lifecycleService?.cleanStaleManualChampion) {
+        await this.lifecycleService.cleanStaleManualChampion(seasonId);
+      }
       const cacheResult = await this.seasonStatistics.computeAndCache(seasonId);
       if (!cacheResult.success) {
         normalized.warnings.push(`${seasonName}: 数据已导入，但统计缓存刷新失败，可稍后重新计算`);
@@ -552,6 +557,20 @@ export class ImportService {
             playerPhoto: rosterLink.playerPhoto,
           },
         });
+      }
+
+      if (
+        (payload.created.rosterLinkIds.length > 0 || payload.updated.rosterLinks.length > 0) &&
+        this.lifecycleService?.cleanStaleManualChampion &&
+        tx.season?.findMany
+      ) {
+        const activeSeasons = await tx.season.findMany({
+          where: { manualChampionTeamId: { not: null } },
+          select: { id: true },
+        });
+        for (const season of activeSeasons) {
+          await this.lifecycleService.cleanStaleManualChampion(season.id, tx);
+        }
       }
 
       if (payload.created.profileIds.length > 0) {

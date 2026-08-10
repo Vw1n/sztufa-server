@@ -14,6 +14,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
+import { UpdateSeasonChampionDto } from './dto/update-season-champion.dto';
+
 @Controller('api/v1/seasons')
 export class SeasonController {
   constructor(private readonly seasonService: SeasonService) {}
@@ -89,6 +91,18 @@ export class SeasonController {
   async renameSeason(@Param('id') id: string, @Body('name') name: string, @Request() req: any) {
     const username = req.user?.username || 'admin';
     return this.seasonService.renameSeason(id, name, username);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Patch(':id/champion')
+  async updateSeasonChampion(
+    @Param('id') id: string,
+    @Body() dto: UpdateSeasonChampionDto,
+    @Request() req: any,
+  ) {
+    const username = req.user?.username || 'admin';
+    return this.seasonService.updateSeasonChampion(id, dto, username);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

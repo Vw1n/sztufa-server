@@ -31,6 +31,30 @@ describe('TeamRosterService', () => {
     });
   });
 
+  it('allows both MALE and FEMALE teams for ungendered active seasons', async () => {
+    const { service } = createService();
+    const tx: any = {
+      season: {
+        findUnique: (jest.fn() as any).mockResolvedValue({
+          id: 'season-1',
+          name: '2026校长杯',
+          status: 'active',
+        }),
+      },
+    };
+
+    await expect(service.validateTargetSeason(tx, 'season-1', 'FEMALE')).resolves.toEqual({
+      id: 'season-1',
+      name: '2026校长杯',
+      status: 'active',
+    });
+    await expect(service.validateTargetSeason(tx, 'season-1', 'MALE')).resolves.toEqual({
+      id: 'season-1',
+      name: '2026校长杯',
+      status: 'active',
+    });
+  });
+
   it('rejects inactive and gender-mismatched seasons with the existing messages', async () => {
     const { service } = createService();
     const tx: any = { season: { findUnique: jest.fn() } };

@@ -17,6 +17,6 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
     SeasonDeletionService,
   ],
   controllers: [SeasonController],
-  exports: [SeasonService],
+  exports: [SeasonService, SeasonLifecycleService],
 })
 export class SeasonModule {}

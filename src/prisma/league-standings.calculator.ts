@@ -13,6 +13,7 @@ export interface TeamStanding {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
+  isTiedWithNext?: boolean;
 }
 
 @Injectable()
@@ -21,22 +22,143 @@ export class LeagueStandingsCalculator {
     matches: any[],
     teams: Map<string, { id: string; teamName: string; teamLogo: string }>,
   ): TeamStanding[] {
-    const standings = new Map<string, TeamStanding>();
+    const standingsMap = new Map<string, TeamStanding>();
     teams.forEach((team) => {
-      standings.set(team.id, this.createStanding(team.id, team.teamName, team.teamLogo));
+      standingsMap.set(team.id, this.createStanding(team.id, team.teamName, team.teamLogo));
     });
 
-    matches
-      .filter((match) => match.stage === 'LEAGUE' || !match.stage)
-      .forEach((match) =>
-        this.applyMatchResult(
-          standings.get(match.homeTeamId),
-          standings.get(match.awayTeamId),
-          match,
-        ),
+    const leagueMatches = matches.filter((match) => match.stage === 'LEAGUE' || !match.stage);
+    leagueMatches.forEach((match) =>
+      this.applyMatchResult(
+        standingsMap.get(match.homeTeamId),
+        standingsMap.get(match.awayTeamId),
+        match,
+      ),
+    );
+
+    const standings = Array.from(standingsMap.values());
+    return this.sortStandingsWithMiniLeague(standings, leagueMatches);
+  }
+
+  private sortStandingsWithMiniLeague(
+    standings: TeamStanding[],
+    leagueMatches: any[],
+  ): TeamStanding[] {
+    // 1. 按 (points, goalDifference, goalsFor) 对球队分组
+    const groupMap = new Map<string, TeamStanding[]>();
+    standings.forEach((team) => {
+      const key = `${team.points}_${team.goalDifference}_${team.goalsFor}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, []);
+      }
+      groupMap.get(key)!.push(team);
+    });
+
+    // 按常规三项进行组排序
+    const sortedGroupKeys = Array.from(groupMap.keys()).sort((keyA, keyB) => {
+      const [ptsA, gdA, gfA] = keyA.split('_').map(Number);
+      const [ptsB, gdB, gfB] = keyB.split('_').map(Number);
+      if (ptsB !== ptsA) return ptsB - ptsA;
+      if (gdB !== gdA) return gdB - gdA;
+      return gfB - gfA;
+    });
+
+    const finalStandings: TeamStanding[] = [];
+
+    sortedGroupKeys.forEach((key) => {
+      const group = groupMap.get(key)!;
+      if (group.length === 1) {
+        group[0].isTiedWithNext = false;
+        finalStandings.push(group[0]);
+        return;
+      }
+
+      // 对 >1 人的组提取相互交手小联赛
+      const groupTeamIds = new Set(group.map((t) => t.teamId));
+      const miniMatches = leagueMatches.filter(
+        (m) => groupTeamIds.has(m.homeTeamId) && groupTeamIds.has(m.awayTeamId),
       );
 
-    return Array.from(standings.values()).sort(this.compareStandings);
+      const miniStats = new Map<
+        string,
+        { miniPoints: number; miniGoalDiff: number; miniGoalsFor: number }
+      >();
+      group.forEach((t) =>
+        miniStats.set(t.teamId, { miniPoints: 0, miniGoalDiff: 0, miniGoalsFor: 0 }),
+      );
+
+      miniMatches.forEach((m) => {
+        const homeStat = miniStats.get(m.homeTeamId);
+        const awayStat = miniStats.get(m.awayTeamId);
+        if (!homeStat || !awayStat) return;
+
+        homeStat.miniGoalsFor += m.homeScore;
+        awayStat.miniGoalsFor += m.awayScore;
+
+        if (m.homeScore > m.awayScore) {
+          homeStat.miniPoints += 3;
+        } else if (m.awayScore > m.homeScore) {
+          awayStat.miniPoints += 3;
+        } else {
+          const penaltyWinner = this.getPenaltyWinner(m);
+          if (penaltyWinner === 'home') {
+            homeStat.miniPoints += 2;
+          } else if (penaltyWinner === 'away') {
+            awayStat.miniPoints += 2;
+          } else {
+            homeStat.miniPoints += 1;
+            awayStat.miniPoints += 1;
+          }
+        }
+      });
+
+      group.forEach((t) => {
+        const stat = miniStats.get(t.teamId)!;
+        // 计算小联赛净胜球：在 miniMatches 中的进球减失球
+        let goalsConceded = 0;
+        miniMatches.forEach((m) => {
+          if (m.homeTeamId === t.teamId) goalsConceded += m.awayScore;
+          if (m.awayTeamId === t.teamId) goalsConceded += m.homeScore;
+        });
+        stat.miniGoalDiff = stat.miniGoalsFor - goalsConceded;
+      });
+
+      // 对组内球队按小联赛三项及稳定字典序排序
+      group.sort((a, b) => {
+        const statA = miniStats.get(a.teamId)!;
+        const statB = miniStats.get(b.teamId)!;
+
+        if (statB.miniPoints !== statA.miniPoints) return statB.miniPoints - statA.miniPoints;
+        if (statB.miniGoalDiff !== statA.miniGoalDiff)
+          return statB.miniGoalDiff - statA.miniGoalDiff;
+        if (statB.miniGoalsFor !== statA.miniGoalsFor)
+          return statB.miniGoalsFor - statA.miniGoalsFor;
+
+        return a.teamName.localeCompare(b.teamName, 'zh-CN') || a.teamId.localeCompare(b.teamId);
+      });
+
+      // 判定邻近球队是否在小联赛后仍完全平局
+      for (let i = 0; i < group.length; i++) {
+        const current = group[i];
+        const next = group[i + 1];
+
+        if (next) {
+          const statCurrent = miniStats.get(current.teamId)!;
+          const statNext = miniStats.get(next.teamId)!;
+          const isTied =
+            statCurrent.miniPoints === statNext.miniPoints &&
+            statCurrent.miniGoalDiff === statNext.miniGoalDiff &&
+            statCurrent.miniGoalsFor === statNext.miniGoalsFor;
+          current.isTiedWithNext = isTied;
+        } else {
+          current.isTiedWithNext = false;
+        }
+
+        finalStandings.push(current);
+      }
+    });
+
+    return finalStandings;
   }
 
   private createStanding(teamId: string, teamName: string, teamLogo: string): TeamStanding {
@@ -120,11 +242,5 @@ export class LeagueStandingsCalculator {
     }
     home.goalDifference = home.goalsFor - home.goalsAgainst;
     away.goalDifference = away.goalsFor - away.goalsAgainst;
-  }
-
-  private compareStandings(a: TeamStanding, b: TeamStanding): number {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
-    return b.goalsFor - a.goalsFor;
   }
 }

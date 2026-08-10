@@ -2,7 +2,6 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
-import { SeasonLifecycleService } from './season-lifecycle.service';
 
 @Injectable()
 export class SeasonGroupService {
@@ -10,7 +9,6 @@ export class SeasonGroupService {
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
     private readonly seasonStatistics: SeasonStatisticsService,
-    private readonly lifecycleService: SeasonLifecycleService,
   ) {}
 
   async getSeasonStandings(id: string) {
@@ -61,10 +59,6 @@ export class SeasonGroupService {
             groupName: g.groupName,
           })),
         });
-      }
-
-      if (this.lifecycleService?.cleanStaleManualChampion) {
-        await this.lifecycleService.cleanStaleManualChampion(seasonId, tx);
       }
     });
 

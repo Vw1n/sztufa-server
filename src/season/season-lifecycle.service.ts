@@ -1,16 +1,12 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import { SeasonStatisticsService } from '../prisma/season-statistics.service';
-import { UpdateSeasonChampionDto } from './dto/update-season-champion.dto';
-import { getSeasonGender } from '../common/season-gender';
 
 @Injectable()
 export class SeasonLifecycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
-    private readonly seasonStatistics: SeasonStatisticsService,
   ) {}
 
   async getSeasons() {
@@ -196,143 +192,5 @@ export class SeasonLifecycleService {
     );
 
     return updatedSeason;
-  }
-
-  async getSeasonValidChampionTeamIds(seasonId: string, tx?: any): Promise<Set<string>> {
-    const client = tx || this.prisma;
-    const season = await client.season.findUnique({ where: { id: seasonId } });
-    if (!season) return new Set();
-
-    const stageFilter = { OR: [{ stage: 'LEAGUE' }, { stage: null }] };
-    const [seasonPlayers, finishedMatches] = await Promise.all([
-      client.seasonTeamPlayer?.findMany
-        ? client.seasonTeamPlayer.findMany({
-            where: { seasonId },
-            include: { team: true },
-          })
-        : Promise.resolve([]),
-      client.match?.findMany
-        ? client.match.findMany({
-            where: {
-              seasonId,
-              status: 'finished',
-              deletedAt: null,
-              AND: [stageFilter],
-            },
-            include: { homeTeam: true, awayTeam: true },
-          })
-        : Promise.resolve([]),
-    ]);
-
-    const seasonGender = getSeasonGender(season.name) ?? 'MALE';
-    const validTeamIds = new Set<string>();
-    seasonPlayers.forEach((sp: any) => {
-      if (sp.team && sp.team.gender === seasonGender) {
-        validTeamIds.add(sp.teamId);
-      }
-    });
-    finishedMatches.forEach((m: any) => {
-      if (m.homeTeam && m.homeTeam.gender === seasonGender) {
-        validTeamIds.add(m.homeTeamId);
-      }
-      if (m.awayTeam && m.awayTeam.gender === seasonGender) {
-        validTeamIds.add(m.awayTeamId);
-      }
-    });
-
-    return validTeamIds;
-  }
-
-  async updateSeasonChampion(id: string, dto: UpdateSeasonChampionDto, username: string) {
-    const season = await this.prisma.season.findUnique({ where: { id } });
-    if (!season) {
-      throw new BadRequestException('赛季不存在');
-    }
-
-    if (season.type !== 'LEAGUE') {
-      throw new BadRequestException('仅联赛赛季支持手动指定冠军');
-    }
-
-    if (dto.teamId !== null) {
-      const validTeamIds = await this.getSeasonValidChampionTeamIds(id);
-      if (!validTeamIds.has(dto.teamId)) {
-        throw new BadRequestException('指定的球队不属于该赛季参战球队');
-      }
-    }
-
-    const prevManualId = season.manualChampionTeamId;
-    const prevSetBy = season.manualChampionSetBy;
-    const prevSetAt = season.manualChampionSetAt;
-
-    let updatedSeason;
-    if (dto.teamId !== null) {
-      updatedSeason = await this.prisma.season.update({
-        where: { id },
-        data: {
-          manualChampionTeamId: dto.teamId,
-          manualChampionSetBy: username,
-          manualChampionSetAt: new Date(),
-        },
-      });
-    } else {
-      updatedSeason = await this.prisma.season.update({
-        where: { id },
-        data: {
-          manualChampionTeamId: null,
-          manualChampionSetBy: null,
-          manualChampionSetAt: null,
-        },
-      });
-    }
-
-    const cacheResult = await this.seasonStatistics.computeAndCache(id);
-    if (!cacheResult.success) {
-      // 缓存计算失败时，回滚数据库冠军更新
-      await this.prisma.season.update({
-        where: { id },
-        data: {
-          manualChampionTeamId: prevManualId,
-          manualChampionSetBy: prevSetBy,
-          manualChampionSetAt: prevSetAt,
-        },
-      });
-      throw new BadRequestException(`更新冠军失败，无法计算积分榜缓存: ${cacheResult.error}`);
-    }
-
-    // 缓存更新成功后写入审计日志
-    if (dto.teamId !== null) {
-      const team = await this.prisma.team.findUnique({ where: { id: dto.teamId } });
-      await this.auditLogService.log(
-        username,
-        'SET_SEASON_CHAMPION',
-        `指定了赛季 "${season.name}" 的冠军为球队 "${team?.teamName || dto.teamId}"`,
-      );
-    } else {
-      await this.auditLogService.log(
-        username,
-        'CLEAR_SEASON_CHAMPION',
-        `撤销了赛季 "${season.name}" 的手动指定冠军`,
-      );
-    }
-
-    return updatedSeason;
-  }
-
-  async cleanStaleManualChampion(seasonId: string, tx?: any) {
-    const client = tx || this.prisma;
-    const season = await client.season.findUnique({ where: { id: seasonId } });
-    if (!season || !season.manualChampionTeamId) return;
-
-    const validTeamIds = await this.getSeasonValidChampionTeamIds(seasonId, client);
-    if (!validTeamIds.has(season.manualChampionTeamId)) {
-      await client.season.update({
-        where: { id: seasonId },
-        data: {
-          manualChampionTeamId: null,
-          manualChampionSetBy: null,
-          manualChampionSetAt: null,
-        },
-      });
-    }
   }
 }

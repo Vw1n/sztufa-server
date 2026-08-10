@@ -24,13 +24,8 @@ describe('SeasonService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    lifecycleService = new SeasonLifecycleService(prisma as any, auditLogService as any, {} as any);
-    groupService = new SeasonGroupService(
-      prisma as any,
-      auditLogService as any,
-      {} as any,
-      lifecycleService,
-    );
+    lifecycleService = new SeasonLifecycleService(prisma as any, auditLogService as any);
+    groupService = new SeasonGroupService(prisma as any, auditLogService as any, {} as any);
     knockoutService = new KnockoutGeneratorService(prisma as any, auditLogService as any);
     deletionService = new SeasonDeletionService(prisma as any, auditLogService as any);
 
@@ -156,101 +151,6 @@ describe('SeasonService', () => {
       });
       await expect(service.approveSeasonDeletion('season-1', 'admin-1', 'admin1')).rejects.toThrow(
         '只有超级管理员可以审批删除赛季',
-      );
-    });
-  });
-
-  describe('updateSeasonChampion', () => {
-    const seasonStatistics = { computeAndCache: jest.fn().mockResolvedValue({ success: true }) };
-
-    beforeEach(() => {
-      lifecycleService = new SeasonLifecycleService(
-        prisma as any,
-        auditLogService as any,
-        seasonStatistics as any,
-      );
-      service = new SeasonService(lifecycleService, groupService, knockoutService, deletionService);
-    });
-
-    it('rejects setting champion on a CUP season', async () => {
-      prisma.season.findUnique.mockResolvedValue({ id: 'cup-1', type: 'CUP' });
-      await expect(
-        service.updateSeasonChampion('cup-1', { teamId: 'team-1' }, 'admin'),
-      ).rejects.toThrow('仅联赛赛季支持手动指定冠军');
-    });
-
-    it('rejects teamId not participating in the season', async () => {
-      prisma.season.findUnique.mockResolvedValue({
-        id: 'season-1',
-        name: '2026 联赛',
-        type: 'LEAGUE',
-      });
-      (prisma as any).seasonTeamPlayer = { findMany: jest.fn().mockResolvedValue([]) };
-      (prisma as any).match = { findMany: jest.fn().mockResolvedValue([]) };
-
-      await expect(
-        service.updateSeasonChampion('season-1', { teamId: 'non-participating' }, 'admin'),
-      ).rejects.toThrow('指定的球队不属于该赛季参战球队');
-    });
-
-    it('updates manual champion fields for a valid participating team and writes audit log', async () => {
-      prisma.season.findUnique.mockResolvedValue({
-        id: 'season-1',
-        name: '2026 联赛',
-        type: 'LEAGUE',
-      });
-      (prisma as any).seasonTeamPlayer = {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([
-            { teamId: 'team-1', team: { id: 'team-1', teamName: '冠军队', gender: 'MALE' } },
-          ]),
-      };
-      (prisma as any).match = { findMany: jest.fn().mockResolvedValue([]) };
-      (prisma as any).team = {
-        findUnique: jest.fn().mockResolvedValue({ id: 'team-1', teamName: '冠军队' }),
-      };
-      prisma.season.update.mockResolvedValue({ id: 'season-1', manualChampionTeamId: 'team-1' });
-
-      await service.updateSeasonChampion('season-1', { teamId: 'team-1' }, 'admin');
-
-      expect(prisma.season.update).toHaveBeenCalledWith({
-        where: { id: 'season-1' },
-        data: expect.objectContaining({
-          manualChampionTeamId: 'team-1',
-          manualChampionSetBy: 'admin',
-        }),
-      });
-      expect(auditLogService.log).toHaveBeenCalledWith(
-        'admin',
-        'SET_SEASON_CHAMPION',
-        expect.stringContaining('冠军队'),
-      );
-      expect(seasonStatistics.computeAndCache).toHaveBeenCalledWith('season-1');
-    });
-
-    it('resets manual champion fields to null when teamId is null and writes clear audit log', async () => {
-      prisma.season.findUnique.mockResolvedValue({
-        id: 'season-1',
-        name: '2026 联赛',
-        type: 'LEAGUE',
-      });
-      prisma.season.update.mockResolvedValue({ id: 'season-1', manualChampionTeamId: null });
-
-      await service.updateSeasonChampion('season-1', { teamId: null }, 'admin');
-
-      expect(prisma.season.update).toHaveBeenCalledWith({
-        where: { id: 'season-1' },
-        data: {
-          manualChampionTeamId: null,
-          manualChampionSetBy: null,
-          manualChampionSetAt: null,
-        },
-      });
-      expect(auditLogService.log).toHaveBeenCalledWith(
-        'admin',
-        'CLEAR_SEASON_CHAMPION',
-        expect.stringContaining('撤销'),
       );
     });
   });

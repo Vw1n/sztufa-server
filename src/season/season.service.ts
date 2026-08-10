@@ -3,7 +3,6 @@ import { SeasonLifecycleService } from './season-lifecycle.service';
 import { SeasonGroupService } from './season-group.service';
 import { KnockoutGeneratorService } from './knockout-generator.service';
 import { SeasonDeletionService } from './season-deletion.service';
-import { UpdateSeasonChampionDto } from './dto/update-season-champion.dto';
 
 @Injectable()
 export class SeasonService {
@@ -36,10 +35,6 @@ export class SeasonService {
 
   async renameSeason(id: string, name: string, username: string) {
     return this.lifecycleService.renameSeason(id, name, username);
-  }
-
-  async updateSeasonChampion(id: string, dto: UpdateSeasonChampionDto, username: string) {
-    return this.lifecycleService.updateSeasonChampion(id, dto, username);
   }
 
   async getSeasonStandings(id: string) {

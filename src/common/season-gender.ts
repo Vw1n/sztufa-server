@@ -1,10 +1,10 @@
 export type TeamGender = 'MALE' | 'FEMALE';
 
 export function getSeasonGender(seasonName: string): TeamGender | null {
-  if (seasonName.includes('女') || seasonName.includes('女子')) {
+  if (seasonName.includes('女')) {
     return 'FEMALE';
   }
-  if (seasonName.includes('男') || seasonName.includes('男子')) {
+  if (seasonName.includes('男')) {
     return 'MALE';
   }
   return null;

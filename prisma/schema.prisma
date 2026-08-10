@@ -248,22 +248,19 @@ model AuditLog {
 }
 
 model Season {
-  id                   String    @id @default(cuid())
-  name                 String    @unique
-  status               String    @default("active") // active, archived
-  type                 String    @default("LEAGUE") // LEAGUE, CUP
-  manualChampionTeamId String?
-  manualChampionSetBy  String?
-  manualChampionSetAt  DateTime?
-  matches              Match[]
-  standingsCache       Json?
-  statsCache           Json?
-  teamPlayers          SeasonTeamPlayer[]
-  teamProfiles         SeasonTeamProfile[]
-  groupTeams           SeasonGroupTeam[]
-  deletionApprovals    SeasonDeletionApproval[]
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id             String   @id @default(cuid())
+  name           String   @unique
+  status         String   @default("active") // active, archived
+  type           String   @default("LEAGUE") // LEAGUE, CUP
+  matches        Match[]
+  standingsCache Json?
+  statsCache     Json?
+  teamPlayers    SeasonTeamPlayer[]
+  teamProfiles   SeasonTeamProfile[]
+  groupTeams     SeasonGroupTeam[]
+  deletionApprovals SeasonDeletionApproval[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model SeasonTeamProfile {

@@ -98,12 +98,7 @@ const createReadPrisma = () => ({
 });
 
 const createService = (prisma: any) =>
-  new ImportService(
-    prisma,
-    { computeAndCache: jest.fn() } as any,
-    { log: jest.fn() } as any,
-    { cleanStaleManualChampion: jest.fn() } as any,
-  );
+  new ImportService(prisma, { computeAndCache: jest.fn() } as any, { log: jest.fn() } as any);
 
 describe('ImportService', () => {
   it('预检分赛季文件并统计所有可导入实体', async () => {
@@ -246,12 +241,7 @@ describe('ImportService', () => {
       computeAndCache: jest.fn().mockResolvedValue({ success: true }),
     };
     const auditLog = { log: jest.fn().mockResolvedValue(undefined) };
-    const service = new ImportService(
-      prisma as any,
-      seasonStatistics as any,
-      auditLog as any,
-      { cleanStaleManualChampion: jest.fn() } as any,
-    );
+    const service = new ImportService(prisma as any, seasonStatistics as any, auditLog as any);
 
     const result = await service.importFiles([asUpload('2023.json')], 'admin');
 
@@ -363,7 +353,6 @@ describe('ImportService', () => {
       prisma as any,
       { computeAndCache: jest.fn() } as any,
       auditLog as any,
-      { cleanStaleManualChampion: jest.fn() } as any,
     );
 
     await expect(service.undoLastImport('admin')).resolves.toEqual({
@@ -386,134 +375,6 @@ describe('ImportService', () => {
       '撤销历史 JSON 导入批次 batch-1',
       tx,
     );
-  });
-
-  it('calls lifecycleService.cleanStaleManualChampion during import undo', async () => {
-    const tx = {
-      season: { findMany: jest.fn().mockResolvedValue([{ id: 'season-1' }]) },
-      match: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      goal: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      matchEvent: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      seasonTeamPlayer: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      seasonTeamProfile: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      player: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      team: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
-      historyImportBatch: { update: jest.fn().mockResolvedValue({}) },
-    };
-    const undoPayload = {
-      digest: 'digest-1',
-      affectedSeasonIds: ['season-1'],
-      created: {
-        seasonIds: [],
-        teamIds: [],
-        playerIds: [],
-        matchIds: ['match-1'],
-        goalIds: [],
-        eventIds: [],
-        rosterLinkIds: ['roster-1'],
-        profileIds: [],
-      },
-      updated: {
-        matches: [],
-        players: [],
-        rosterLinks: [],
-        teams: [],
-      },
-    };
-    const prisma = {
-      historyImportBatch: {
-        findFirst: jest.fn().mockResolvedValue({
-          id: 'batch-1',
-          undoPayload,
-        }),
-      },
-      season: { findUnique: jest.fn().mockResolvedValue(null) },
-      $transaction: jest.fn((work: (client: typeof tx) => Promise<void>) => work(tx)),
-    };
-    const auditLog = { log: jest.fn().mockResolvedValue(undefined) };
-    const lifecycleService = { cleanStaleManualChampion: jest.fn().mockResolvedValue(undefined) };
-    const service = new ImportService(
-      prisma as any,
-      { computeAndCache: jest.fn() } as any,
-      auditLog as any,
-      lifecycleService as any,
-    );
-
-    await service.undoLastImport('admin');
-    expect(lifecycleService.cleanStaleManualChampion).toHaveBeenCalledWith('season-1', tx);
-  });
-
-  it('calls lifecycleService.cleanStaleManualChampion and computeAndCache during import executeFiles commit', async () => {
-    const tx = {
-      season: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 'season-1', name: '2023 校长杯' }),
-      },
-      team: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 'team-1', teamName: '甲队' }),
-      },
-      player: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 'player-1', name: '张三' }),
-      },
-      seasonTeamPlayer: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn().mockResolvedValue(null),
-        upsert: jest.fn().mockResolvedValue({ id: 'stp-1' }),
-        create: jest.fn().mockResolvedValue({ id: 'stp-1' }),
-      },
-      seasonTeamProfile: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn().mockResolvedValue(null),
-        upsert: jest.fn().mockResolvedValue({ id: 'stp-profile-1' }),
-        create: jest.fn().mockResolvedValue({ id: 'stp-profile-1' }),
-      },
-      match: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: 'match-1' }),
-      },
-      goal: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        createMany: jest.fn().mockResolvedValue({ count: 0 }),
-      },
-      matchEvent: {
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-        createMany: jest.fn().mockResolvedValue({ count: 0 }),
-      },
-      historyImportBatch: {
-        create: jest.fn().mockResolvedValue({ id: 'batch-1' }),
-      },
-    };
-    const prisma = {
-      season: {
-        findMany: jest.fn().mockResolvedValue([]),
-        findUnique: jest.fn().mockResolvedValue({ id: 'season-1' }),
-      },
-      team: { findMany: jest.fn().mockResolvedValue([]) },
-      player: { findMany: jest.fn().mockResolvedValue([]) },
-      match: { findMany: jest.fn().mockResolvedValue([]) },
-      $transaction: jest.fn((work: (client: typeof tx) => Promise<void>) => work(tx)),
-    };
-    const seasonStatistics = { computeAndCache: jest.fn().mockResolvedValue({ success: true }) };
-    const auditLog = { log: jest.fn().mockResolvedValue(undefined) };
-    const lifecycleService = { cleanStaleManualChampion: jest.fn().mockResolvedValue(undefined) };
-
-    const service = new ImportService(
-      prisma as any,
-      seasonStatistics as any,
-      auditLog as any,
-      lifecycleService as any,
-    );
-
-    const uploadFile = asUpload('2023.json');
-    await service.importFiles([uploadFile], 'admin');
-
-    expect(lifecycleService.cleanStaleManualChampion).toHaveBeenCalledWith('season-1');
-    expect(seasonStatistics.computeAndCache).toHaveBeenCalledWith('season-1');
   });
 
   it('使用 SHA-256 稳定摘要生成 legacyKey 与 legacyGameId，确保跨重构持久化身份一致', async () => {
@@ -723,12 +584,7 @@ describe('ImportService', () => {
 
     const auditLog = { log: jest.fn().mockResolvedValue(undefined) };
     const seasonStatistics = { computeAndCache: jest.fn().mockResolvedValue({ success: true }) };
-    const service = new ImportService(
-      prisma as any,
-      seasonStatistics as any,
-      auditLog as any,
-      { cleanStaleManualChampion: jest.fn() } as any,
-    );
+    const service = new ImportService(prisma as any, seasonStatistics as any, auditLog as any);
 
     const result = await service.undoLastImport('admin');
 

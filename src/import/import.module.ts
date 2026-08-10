@@ -5,10 +5,8 @@ import { PdfParserService } from './pdf-parser.service';
 import { PdfImportService } from './pdf-import.service';
 import { UploadModule } from '../upload/upload.module';
 
-import { SeasonModule } from '../season/season.module';
-
 @Module({
-  imports: [UploadModule, SeasonModule],
+  imports: [UploadModule],
   controllers: [ImportController],
   providers: [ImportService, PdfParserService, PdfImportService],
   exports: [PdfParserService, PdfImportService],

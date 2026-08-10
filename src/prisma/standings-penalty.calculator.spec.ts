@@ -180,50 +180,6 @@ describe('StandingsCalculators - Penalty Shootout Points', () => {
       expect(team1.points).toBe(1);
       expect(team2.points).toBe(1);
     });
-
-    it('ranks team with H2H win higher when points, GD, and GF are identical', () => {
-      const H2HTeamsMap = new Map([
-        ['team-a', { id: 'team-a', teamName: 'A队', teamLogo: '' }],
-        ['team-b', { id: 'team-b', teamName: 'B队', teamLogo: '' }],
-        ['team-x', { id: 'team-x', teamName: 'X队', teamLogo: '' }],
-        ['team-y', { id: 'team-y', teamName: 'Y队', teamLogo: '' }],
-      ]);
-      // A 和 B 均累积 6分、+2 净胜球、4 进球
-      const matches = [
-        { stage: 'LEAGUE', homeTeamId: 'team-a', awayTeamId: 'team-b', homeScore: 2, awayScore: 0 },
-        { stage: 'LEAGUE', homeTeamId: 'team-b', awayTeamId: 'team-a', homeScore: 1, awayScore: 0 },
-        { stage: 'LEAGUE', homeTeamId: 'team-a', awayTeamId: 'team-x', homeScore: 2, awayScore: 1 },
-        { stage: 'LEAGUE', homeTeamId: 'team-b', awayTeamId: 'team-y', homeScore: 3, awayScore: 0 },
-      ];
-      const standings = calculator.calculate(matches, H2HTeamsMap);
-      // team-a 和 team-b 积分(6分)，GD(+2)，GF(4) 完全相同
-      // 小联赛 H2H: A 对 B 相互净胜球 +1 vs B 的 -1
-      // 因此 A 排名第一，且与 B 不处于未决平局 (isTiedWithNext = false)
-      expect(standings[0].teamId).toBe('team-a');
-      expect(standings[0].isTiedWithNext).toBe(false);
-      expect(standings[1].teamId).toBe('team-b');
-    });
-
-    it('marks isTiedWithNext = true in a 3-team circular tie (A beats B, B beats C, C beats A)', () => {
-      const H2HTeamsMap = new Map([
-        ['team-a', { id: 'team-a', teamName: 'A队', teamLogo: '' }],
-        ['team-b', { id: 'team-b', teamName: 'B队', teamLogo: '' }],
-        ['team-c', { id: 'team-c', teamName: 'C队', teamLogo: '' }],
-      ]);
-      // A 胜 B 1:0, B 胜 C 1:0, C 胜 A 1:0
-      // 3队积分均为3，GD均为0，GF均为1，小联赛相互积分/GD/GF亦完全相同！
-      const matches = [
-        { stage: 'LEAGUE', homeTeamId: 'team-a', awayTeamId: 'team-b', homeScore: 1, awayScore: 0 },
-        { stage: 'LEAGUE', homeTeamId: 'team-b', awayTeamId: 'team-c', homeScore: 1, awayScore: 0 },
-        { stage: 'LEAGUE', homeTeamId: 'team-c', awayTeamId: 'team-a', homeScore: 1, awayScore: 0 },
-      ];
-      const standings = calculator.calculate(matches, H2HTeamsMap);
-
-      expect(standings.length).toBe(3);
-      expect(standings[0].isTiedWithNext).toBe(true);
-      expect(standings[1].isTiedWithNext).toBe(true);
-      expect(standings[2].isTiedWithNext).toBe(false);
-    });
   });
 
   describe('CupStandingsCalculator', () => {

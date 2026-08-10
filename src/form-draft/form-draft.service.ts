@@ -191,9 +191,13 @@ export class FormDraftService {
         await this.prisma.$transaction(async (tx) => {
           if (draft.officialRecordId) {
             const updateDto: any = { seasonId, ...normalized };
-            await this.teamService.updateWithPlayersCore(tx, draft.officialRecordId, updateDto, {
-              role: 'super_admin',
-            });
+            await this.teamService.updateWithPlayersCore(
+              tx,
+              draft.officialRecordId,
+              updateDto,
+              username,
+              { role: 'super_admin' },
+            );
             createdTeamId = draft.officialRecordId;
           } else {
             const createDto: any = { seasonId, ...normalized };

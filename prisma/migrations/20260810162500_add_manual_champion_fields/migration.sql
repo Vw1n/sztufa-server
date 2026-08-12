@@ -1,4 +1,4 @@
 -- AlterTable
-ALTER TABLE "Season" ADD COLUMN     "manualChampionTeamId" TEXT,
-ADD COLUMN     "manualChampionSetBy" TEXT,
-ADD COLUMN     "manualChampionSetAt" TIMESTAMP(3);
+ALTER TABLE "Season" ADD COLUMN IF NOT EXISTS "manualChampionTeamId" TEXT,
+ADD COLUMN IF NOT EXISTS "manualChampionSetBy" TEXT,
+ADD COLUMN IF NOT EXISTS "manualChampionSetAt" TIMESTAMP(3);

@@ -19,6 +19,8 @@ import { BackupScope } from './backup-scope.service';
 @Controller('api/v1/backups')
 @ApiTags('备份管理')
 export class BackupController {
+  private scheduledBackupInFlight: ReturnType<BackupService['createScheduledBackup']> | null = null;
+
   constructor(private readonly backupService: BackupService) {}
 
   @ApiBearerAuth()
@@ -174,12 +176,18 @@ export class BackupController {
     res.on('close', onClose);
 
     try {
-      const backupMetadata = await this.backupService.createBackup('vercel-cron-system', {
-        purpose: 'scheduled',
-        signal: abortController.signal,
-      });
+      if (!this.scheduledBackupInFlight) {
+        this.scheduledBackupInFlight = this.backupService.createScheduledBackup(
+          'vercel-cron-system',
+          {
+            signal: abortController.signal,
+          },
+        );
+      }
+      const backupMetadata = await this.scheduledBackupInFlight;
       return { success: true, data: backupMetadata };
     } finally {
+      this.scheduledBackupInFlight = null;
       req.off('aborted', onAborted);
       req.off('error', onAborted);
       res.off('close', onClose);

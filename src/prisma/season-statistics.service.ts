@@ -16,7 +16,10 @@ export class SeasonStatisticsService {
 
   async computeAndCache(seasonId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const season = await this.prisma.season.findUnique({ where: { id: seasonId } });
+      const season = await this.prisma.season.findUnique({
+        where: { id: seasonId },
+        select: { id: true, name: true, type: true },
+      });
       if (!season) return { success: false, error: '赛季不存在' };
 
       const seasonType = season.type || 'LEAGUE';
@@ -30,7 +33,10 @@ export class SeasonStatisticsService {
 
       const seasonPlayers = await this.prisma.seasonTeamPlayer.findMany({
         where: { seasonId },
-        include: { team: true },
+        select: {
+          teamId: true,
+          team: { select: { id: true, teamName: true, teamLogo: true, gender: true } },
+        },
       });
 
       const teamsMap = new Map<string, { id: string; teamName: string; teamLogo: string }>();
@@ -48,7 +54,9 @@ export class SeasonStatisticsService {
         }
       });
 
-      const allTeams = await this.prisma.team.findMany();
+      const allTeams = await this.prisma.team.findMany({
+        select: { id: true, teamName: true, teamLogo: true, gender: true },
+      });
       const databaseTeams = new Map(allTeams.map((team) => [team.id, team]));
 
       matches.forEach((match) => {

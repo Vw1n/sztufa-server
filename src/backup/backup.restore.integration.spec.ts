@@ -100,6 +100,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       verificationService,
       scopeService,
       retentionService,
+      testPrisma as unknown as PrismaService,
     );
 
     // 保存原始值并启用恢复功能（所有集成测试均需要）

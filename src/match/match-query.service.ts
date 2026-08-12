@@ -1,12 +1,34 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { publicPlayerFieldsSelect, publicTeamSelect } from '../common/dto/public-response.dto';
 
 const matchDetails = {
-  homeTeam: true,
-  awayTeam: true,
+  id: true,
+  homeTeamId: true,
+  awayTeamId: true,
+  homeScore: true,
+  awayScore: true,
+  homePenaltyScore: true,
+  awayPenaltyScore: true,
+  winnerTeamId: true,
+  decidedBy: true,
+  matchDate: true,
+  location: true,
+  status: true,
+  seasonId: true,
+  mvpPlayerId: true,
+  mvpPlayerName: true,
+  stage: true,
+  groupName: true,
+  knockoutRound: true,
+  knockoutMatchIndex: true,
+  createdAt: true,
+  updatedAt: true,
+  homeTeam: { select: publicTeamSelect },
+  awayTeam: { select: publicTeamSelect },
   goals: true,
   events: true,
-  lineups: { include: { player: true } },
+  lineups: { include: { player: { select: publicPlayerFieldsSelect } } },
 } as const;
 
 @Injectable()
@@ -31,6 +53,7 @@ export class MatchQueryService {
     if (!targetSeasonId) {
       const activeSeason = await this.prisma.season.findFirst({
         where: { status: 'active' },
+        select: { id: true },
       });
       if (activeSeason) targetSeasonId = activeSeason.id;
     }
@@ -47,17 +70,26 @@ export class MatchQueryService {
     delete whereStats.status;
 
     try {
-      const [data, total, allMatchesForStats] = await Promise.all([
+      const [data, total, statusGroups] = await Promise.all([
         this.prisma.match.findMany({
           skip,
           take: limitNum,
           where,
-          include: matchDetails,
+          select: matchDetails,
           orderBy: { matchDate: 'desc' },
         }),
         this.prisma.match.count({ where }),
-        this.prisma.match.findMany({ where: whereStats, select: { status: true } }),
+        this.prisma.match.groupBy({
+          by: ['status'],
+          where: whereStats,
+          _count: { _all: true },
+        }),
       ]);
+
+      const statusCounts = Object.fromEntries(
+        statusGroups.map((group) => [group.status, group._count._all]),
+      );
+      const statsTotal = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
 
       return {
         data,
@@ -65,10 +97,10 @@ export class MatchQueryService {
         page: pageNum,
         limit: limitNum,
         stats: {
-          total: allMatchesForStats.length,
-          completed: allMatchesForStats.filter((match) => match.status === 'finished').length,
-          scheduled: allMatchesForStats.filter((match) => match.status === 'scheduled').length,
-          ongoing: allMatchesForStats.filter((match) => match.status === 'ongoing').length,
+          total: statsTotal,
+          completed: statusCounts.finished || 0,
+          scheduled: statusCounts.scheduled || 0,
+          ongoing: statusCounts.ongoing || 0,
         },
       };
     } catch (error) {
@@ -107,18 +139,19 @@ export class MatchQueryService {
   async findOne(id: string) {
     const match = await this.prisma.match.findUnique({
       where: { id },
-      include: matchDetails,
+      select: { ...matchDetails, deletedAt: true },
     });
     if (!match || match.deletedAt !== null) {
       throw new NotFoundException('比赛不存在');
     }
-    return match;
+    const { deletedAt: _deletedAt, ...publicMatch } = match;
+    return publicMatch;
   }
 
   findDetails(id: string) {
     return this.prisma.match.findUnique({
       where: { id },
-      include: matchDetails,
+      select: matchDetails,
     });
   }
 }

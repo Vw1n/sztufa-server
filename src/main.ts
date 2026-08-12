@@ -7,6 +7,8 @@ import { AppModule } from './app.module';
 import { PrismaClientExceptionFilter } from './prisma/prisma-client-exception.filter';
 import { createSingleFlightInitializer } from './serverless/single-flight-initializer';
 import express from 'express';
+import { apiCachePolicyMiddleware } from './common/http-cache-policy';
+import { apiResponseMetricsMiddleware } from './common/api-response-metrics';
 
 function validateStartupConfig() {
   const requiredEnvVars = [
@@ -81,12 +83,11 @@ async function initializeApp() {
     }),
   );
 
-  // API responses must not be reused across origins. A cached 304 response can
-  // otherwise retain an old Access-Control-Allow-Origin value in the browser.
-  app.use('/api', (req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store');
-    next();
-  });
+  // Public read endpoints may be shared briefly by the CDN. Private, admin and
+  // mutation responses remain non-cacheable. Vary: Origin prevents a cached
+  // CORS response from being reused for a different requesting origin.
+  app.use('/api', apiCachePolicyMiddleware);
+  app.use('/api', apiResponseMetricsMiddleware);
 
   const configuredOrigins = (process.env.CORS_ORIGINS || '')
     .split(',')

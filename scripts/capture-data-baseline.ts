@@ -79,10 +79,33 @@ async function captureBaseline() {
     },
     foreignKeys: {
       playerTeamIds: players.map((p) => ({ playerId: p.id, teamId: p.teamId })),
-      matchTeamIds: matches.map((m) => ({ matchId: m.id, homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId, seasonId: m.seasonId, mvpPlayerId: m.mvpPlayerId })),
-      goalRefs: goals.map((g) => ({ goalId: g.id, matchId: g.matchId, teamType: g.teamType, playerId: g.playerId })),
-      matchEventRefs: matchEvents.map((e) => ({ eventId: e.id, matchId: e.matchId, teamType: e.teamType, playerId: e.playerId, assistPlayerId: e.assistPlayerId, subPlayerId: e.subPlayerId })),
-      matchLineupRefs: matchLineups.map((l) => ({ lineupId: l.id, matchId: l.matchId, teamType: l.teamType, playerId: l.playerId })),
+      matchTeamIds: matches.map((m) => ({
+        matchId: m.id,
+        homeTeamId: m.homeTeamId,
+        awayTeamId: m.awayTeamId,
+        seasonId: m.seasonId,
+        mvpPlayerId: m.mvpPlayerId,
+      })),
+      goalRefs: goals.map((g) => ({
+        goalId: g.id,
+        matchId: g.matchId,
+        teamType: g.teamType,
+        playerId: g.playerId,
+      })),
+      matchEventRefs: matchEvents.map((e) => ({
+        eventId: e.id,
+        matchId: e.matchId,
+        teamType: e.teamType,
+        playerId: e.playerId,
+        assistPlayerId: e.assistPlayerId,
+        subPlayerId: e.subPlayerId,
+      })),
+      matchLineupRefs: matchLineups.map((l) => ({
+        lineupId: l.id,
+        matchId: l.matchId,
+        teamType: l.teamType,
+        playerId: l.playerId,
+      })),
     },
     hashes: {
       teams: mapHashes(teams),
@@ -99,7 +122,9 @@ async function captureBaseline() {
 
   fs.writeFileSync(OUTPUT_FILE, JSON.stringify(baselineData, null, 2), 'utf-8');
   console.log(`[BASELINE SUCCESS] 基线快照已成功导出至: ${OUTPUT_FILE}`);
-  console.log(`- 球队: ${teams.length}, 球员: ${players.length}, 比赛: ${matches.length}, 进球: ${goals.length}, 事件: ${matchEvents.length}, 阵容: ${matchLineups.length}`);
+  console.log(
+    `- 球队: ${teams.length}, 球员: ${players.length}, 比赛: ${matches.length}, 进球: ${goals.length}, 事件: ${matchEvents.length}, 阵容: ${matchLineups.length}`,
+  );
 
   await prisma.$disconnect();
 }

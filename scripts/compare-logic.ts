@@ -75,7 +75,9 @@ export function checkPlayerTeamForeignKeys(
 export function checkMatchTeamForeignKeys(
   errors: string[],
   matchesMap: Map<string, any>,
-  refs: { matchId: string; homeTeamId: string; awayTeamId: string; seasonId?: string }[] | undefined,
+  refs:
+    | { matchId: string; homeTeamId: string; awayTeamId: string; seasonId?: string }[]
+    | undefined,
 ): void {
   for (const ref of refs ?? []) {
     const m = matchesMap.get(ref.matchId);
@@ -112,8 +114,7 @@ export function checkMatchEventForeignKeys(
   for (const ref of refs ?? []) {
     const e = eventsMap.get(ref.eventId);
     if (!e) continue;
-    if (e.matchId !== ref.matchId)
-      errors.push(`MatchEvent (ID=${ref.eventId}) matchId 外键不匹配`);
+    if (e.matchId !== ref.matchId) errors.push(`MatchEvent (ID=${ref.eventId}) matchId 外键不匹配`);
     if (e.playerId !== ref.playerId)
       errors.push(`MatchEvent (ID=${ref.eventId}) playerId 外键不匹配`);
   }
@@ -149,11 +150,13 @@ export function checkMatchLineupForeignKeys(
 export function checkV1LegacyForeignKeys(
   errors: string[],
   playersSet: Set<string>,
-  foreignKeys: {
-    matchMvpPlayerIds?: string[];
-    matchEventPlayerIds?: string[];
-    matchEventAssistPlayerIds?: string[];
-  } | undefined,
+  foreignKeys:
+    | {
+        matchMvpPlayerIds?: string[];
+        matchEventPlayerIds?: string[];
+        matchEventAssistPlayerIds?: string[];
+      }
+    | undefined,
 ): void {
   if (!foreignKeys) return;
 

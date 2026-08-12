@@ -11,6 +11,6 @@ import { PredictionModule } from '../prediction/prediction.module';
   imports: [PredictionModule],
   controllers: [MatchController],
   providers: [MatchService, MatchQueryService, MatchDataWriterService, PlayerCardSyncService],
-  exports: [MatchService, PlayerCardSyncService],
+  exports: [MatchService, MatchQueryService, MatchDataWriterService, PlayerCardSyncService],
 })
 export class MatchModule {}

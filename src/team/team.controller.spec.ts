@@ -19,7 +19,9 @@ describe('TeamController', () => {
 
   const mockTeamQueryService = {
     findAll: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
+    findPublicAll: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
     searchByName: jest.fn(),
+    searchPublicByName: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue({ id: 'coach_team_1', teamName: '教练所属球队' }),
   };
 

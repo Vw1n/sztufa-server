@@ -9,19 +9,19 @@ describe('MatchQueryService', () => {
         findFirst: jest.fn<() => Promise<any>>().mockResolvedValue({ id: 'season-1' }),
       },
       match: {
-        findMany: jest
-          .fn<() => Promise<any[]>>()
-          .mockResolvedValueOnce([{ id: 'match-1' }])
-          .mockResolvedValueOnce([{ status: 'finished' }, { status: 'scheduled' }]),
+        findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([{ id: 'match-1' }]),
         count: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+        groupBy: jest.fn<() => Promise<any[]>>().mockResolvedValue([
+          { status: 'finished', _count: { _all: 1 } },
+          { status: 'scheduled', _count: { _all: 1 } },
+        ]),
       },
     };
     const service = new MatchQueryService(prisma);
 
     const result = await service.findAll(1, 10, undefined, undefined, 'finished');
 
-    expect(prisma.match.findMany).toHaveBeenNthCalledWith(
-      2,
+    expect(prisma.match.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { deletedAt: null, seasonId: 'season-1' },
       }),

@@ -1,3 +1,5 @@
+import { getCanonicalWinnerTeamId } from './winner-team-id';
+
 export type KnockoutMigrationEvent = {
   eventType: string;
   teamType: string;
@@ -21,44 +23,8 @@ export type KnockoutMigrationMatch = {
   events?: KnockoutMigrationEvent[];
 };
 
-const getPenaltyScoreFromEvents = (
-  events: KnockoutMigrationEvent[] = [],
-): { home: number; away: number } | null => {
-  const shootoutEvents = events.filter(
-    (event) =>
-      event.eventType === 'penalty_shootout_goal' || event.eventType === 'penalty_shootout_miss',
-  );
-  if (shootoutEvents.length === 0) return null;
-
-  return shootoutEvents.reduce(
-    (score, event) => {
-      if (event.eventType === 'penalty_shootout_goal') {
-        if (event.teamType === 'home') score.home += 1;
-        if (event.teamType === 'away') score.away += 1;
-      }
-      return score;
-    },
-    { home: 0, away: 0 },
-  );
-};
-
 export const getKnockoutWinnerTeamId = (match: KnockoutMigrationMatch): string | null => {
-  if (match.winnerTeamId === match.homeTeamId || match.winnerTeamId === match.awayTeamId) {
-    return match.winnerTeamId;
-  }
-  if (match.homeScore > match.awayScore) return match.homeTeamId;
-  if (match.awayScore > match.homeScore) return match.awayTeamId;
-
-  const penaltyScore =
-    match.homePenaltyScore !== null &&
-    match.homePenaltyScore !== undefined &&
-    match.awayPenaltyScore !== null &&
-    match.awayPenaltyScore !== undefined
-      ? { home: match.homePenaltyScore, away: match.awayPenaltyScore }
-      : getPenaltyScoreFromEvents(match.events);
-
-  if (!penaltyScore || penaltyScore.home === penaltyScore.away) return null;
-  return penaltyScore.home > penaltyScore.away ? match.homeTeamId : match.awayTeamId;
+  return getCanonicalWinnerTeamId(match);
 };
 
 export const findThirdPlaceMatch = (

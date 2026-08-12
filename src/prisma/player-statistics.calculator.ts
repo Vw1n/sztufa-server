@@ -36,7 +36,27 @@ export class PlayerStatisticsCalculator {
     const scorers = new Map<string, ScorerStat>();
     const assists = new Map<string, AssistStat>();
     const cards = new Map<string, CardStat>();
-    const players = await this.prisma.player.findMany({ include: { team: true } });
+    const referencedPlayerIds = new Set<string>();
+    matches.forEach((match) => {
+      match.goals?.forEach((goal: any) => {
+        if (goal.playerId) referencedPlayerIds.add(goal.playerId);
+      });
+      match.events?.forEach((event: any) => {
+        if (event.playerId) referencedPlayerIds.add(event.playerId);
+        if (event.assistPlayerId) referencedPlayerIds.add(event.assistPlayerId);
+      });
+    });
+    const players = referencedPlayerIds.size
+      ? await this.prisma.player.findMany({
+          where: { id: { in: Array.from(referencedPlayerIds) } },
+          select: {
+            id: true,
+            name: true,
+            jerseyNumber: true,
+            team: { select: { teamName: true, teamLogo: true } },
+          },
+        })
+      : [];
     const playersMap = new Map(players.map((player) => [player.id, player]));
 
     const getPlayerTeamInfo = (

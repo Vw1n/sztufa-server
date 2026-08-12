@@ -7,6 +7,7 @@ import { BackupObjectStoreService } from './backup-object-store.service';
 import { BackupVerificationService } from './backup-verification.service';
 import { BackupScopeService } from './backup-scope.service';
 import { BackupRetentionService } from './backup-retention.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 // 保持既有外部导入兼容性的符号 re-export
 export { MANDATORY_BACKUP_TABLES } from './backup-table-registry';
@@ -29,10 +30,62 @@ export class BackupService {
     private readonly verificationService: BackupVerificationService,
     private readonly scopeService: BackupScopeService,
     private readonly retentionService: BackupRetentionService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  private async getLatestBusinessChange(): Promise<Date | null> {
+    const results = await Promise.all([
+      this.prisma.team.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.player.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.match.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.news.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.season.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.prediction.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.seasonTeamProfile.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.adminFormDraft.aggregate({ _max: { updatedAt: true } }),
+      this.prisma.goal.aggregate({ _max: { createdAt: true } }),
+      this.prisma.matchEvent.aggregate({ _max: { createdAt: true } }),
+      this.prisma.seasonTeamPlayer.aggregate({ _max: { createdAt: true } }),
+    ]);
+    const timestamps = results.flatMap((result) => Object.values(result._max)).filter(Boolean);
+    if (timestamps.length === 0) return null;
+    return new Date(Math.max(...timestamps.map((value) => new Date(value as Date).getTime())));
+  }
 
   createBackup(username: string, options?: Parameters<BackupExportService['createBackup']>[1]) {
     return this.exportService.createBackup(username, options);
+  }
+
+  async createScheduledBackup(
+    username: string,
+    options?: Parameters<BackupExportService['createBackup']>[1],
+  ) {
+    const configuredHours = Number(process.env.SCHEDULED_BACKUP_MIN_INTERVAL_HOURS || 144);
+    const minIntervalHours = Number.isFinite(configuredHours) ? Math.max(0, configuredHours) : 144;
+
+    if (minIntervalHours > 0) {
+      const backups = await this.objectStore.listBackups();
+      const cutoff = Date.now() - minIntervalHours * 60 * 60 * 1000;
+      const latestScheduled = backups.find(
+        (backup) =>
+          backup.purpose === 'scheduled' &&
+          (backup.scope || 'full') === (options?.scope || 'full') &&
+          (backup.seasonId || undefined) === (options?.seasonId || undefined) &&
+          !!backup.lastModified,
+      );
+
+      if (latestScheduled?.lastModified) {
+        const latestBackupTime = new Date(latestScheduled.lastModified).getTime();
+        if (latestBackupTime >= cutoff) return latestScheduled;
+
+        if (process.env.SCHEDULED_BACKUP_CHANGE_DETECTION_ENABLED !== 'false') {
+          const latestChange = await this.getLatestBusinessChange();
+          if (!latestChange || latestChange.getTime() <= latestBackupTime) return latestScheduled;
+        }
+      }
+    }
+
+    return this.exportService.createBackup(username, { ...options, purpose: 'scheduled' });
   }
 
   listBackups(options?: { includeUploads?: boolean }) {

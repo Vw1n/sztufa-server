@@ -1,6 +1,23 @@
 const { spawnSync } = require('node:child_process');
 
 const environment = { ...process.env };
+const isDatabaseLessPreview =
+  environment.VERCEL_ENV === 'preview' &&
+  !environment.DIRECT_URL &&
+  !environment.DATABASE_URL_UNPOOLED &&
+  !environment.DATABASE_URL;
+
+if (isDatabaseLessPreview) {
+  // Preview deployments may intentionally have no database connection. Prisma
+  // still needs a syntactically valid URL while generating the client, but no
+  // connection is opened during generation or application compilation.
+  environment.DIRECT_URL =
+    'postgresql://preview:preview@127.0.0.1:5432/preview';
+  environment.DATABASE_URL = environment.DIRECT_URL;
+  console.log(
+    'Vercel preview build: database is not connected; skipping migrations.',
+  );
+}
 
 if (!environment.DIRECT_URL) {
   const fallbackName = environment.DATABASE_URL_UNPOOLED
@@ -21,7 +38,9 @@ if (!environment.DIRECT_URL) {
 const executable = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const steps = [
   [executable, ['prisma', 'generate']],
-  [process.execPath, ['scripts/run-vercel-migrations.js']],
+  ...(!isDatabaseLessPreview
+    ? [[process.execPath, ['scripts/run-vercel-migrations.js']]]
+    : []),
   [executable, ['nest', 'build']],
   [process.execPath, ['copy-swagger.js']],
 ];

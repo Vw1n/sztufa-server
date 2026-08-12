@@ -7,6 +7,7 @@ import { BackupService } from './backup.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { EventEmitter } from 'events';
 
 describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
   let app: INestApplication;
@@ -21,6 +22,9 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
       createBackup: jest
         .fn()
         .mockResolvedValue({ key: 'private-backups/database/backup_123.json.gz' }),
+      createScheduledBackup: jest
+        .fn()
+        .mockResolvedValue({ key: 'private-backups/database/backup_scheduled.json.gz' }),
       listBackups: jest.fn().mockResolvedValue([]),
       getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://r2.example.com/url'),
       restoreBackup: jest.fn().mockResolvedValue('数据库还原成功'),
@@ -144,5 +148,53 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
       .set('Authorization', superAdminToken)
       .send({ key: 'private-backups/database/b.json.gz', confirmText: 'DELETE_BACKUP' })
       .expect(200);
+  });
+});
+
+describe('BackupController scheduled backup single-flight', () => {
+  it('reuses one export when duplicate cron requests overlap in the same instance', async () => {
+    let resolveBackup: (value: any) => void = () => {};
+    const pendingBackup = new Promise((resolve) => {
+      resolveBackup = resolve;
+    });
+    const backupService = {
+      createScheduledBackup: jest.fn().mockReturnValue(pendingBackup),
+    } as any;
+    const controller = new BackupController(backupService);
+    const previousSecret = process.env.CRON_SECRET;
+    process.env.CRON_SECRET = 'cron-test-secret';
+
+    const createRequest = () => {
+      const req = new EventEmitter() as any;
+      req.headers = { authorization: 'Bearer cron-test-secret' };
+      req.off = req.removeListener.bind(req);
+      return req;
+    };
+    const createResponse = () => {
+      const res = new EventEmitter() as any;
+      res.writableEnded = false;
+      res.off = res.removeListener.bind(res);
+      return res;
+    };
+
+    try {
+      const first = controller.autoBackup(createRequest(), createResponse());
+      const second = controller.autoBackup(createRequest(), createResponse());
+      expect(backupService.createScheduledBackup).toHaveBeenCalledTimes(1);
+
+      resolveBackup({ key: 'private-backups/database/full/scheduled.json.gz' });
+
+      await expect(first).resolves.toEqual({
+        success: true,
+        data: { key: 'private-backups/database/full/scheduled.json.gz' },
+      });
+      await expect(second).resolves.toEqual({
+        success: true,
+        data: { key: 'private-backups/database/full/scheduled.json.gz' },
+      });
+    } finally {
+      if (previousSecret === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = previousSecret;
+    }
   });
 });

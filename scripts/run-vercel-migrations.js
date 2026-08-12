@@ -2,6 +2,8 @@ const { spawnSync } = require('node:child_process');
 
 const environment = { ...process.env };
 const recoverableMigration = '20260807200000_add_admin_form_drafts';
+const retryableMigration =
+  '20260806202000_restore_evidenced_season_team_profiles';
 
 const executable = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 // 旧版预览构建关闭了 Prisma advisory lock，并发部署可能为这条迁移留下
@@ -19,6 +21,24 @@ const recovery = spawnSync(
 
 if (recovery.status === 0) {
   console.log(`Vercel 构建：已处理失败迁移 ${recoverableMigration}，准备执行前向修复。`);
+}
+
+// This migration could fail on legacy matches that have no season assigned.
+// The SQL now excludes those rows, so roll back only its failed migration
+// record and let `migrate deploy` retry it safely.
+const retryRecovery = spawnSync(
+  executable,
+  ['prisma', 'migrate', 'resolve', '--rolled-back', retryableMigration],
+  {
+    env: environment,
+    encoding: 'utf8',
+  },
+);
+
+if (retryRecovery.status === 0) {
+  console.log(
+    `Vercel build: recovered failed migration ${retryableMigration}; preparing a safe retry.`,
+  );
 }
 
 // 不再关闭 advisory lock，避免共享预览数据库上的并发迁移互相破坏。

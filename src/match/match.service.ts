@@ -28,7 +28,7 @@ export class MatchService {
     private readonly predictionService: PredictionService,
   ) {}
 
-  async createMatchCore(tx: any, createMatchDto: CreateMatchDto) {
+  async createMatchCore(tx: any, createMatchDto: CreateMatchDto, _username: string = 'admin') {
     if (createMatchDto.homeTeamId === createMatchDto.awayTeamId) {
       throw new BadRequestException('主队和客队不能是同一支球队');
     }

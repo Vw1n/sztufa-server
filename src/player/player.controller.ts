@@ -65,7 +65,7 @@ export class PlayerController {
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('teamId') teamId?: string,
   ) {
-    const result = await this.playerService.findAll(teamId, page, limit);
+    const result = await this.playerService.findPublicAll(teamId, page, limit);
     return {
       ...result,
       data: result.data.map(toPublicPlayerDto),
@@ -75,14 +75,14 @@ export class PlayerController {
   @Get('search')
   @ApiOperation({ summary: '按名称搜索脱敏公共球员' })
   async search(@Query('name') name: string) {
-    const list = await this.playerService.searchByName(name);
+    const list = await this.playerService.searchPublicByName(name);
     return list.map(toPublicPlayerDto);
   }
 
   @Get(':id')
   @ApiOperation({ summary: '获取单个脱敏公共球员' })
   async findOne(@Param('id') id: string) {
-    const player = await this.playerService.findOne(id);
+    const player = await this.playerService.findPublicOne(id);
     return toPublicPlayerDto(player);
   }
 

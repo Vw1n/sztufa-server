@@ -33,7 +33,9 @@ async function compareBaseline() {
   const raw = fs.readFileSync(BASELINE_FILE, 'utf-8');
   const snapshot = JSON.parse(raw);
 
-  console.log(`[BASELINE] 正在比对当前数据库状态与基线快照 (${inputFileArg}, 捕获于 ${snapshot.capturedAt})...`);
+  console.log(
+    `[BASELINE] 正在比对当前数据库状态与基线快照 (${inputFileArg}, 捕获于 ${snapshot.capturedAt})...`,
+  );
 
   const errors: string[] = [];
 
@@ -67,8 +69,18 @@ async function compareBaseline() {
   checkCount(errors, 'MatchEvent', matchEvents.length, snapshot.counts?.matchEvents);
   checkCount(errors, 'MatchLineup', matchLineups.length, snapshot.counts?.matchLineups);
   checkCount(errors, 'SeasonGroupTeam', seasonGroupTeams.length, snapshot.counts?.seasonGroupTeams);
-  checkCount(errors, 'SeasonTeamProfile', seasonTeamProfiles.length, snapshot.counts?.seasonTeamProfiles);
-  checkCount(errors, 'SeasonTeamPlayer', seasonTeamPlayers.length, snapshot.counts?.seasonTeamPlayers);
+  checkCount(
+    errors,
+    'SeasonTeamProfile',
+    seasonTeamProfiles.length,
+    snapshot.counts?.seasonTeamProfiles,
+  );
+  checkCount(
+    errors,
+    'SeasonTeamPlayer',
+    seasonTeamPlayers.length,
+    snapshot.counts?.seasonTeamPlayers,
+  );
 
   // 2. 主键集合全量覆盖
   const pkSets = snapshot.primaryKeySets || {};
@@ -84,13 +96,16 @@ async function compareBaseline() {
 
   // 3. 外键映射比对（自动检测 V1 / V2 格式）
   if (snapshot.foreignKeys) {
-    const isV1Format = 'matchMvpPlayerIds' in snapshot.foreignKeys ||
+    const isV1Format =
+      'matchMvpPlayerIds' in snapshot.foreignKeys ||
       'matchEventPlayerIds' in snapshot.foreignKeys ||
       'matchEventAssistPlayerIds' in snapshot.foreignKeys;
 
     if (isV1Format) {
       // V1 格式：三组纯 Player ID 数组，验证这些球员 ID 在当前数据库中仍然存在
-      console.log('[BASELINE] 检测到 V1 外键格式，使用兼容校验（matchMvpPlayerIds / matchEventPlayerIds / matchEventAssistPlayerIds）...');
+      console.log(
+        '[BASELINE] 检测到 V1 外键格式，使用兼容校验（matchMvpPlayerIds / matchEventPlayerIds / matchEventAssistPlayerIds）...',
+      );
       const playersSet = new Set(players.map((p) => p.id));
       checkV1LegacyForeignKeys(errors, playersSet, snapshot.foreignKeys);
     } else {
@@ -109,7 +124,6 @@ async function compareBaseline() {
     }
   }
 
-
   // 4. 确定性哈希比对（仅当快照包含 hashes 字段时生效）
   if (snapshot.hashes) {
     checkEntityHashes(errors, 'Team', teams, snapshot.hashes.teams);
@@ -118,11 +132,28 @@ async function compareBaseline() {
     checkEntityHashes(errors, 'Goal', goals, snapshot.hashes.goals);
     checkEntityHashes(errors, 'MatchEvent', matchEvents, snapshot.hashes.matchEvents);
     checkEntityHashes(errors, 'MatchLineup', matchLineups, snapshot.hashes.matchLineups);
-    checkEntityHashes(errors, 'SeasonGroupTeam', seasonGroupTeams, snapshot.hashes.seasonGroupTeams);
-    checkEntityHashes(errors, 'SeasonTeamProfile', seasonTeamProfiles, snapshot.hashes.seasonTeamProfiles);
-    checkEntityHashes(errors, 'SeasonTeamPlayer', seasonTeamPlayers, snapshot.hashes.seasonTeamPlayers);
+    checkEntityHashes(
+      errors,
+      'SeasonGroupTeam',
+      seasonGroupTeams,
+      snapshot.hashes.seasonGroupTeams,
+    );
+    checkEntityHashes(
+      errors,
+      'SeasonTeamProfile',
+      seasonTeamProfiles,
+      snapshot.hashes.seasonTeamProfiles,
+    );
+    checkEntityHashes(
+      errors,
+      'SeasonTeamPlayer',
+      seasonTeamPlayers,
+      snapshot.hashes.seasonTeamPlayers,
+    );
   } else {
-    console.warn('[BASELINE WARNING] 当前快照不含 hashes 字段，跳过逐行 SHA256 哈希比对。建议使用 V2 基线进行完整哈希验证。');
+    console.warn(
+      '[BASELINE WARNING] 当前快照不含 hashes 字段，跳过逐行 SHA256 哈希比对。建议使用 V2 基线进行完整哈希验证。',
+    );
   }
 
   if (errors.length > 0) {
@@ -133,7 +164,9 @@ async function compareBaseline() {
     process.exit(1);
   }
 
-  console.log(`[BASELINE VERIFICATION PASSED] ${inputFileArg} 比对验证通过！已有历史主键、外键${snapshot.hashes ? '与 SHA256 记录哈希' : ''}无任何损毁与变更！`);
+  console.log(
+    `[BASELINE VERIFICATION PASSED] ${inputFileArg} 比对验证通过！已有历史主键、外键${snapshot.hashes ? '与 SHA256 记录哈希' : ''}无任何损毁与变更！`,
+  );
   await prisma.$disconnect();
 }
 

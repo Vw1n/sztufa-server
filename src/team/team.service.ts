@@ -280,6 +280,7 @@ export class TeamService {
     tx: any,
     teamId: string,
     dto: UpdateTeamWithPlayersDto,
+    _username: string = 'admin',
     userCtx?: { role?: string; teamId?: string },
     txParam?: any,
   ) {
@@ -480,10 +481,10 @@ export class TeamService {
       throw new ForbiddenException('您没有权限修改其他球队的信息');
     }
     if (txParam) {
-      return this.updateWithPlayersCore(txParam, teamId, dto, userCtx);
+      return this.updateWithPlayersCore(txParam, teamId, dto, username, userCtx);
     }
     const result = await this.prisma.$transaction(
-      async (tx) => this.updateWithPlayersCore(tx, teamId, dto, userCtx),
+      async (tx) => this.updateWithPlayersCore(tx, teamId, dto, username, userCtx),
       { timeout: 30000 },
     );
     await this.afterTeamCommitted(result.id, username);

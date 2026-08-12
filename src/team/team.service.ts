@@ -374,7 +374,7 @@ export class TeamService {
     if (deletePlayerIds.length > 0) {
       for (const playerId of deletePlayerIds) {
         const player = await tx.player.findUnique({ where: { id: playerId } });
-        if (player && player.teamId === teamId && player.deletedAt === null) {
+        if (player && player.deletedAt === null) {
           await tx.seasonTeamPlayer.deleteMany({
             where: { seasonId: effectiveSeasonId, teamId, playerId },
           });
@@ -394,8 +394,8 @@ export class TeamService {
       const existingById = normalizedDto.id
         ? await tx.player.findUnique({ where: { id: normalizedDto.id } })
         : null;
-      if (normalizedDto.id && (!existingById || existingById.teamId !== teamId)) {
-        throw new BadRequestException(`球员 ${normalizedDto.name} 不属于当前球队`);
+      if (normalizedDto.id && !existingById) {
+        throw new BadRequestException(`未找到 ID 为 ${normalizedDto.id} 的球员记录`);
       }
 
       if (!isSuperAdmin) {

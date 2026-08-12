@@ -286,7 +286,6 @@ model SeasonTeamProfile {
   updatedAt       DateTime @updatedAt
 
   @@unique([seasonId, teamId])
-  @@unique([teamId], map: "SeasonTeamProfile_teamId_one_season_key")
   @@index([seasonId])
   @@index([seasonId, isRegistered])
   @@index([teamId])

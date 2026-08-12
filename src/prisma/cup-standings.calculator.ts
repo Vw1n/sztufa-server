@@ -15,7 +15,11 @@ export class CupStandingsCalculator {
   ): Promise<{ type: string; groups: Record<string, TeamStanding[]> }> {
     const groupTeams = await this.prisma.seasonGroupTeam.findMany({
       where: { seasonId },
-      include: { team: true },
+      select: {
+        teamId: true,
+        groupName: true,
+        team: { select: { teamName: true, teamLogo: true, gender: true } },
+      },
     });
     const groups = new Map<string, Map<string, TeamStanding>>();
 

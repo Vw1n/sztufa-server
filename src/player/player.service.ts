@@ -9,6 +9,7 @@ import { CreatePlayerDto } from './dto/create-player.dto';
 import { UpdatePlayerDto } from './dto/update-player.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { isTeamGenderCompatibleWithSeason } from '../common/season-gender';
+import { publicPlayerSelect } from '../common/dto/public-response.dto';
 
 @Injectable()
 export class PlayerService {
@@ -203,6 +204,26 @@ export class PlayerService {
     return { data, total, page: pageNum, limit: limitNum };
   }
 
+  async findPublicAll(teamId?: string, page: number = 1, limit: number = 10) {
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, Number(limit) || 10));
+    const skip = (pageNum - 1) * limitNum;
+    const where = teamId ? { teamId, deletedAt: null } : { deletedAt: null };
+
+    const [data, total] = await Promise.all([
+      this.prisma.player.findMany({
+        skip,
+        take: limitNum,
+        where,
+        select: publicPlayerSelect,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.player.count({ where }),
+    ]);
+
+    return { data, total, page: pageNum, limit: limitNum };
+  }
+
   async findOne(id: string) {
     const player = await this.prisma.player.findUnique({
       where: { id },
@@ -335,7 +356,29 @@ export class PlayerService {
     return this.prisma.player.findMany({
       where: { name: { contains: name.trim() }, deletedAt: null },
       include: { team: true },
+      take: 20,
     });
+  }
+
+  async searchPublicByName(name: string) {
+    if (!name || name.trim() === '') return [];
+    return this.prisma.player.findMany({
+      where: { name: { contains: name.trim() }, deletedAt: null },
+      select: publicPlayerSelect,
+      take: 20,
+    });
+  }
+
+  async findPublicOne(id: string) {
+    const player = await this.prisma.player.findUnique({
+      where: { id },
+      select: { ...publicPlayerSelect, deletedAt: true },
+    });
+    if (!player || player.deletedAt !== null) {
+      throw new NotFoundException('球员不存在');
+    }
+    const { deletedAt: _deletedAt, ...publicPlayer } = player;
+    return publicPlayer;
   }
 
   async getCareerStats(id: string) {

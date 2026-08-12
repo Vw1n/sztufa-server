@@ -10,8 +10,11 @@ describe('PlayerController', () => {
   const mockPlayerService = {
     create: jest.fn(),
     findAll: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
+    findPublicAll: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
     searchByName: jest.fn(),
+    searchPublicByName: jest.fn().mockResolvedValue([]),
     findOne: jest.fn(),
+    findPublicOne: jest.fn(),
     getCareerStats: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),

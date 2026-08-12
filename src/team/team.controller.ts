@@ -90,7 +90,7 @@ export class TeamController {
     @Query('seasonId') seasonId?: string,
     @Query('gender') gender?: string,
   ) {
-    const result = await this.teamQueryService.findAll(page, limit, seasonId, gender);
+    const result = await this.teamQueryService.findPublicAll(page, limit, seasonId, gender);
     return {
       ...result,
       data: result.data.map(toPublicTeamDto),
@@ -100,14 +100,14 @@ export class TeamController {
   @Get('search')
   @ApiOperation({ summary: '按名称搜索脱敏公共球队' })
   async search(@Query('name') name: string) {
-    const list = await this.teamQueryService.searchByName(name);
+    const list = await this.teamQueryService.searchPublicByName(name);
     return list.map(toPublicTeamDto);
   }
 
   @Get(':id')
   @ApiOperation({ summary: '获取单个脱敏公共球队' })
   async findOne(@Param('id') id: string) {
-    const team = await this.teamQueryService.findOne(id);
+    const team = await this.teamQueryService.findPublicOne(id);
     return toPublicTeamDto(team);
   }
 

@@ -29,6 +29,40 @@ export interface PublicTeamDto {
   updatedAt?: Date | string;
 }
 
+export const publicTeamSelect = {
+  id: true,
+  teamName: true,
+  teamDoctor: true,
+  headCoach: true,
+  teamLeader: true,
+  homeJerseyColor: true,
+  awayJerseyColor: true,
+  teamLogo: true,
+  homeJersey: true,
+  awayJersey: true,
+  gender: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export const publicPlayerFieldsSelect = {
+  id: true,
+  name: true,
+  jerseyNumber: true,
+  photo: true,
+  status: true,
+  yellowCards: true,
+  redCards: true,
+  teamId: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export const publicPlayerSelect = {
+  ...publicPlayerFieldsSelect,
+  team: { select: publicTeamSelect },
+} as const;
+
 export function toPublicTeamDto(team: any): PublicTeamDto {
   if (!team) return team;
   const {

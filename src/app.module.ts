@@ -15,6 +15,7 @@ import { NewsModule } from './news/news.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { PredictionModule } from './prediction/prediction.module';
 import { FormDraftModule } from './form-draft/form-draft.module';
+import { PublicSummaryModule } from './public-summary/public-summary.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { FormDraftModule } from './form-draft/form-draft.module';
     NewsModule,
     PredictionModule,
     FormDraftModule,
+    PublicSummaryModule,
   ],
   providers: [
     {

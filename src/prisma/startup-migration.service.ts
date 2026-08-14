@@ -7,6 +7,7 @@ import { findThirdPlaceMatch } from '../match/knockout-migration';
 @Injectable()
 export class StartupMigrationService implements OnModuleInit {
   private static hasRun = false;
+  private static runPromise: Promise<void> | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -29,16 +30,23 @@ export class StartupMigrationService implements OnModuleInit {
 
   async run() {
     if (StartupMigrationService.hasRun) return;
-    StartupMigrationService.hasRun = true;
+    if (StartupMigrationService.runPromise) return StartupMigrationService.runPromise;
 
-    try {
-      await this.migrateSeasonRosters();
-      await this.ensureKnockoutMatches();
-      await this.seedInitialNews();
-      await this.precomputeSeasonCaches();
-    } catch (error) {
-      console.error('[Startup Migration] Error during startup migration:', error);
-    }
+    StartupMigrationService.runPromise = (async () => {
+      try {
+        await this.migrateSeasonRosters();
+        await this.ensureKnockoutMatches();
+        await this.seedInitialNews();
+        await this.precomputeSeasonCaches();
+        StartupMigrationService.hasRun = true;
+      } catch (error) {
+        console.error('[Startup Migration] Error during startup migration:', error);
+      } finally {
+        StartupMigrationService.runPromise = null;
+      }
+    })();
+
+    return StartupMigrationService.runPromise;
   }
 
   private async migrateSeasonRosters() {
@@ -49,31 +57,20 @@ export class StartupMigrationService implements OnModuleInit {
     const seasons = await this.prisma.season.findMany();
     const players = await this.prisma.player.findMany();
 
+    const batchSize = 500;
     for (const season of seasons) {
       console.log(`[Startup Migration] Registering players to season: ${season.name}`);
-      for (const player of players) {
-        await this.prisma.seasonTeamPlayer
-          .upsert({
-            where: {
-              seasonId_playerId: { seasonId: season.id, playerId: player.id },
-            },
-            create: {
-              seasonId: season.id,
-              teamId: player.teamId,
-              playerId: player.id,
-              playerName: player.name,
-              studentId: player.studentId,
-              jerseyNumber: player.jerseyNumber,
-              playerPhoto: player.photo,
-            },
-            update: {},
-          })
-          .catch((error) => {
-            console.error(
-              `[Startup Migration] Failed to register player ${player.name} to season ${season.name}:`,
-              error.message,
-            );
-          });
+      for (let offset = 0; offset < players.length; offset += batchSize) {
+        const batch = players.slice(offset, offset + batchSize).map((player) => ({
+          seasonId: season.id,
+          teamId: player.teamId,
+          playerId: player.id,
+          playerName: player.name,
+          studentId: player.studentId,
+          jerseyNumber: player.jerseyNumber,
+          playerPhoto: player.photo,
+        }));
+        await this.prisma.seasonTeamPlayer.createMany({ data: batch, skipDuplicates: true });
       }
     }
     console.log('[Startup Migration] SeasonTeamPlayer migration completed!');

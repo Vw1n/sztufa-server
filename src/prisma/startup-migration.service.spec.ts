@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { execSync } from 'child_process';
 import { StartupMigrationService } from './startup-migration.service';
 
@@ -8,6 +8,11 @@ jest.mock('child_process', () => ({
 }));
 
 describe('StartupMigrationService', () => {
+  beforeEach(() => {
+    (StartupMigrationService as any).hasRun = false;
+    (StartupMigrationService as any).runPromise = null;
+  });
+
   it('已有名单和新闻时只预计算全部赛季缓存', async () => {
     const rosterCount: any = jest.fn();
     const newsCount: any = jest.fn();
@@ -48,5 +53,23 @@ describe('StartupMigrationService', () => {
     } finally {
       process.env.NODE_ENV = originalEnv;
     }
+  });
+
+  it('启动任务失败后允许后续调用重试', async () => {
+    const rosterCount = jest
+      .fn<() => Promise<number>>()
+      .mockRejectedValueOnce(new Error('temporary error'))
+      .mockResolvedValueOnce(1);
+    const prisma: any = {
+      seasonTeamPlayer: { count: rosterCount },
+      news: { count: jest.fn<() => Promise<number>>().mockResolvedValue(1) },
+      season: { findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([]) },
+    };
+
+    const service = new StartupMigrationService(prisma, { computeAndCache: jest.fn() } as any);
+    await service.run();
+    await service.run();
+
+    expect(rosterCount).toHaveBeenCalledTimes(2);
   });
 });

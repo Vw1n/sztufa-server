@@ -94,7 +94,9 @@ describe('SeasonStatisticsService', () => {
           expect.objectContaining({ teamId: 'away', played: 1, lost: 1, points: 0 }),
         ],
         statsCache: {
-          scorers: [expect.objectContaining({ playerId: 'player-1', goals: 1 })],
+          scorers: [
+            expect.objectContaining({ playerId: 'player-1', goals: 1, penaltyGoals: 1 }),
+          ],
           assists: [expect.objectContaining({ playerId: 'player-1', assists: 1 })],
           cards: [expect.objectContaining({ playerId: 'player-2', yellowCards: 1 })],
         },

@@ -11,6 +11,7 @@ export interface PlayerStat {
 
 export interface ScorerStat extends PlayerStat {
   goals: number;
+  penaltyGoals: number;
 }
 
 export interface AssistStat extends PlayerStat {
@@ -88,7 +89,8 @@ export class PlayerStatisticsCalculator {
     matches.forEach((match) => {
       match.goals.forEach((goal: any) => {
         let cleanName = goal.playerName;
-        if (cleanName.endsWith(' (点球)')) {
+        const isPenaltyGoal = cleanName.endsWith(' (点球)');
+        if (isPenaltyGoal) {
           cleanName = cleanName.substring(0, cleanName.length - 5);
         } else if (cleanName.endsWith(' (乌龙)')) {
           return;
@@ -109,8 +111,10 @@ export class PlayerStatisticsCalculator {
           teamName: teamInfo.teamName,
           teamLogo: teamInfo.teamLogo,
           goals: 0,
+          penaltyGoals: 0,
         };
         record.goals += 1;
+        if (isPenaltyGoal) record.penaltyGoals += 1;
         scorers.set(key, record);
       });
 

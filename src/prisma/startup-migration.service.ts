@@ -15,13 +15,8 @@ export class StartupMigrationService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    if (
-      process.env.VERCEL &&
-      process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT !== 'true'
-    ) {
-      console.log(
-        '[Startup Migration] 跳过 Vercel 冷启动维护任务；请通过受控任务显式执行。',
-      );
+    if (process.env.VERCEL && process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT !== 'true') {
+      console.log('[Startup Migration] 跳过 Vercel 冷启动维护任务；请通过受控任务显式执行。');
       return;
     }
 

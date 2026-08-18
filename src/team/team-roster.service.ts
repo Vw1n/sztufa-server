@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { getSeasonGender } from '../common/season-gender';
+import { publicPlayerFieldsSelect } from '../common/dto/public-response.dto';
 
 @Injectable()
 export class TeamRosterService {
@@ -79,13 +80,18 @@ export class TeamRosterService {
         teamId,
         player: { deletedAt: null },
       },
-      include: { player: true },
+      select: {
+        teamId: true,
+        playerName: true,
+        jerseyNumber: true,
+        playerPhoto: true,
+        player: { select: publicPlayerFieldsSelect },
+      },
     });
 
     const players = rosterRecords.map((record) => ({
       ...record.player,
       name: record.playerName,
-      studentId: record.studentId,
       jerseyNumber: record.jerseyNumber,
       photo: record.playerPhoto,
       teamId: record.teamId,

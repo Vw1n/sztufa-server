@@ -2,6 +2,15 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 
+const seasonSummarySelect = {
+  id: true,
+  name: true,
+  status: true,
+  type: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
 @Injectable()
 export class SeasonLifecycleService {
   constructor(
@@ -11,6 +20,7 @@ export class SeasonLifecycleService {
 
   async getSeasons() {
     const seasons = await this.prisma.season.findMany({
+      select: seasonSummarySelect,
       orderBy: { createdAt: 'desc' },
     });
     return seasons.sort((left, right) => {
@@ -32,6 +42,7 @@ export class SeasonLifecycleService {
   async getActiveSeason() {
     const active = await this.prisma.season.findFirst({
       where: { status: 'active' },
+      select: seasonSummarySelect,
       orderBy: { createdAt: 'desc' },
     });
     if (!active) {

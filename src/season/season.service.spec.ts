@@ -45,6 +45,15 @@ describe('SeasonService', () => {
 
       const seasons = await service.getSeasons();
 
+      expect(prisma.season.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.not.objectContaining({
+            standingsCache: expect.anything(),
+            statsCache: expect.anything(),
+          }),
+        }),
+      );
+
       expect(seasons.map((season) => season.name)).toEqual([
         '2026春季赛季',
         '2025校长杯',

@@ -145,6 +145,24 @@ describe('TeamQueryService', () => {
     await expect(service.findOne('team-1')).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('does not include player rosters in the public team list', async () => {
+    const { service, prisma } = createService();
+    prisma.team.findMany.mockResolvedValue([{ id: 'team-1', seasonProfiles: [] }]);
+    prisma.team.count.mockResolvedValue(1);
+
+    const result = await service.findPublicAll(1, 10, 'season-1');
+
+    expect(prisma.team.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.not.objectContaining({
+          players: expect.anything(),
+          seasonPlayers: expect.anything(),
+        }),
+      }),
+    );
+    expect(result.data[0]).not.toHaveProperty('players');
+  });
+
   it('trims searches and returns no results for an empty name', async () => {
     const { service, prisma } = createService();
     await expect(service.searchByName('  ')).resolves.toEqual([]);

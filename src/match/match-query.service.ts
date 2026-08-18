@@ -1,8 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { publicPlayerFieldsSelect, publicTeamSelect } from '../common/dto/public-response.dto';
+const matchTeamSelect = {
+  id: true,
+  teamName: true,
+  teamLogo: true,
+} as const;
 
-const matchDetails = {
+const matchLineupPlayerSelect = {
+  id: true,
+  name: true,
+  jerseyNumber: true,
+  photo: true,
+} as const;
+
+const matchListDetails = {
   id: true,
   homeTeamId: true,
   awayTeamId: true,
@@ -22,13 +33,26 @@ const matchDetails = {
   groupName: true,
   knockoutRound: true,
   knockoutMatchIndex: true,
+  matchName: true,
   createdAt: true,
   updatedAt: true,
-  homeTeam: { select: publicTeamSelect },
-  awayTeam: { select: publicTeamSelect },
+  homeTeam: { select: matchTeamSelect },
+  awayTeam: { select: matchTeamSelect },
+} as const;
+
+const matchDetails = {
+  ...matchListDetails,
   goals: true,
   events: true,
-  lineups: { include: { player: { select: publicPlayerFieldsSelect } } },
+  lineups: {
+    select: {
+      id: true,
+      playerId: true,
+      teamType: true,
+      lineupType: true,
+      player: { select: matchLineupPlayerSelect },
+    },
+  },
 } as const;
 
 @Injectable()
@@ -75,7 +99,7 @@ export class MatchQueryService {
           skip,
           take: limitNum,
           where,
-          select: matchDetails,
+          select: matchListDetails,
           orderBy: { matchDate: 'desc' },
         }),
         this.prisma.match.count({ where }),

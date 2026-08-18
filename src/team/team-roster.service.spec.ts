@@ -121,6 +121,9 @@ describe('TeamRosterService', () => {
         teamId: 'team-1',
       },
     ]);
+    const rosterQuery = (prisma.seasonTeamPlayer.findMany.mock.calls as any[][])[0][0];
+    expect(rosterQuery.select.studentId).toBeUndefined();
+    expect(rosterQuery.select.player.select.studentId).toBeUndefined();
     expect(prisma.season.findFirst).not.toHaveBeenCalled();
   });
 

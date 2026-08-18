@@ -26,6 +26,21 @@ describe('MatchQueryService', () => {
         where: { deletedAt: null, seasonId: 'season-1' },
       }),
     );
+    expect(prisma.match.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.not.objectContaining({
+          goals: expect.anything(),
+          events: expect.anything(),
+          lineups: expect.anything(),
+        }),
+      }),
+    );
+    const listQuery = (prisma.match.findMany.mock.calls as any[][])[0][0];
+    expect(listQuery.select.homeTeam.select).toEqual({
+      id: true,
+      teamName: true,
+      teamLogo: true,
+    });
     expect(result.stats).toEqual({ total: 2, completed: 1, scheduled: 1, ongoing: 0 });
   });
 
@@ -40,5 +55,13 @@ describe('MatchQueryService', () => {
     const service = new MatchQueryService(prisma);
 
     await expect(service.findOne('match-1')).rejects.toBeInstanceOf(NotFoundException);
+
+    const detailQuery = (prisma.match.findUnique.mock.calls as any[][])[0][0];
+    expect(detailQuery.select.lineups.select.player.select).toEqual({
+      id: true,
+      name: true,
+      jerseyNumber: true,
+      photo: true,
+    });
   });
 });

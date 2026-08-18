@@ -46,6 +46,7 @@ export class MatchController {
     @Query('stage') stage?: string,
     @Query('groupName') groupName?: string,
     @Query('knockoutRound') knockoutRound?: string,
+    @Query('includeMeta') includeMeta?: string,
   ) {
     return this.matchService.findAll(
       page,
@@ -56,6 +57,7 @@ export class MatchController {
       stage,
       groupName,
       knockoutRound,
+      includeMeta !== 'false',
     );
   }
 

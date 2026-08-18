@@ -184,6 +184,7 @@ export class MatchService {
     stage?: string,
     groupName?: string,
     knockoutRound?: string,
+    includeMeta: boolean = true,
   ) {
     return this.matchQuery.findAll(
       page,
@@ -194,6 +195,7 @@ export class MatchService {
       stage,
       groupName,
       knockoutRound,
+      includeMeta,
     );
   }
 

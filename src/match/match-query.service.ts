@@ -68,6 +68,7 @@ export class MatchQueryService {
     stage?: string,
     groupName?: string,
     knockoutRound?: string,
+    includeMeta: boolean = true,
   ) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Math.min(100, Number(limit) || 10));
@@ -94,7 +95,25 @@ export class MatchQueryService {
     delete whereStats.status;
 
     try {
-      const [data, total, statusGroups] = await Promise.all([
+      if (!includeMeta) {
+        const data = await this.prisma.match.findMany({
+          skip,
+          take: limitNum,
+          where,
+          select: matchListDetails,
+          orderBy: { matchDate: 'desc' },
+        });
+
+        return {
+          data,
+          total: data.length,
+          page: pageNum,
+          limit: limitNum,
+        };
+      }
+
+      const hasStatusFilter = !!status && status !== 'all';
+      const [data, filteredTotal, statusGroups] = await Promise.all([
         this.prisma.match.findMany({
           skip,
           take: limitNum,
@@ -102,7 +121,7 @@ export class MatchQueryService {
           select: matchListDetails,
           orderBy: { matchDate: 'desc' },
         }),
-        this.prisma.match.count({ where }),
+        hasStatusFilter ? this.prisma.match.count({ where }) : Promise.resolve(undefined),
         this.prisma.match.groupBy({
           by: ['status'],
           where: whereStats,
@@ -114,6 +133,7 @@ export class MatchQueryService {
         statusGroups.map((group) => [group.status, group._count._all]),
       );
       const statsTotal = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
+      const total = filteredTotal ?? statsTotal;
 
       return {
         data,
@@ -130,22 +150,32 @@ export class MatchQueryService {
     } catch (error) {
       console.error('[MatchQueryService.findAll Error]', error);
       try {
-        const [data, total] = await Promise.all([
-          this.prisma.match.findMany({
-            skip,
-            take: limitNum,
-            where,
-            include: { homeTeam: true, awayTeam: true },
-            orderBy: { matchDate: 'desc' },
-          }),
-          this.prisma.match.count({ where }),
-        ]);
+        const dataPromise = this.prisma.match.findMany({
+          skip,
+          take: limitNum,
+          where,
+          include: { homeTeam: true, awayTeam: true },
+          orderBy: { matchDate: 'desc' },
+        });
+        const [data, total] = includeMeta
+          ? await Promise.all([dataPromise, this.prisma.match.count({ where })])
+          : [await dataPromise, undefined];
+        const resolvedTotal = total ?? data.length;
         return {
           data: data.map((m) => ({ ...m, goals: [], events: [], lineups: [] })),
-          total,
+          total: resolvedTotal,
           page: pageNum,
           limit: limitNum,
-          stats: { total, completed: 0, scheduled: 0, ongoing: 0 },
+          ...(includeMeta
+            ? {
+                stats: {
+                  total: resolvedTotal,
+                  completed: 0,
+                  scheduled: 0,
+                  ongoing: 0,
+                },
+              }
+            : {}),
         };
       } catch (fallbackErr) {
         console.error('[MatchQueryService.findAll Fallback Error]', fallbackErr);

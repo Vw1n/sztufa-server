@@ -64,4 +64,55 @@ describe('MatchQueryService', () => {
       photo: true,
     });
   });
+
+  it('skips count and status queries when metadata is not requested', async () => {
+    const prisma: any = {
+      match: {
+        findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([{ id: 'match-1' }]),
+        count: jest.fn<() => Promise<number>>(),
+        groupBy: jest.fn<() => Promise<any[]>>(),
+      },
+    };
+    const service = new MatchQueryService(prisma);
+
+    const result = await service.findAll(
+      1,
+      100,
+      undefined,
+      'season-1',
+      undefined,
+      'KNOCKOUT',
+      undefined,
+      undefined,
+      false,
+    );
+
+    expect(prisma.match.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.match.count).not.toHaveBeenCalled();
+    expect(prisma.match.groupBy).not.toHaveBeenCalled();
+    expect(result).toEqual({ data: [{ id: 'match-1' }], total: 1, page: 1, limit: 100 });
+  });
+
+  it('derives the unfiltered total from status groups without a separate count query', async () => {
+    const prisma: any = {
+      season: {
+        findFirst: jest.fn<() => Promise<any>>().mockResolvedValue({ id: 'season-1' }),
+      },
+      match: {
+        findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([{ id: 'match-1' }]),
+        count: jest.fn<() => Promise<number>>(),
+        groupBy: jest.fn<() => Promise<any[]>>().mockResolvedValue([
+          { status: 'finished', _count: { _all: 3 } },
+          { status: 'scheduled', _count: { _all: 2 } },
+        ]),
+      },
+    };
+    const service = new MatchQueryService(prisma);
+
+    const result = await service.findAll();
+
+    expect(prisma.match.count).not.toHaveBeenCalled();
+    expect(result.total).toBe(5);
+    expect(result.stats.total).toBe(5);
+  });
 });

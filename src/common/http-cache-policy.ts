@@ -22,7 +22,7 @@ export function getApiCacheControl(method: string, path: string): string {
     return 'public, s-maxage=15, stale-while-revalidate=30';
   }
 
-  return 'public, s-maxage=60, stale-while-revalidate=300';
+  return 'public, s-maxage=300, stale-while-revalidate=1800';
 }
 
 export function apiCachePolicyMiddleware(req: Request, res: Response, next: NextFunction) {

@@ -37,4 +37,13 @@ describe('HTTP cache policy', () => {
       'public, s-maxage=15, stale-while-revalidate=30',
     );
   });
+
+  it('reuses stable public data for five minutes at the CDN', () => {
+    expect(getApiCacheControl('GET', '/api/v1/seasons')).toBe(
+      'public, s-maxage=300, stale-while-revalidate=1800',
+    );
+    expect(getApiCacheControl('GET', '/api/v1/seasons/season-1/stats')).toBe(
+      'public, s-maxage=300, stale-while-revalidate=1800',
+    );
+  });
 });

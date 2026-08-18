@@ -9,6 +9,7 @@ jest.mock('child_process', () => ({
 
 describe('StartupMigrationService', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     (StartupMigrationService as any).hasRun = false;
     (StartupMigrationService as any).runPromise = null;
   });
@@ -52,6 +53,27 @@ describe('StartupMigrationService', () => {
       expect(runSpy).not.toHaveBeenCalled();
     } finally {
       process.env.NODE_ENV = originalEnv;
+    }
+  });
+
+  it('Vercel 冷启动默认跳过全库维护任务', async () => {
+    const originalVercel = process.env.VERCEL;
+    const originalOptIn = process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT;
+    process.env.VERCEL = '1';
+    delete process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT;
+
+    const service = new StartupMigrationService({} as any, {} as any);
+    const runSpy = jest.spyOn(service, 'run').mockResolvedValue();
+
+    try {
+      await service.onModuleInit();
+      expect(runSpy).not.toHaveBeenCalled();
+      expect(execSync).not.toHaveBeenCalled();
+    } finally {
+      if (originalVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = originalVercel;
+      if (originalOptIn === undefined) delete process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT;
+      else process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT = originalOptIn;
     }
   });
 

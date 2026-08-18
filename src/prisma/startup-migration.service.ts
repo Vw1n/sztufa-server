@@ -15,6 +15,11 @@ export class StartupMigrationService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    if (process.env.VERCEL && process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT !== 'true') {
+      console.log('[Startup Migration] 跳过 Vercel 冷启动维护任务；请通过受控任务显式执行。');
+      return;
+    }
+
     if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL && !process.env.VERCEL) {
       console.log('[Startup Migration] 检查并自动应用数据库迁移...');
       try {

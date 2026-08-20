@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { PrismaService } from './prisma.service';
 import { SeasonStatisticsService } from './season-statistics.service';
 import { findThirdPlaceMatch } from '../match/knockout-migration';
@@ -15,9 +15,15 @@ export class StartupMigrationService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    if (process.env.VERCEL && process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT !== 'true') {
-      console.log('[Startup Migration] 跳过 Vercel 冷启动维护任务；请通过受控任务显式执行。');
-      return;
+    if (process.env.VERCEL) {
+      if (process.env.ALLOW_RUNTIME_DATABASE_MIGRATIONS === 'true') {
+        this.deployVercelRuntimeMigrations();
+      }
+
+      if (process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT !== 'true') {
+        console.log('[Startup Migration] 跳过 Vercel 冷启动维护任务；请通过受控任务显式执行。');
+        return;
+      }
     }
 
     if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL && !process.env.VERCEL) {
@@ -31,6 +37,23 @@ export class StartupMigrationService implements OnModuleInit {
       }
     }
     await this.run();
+  }
+
+  private deployVercelRuntimeMigrations() {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('Vercel 运行时数据库迁移失败：缺少 DATABASE_URL');
+    }
+
+    const prismaCliPath = require.resolve('prisma/build/index.js');
+    console.log('[Startup Migration] Vercel 构建节点无法连接数据库，改由运行时应用迁移...');
+    execFileSync(process.execPath, [prismaCliPath, 'migrate', 'deploy'], {
+      env: {
+        ...process.env,
+        DIRECT_URL: process.env.DATABASE_URL,
+      },
+      stdio: 'inherit',
+    });
+    console.log('[Startup Migration] Vercel 运行时数据库迁移完成。');
   }
 
   async run() {

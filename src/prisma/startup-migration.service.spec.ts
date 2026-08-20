@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { StartupMigrationService } from './startup-migration.service';
 
 jest.mock('child_process', () => ({
   ...(jest.requireActual('child_process') as any),
+  execFileSync: jest.fn(),
   execSync: jest.fn(),
 }));
 
@@ -74,6 +75,37 @@ describe('StartupMigrationService', () => {
       else process.env.VERCEL = originalVercel;
       if (originalOptIn === undefined) delete process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT;
       else process.env.RUN_STARTUP_MAINTENANCE_ON_BOOT = originalOptIn;
+    }
+  });
+
+  it('开发环境开关启用时在 Vercel 运行时通过连接池应用迁移', async () => {
+    const originalVercel = process.env.VERCEL;
+    const originalOptIn = process.env.ALLOW_RUNTIME_DATABASE_MIGRATIONS;
+    const originalDatabaseUrl = process.env.DATABASE_URL;
+    process.env.VERCEL = '1';
+    process.env.ALLOW_RUNTIME_DATABASE_MIGRATIONS = 'true';
+    process.env.DATABASE_URL = 'postgresql://runtime-pool/database';
+
+    const service = new StartupMigrationService({} as any, {} as any);
+
+    try {
+      await service.onModuleInit();
+      expect(execFileSync).toHaveBeenCalledWith(
+        process.execPath,
+        [expect.stringContaining('prisma'), 'migrate', 'deploy'],
+        expect.objectContaining({
+          env: expect.objectContaining({
+            DIRECT_URL: 'postgresql://runtime-pool/database',
+          }),
+        }),
+      );
+    } finally {
+      if (originalVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = originalVercel;
+      if (originalOptIn === undefined) delete process.env.ALLOW_RUNTIME_DATABASE_MIGRATIONS;
+      else process.env.ALLOW_RUNTIME_DATABASE_MIGRATIONS = originalOptIn;
+      if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = originalDatabaseUrl;
     }
   });
 

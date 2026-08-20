@@ -16,6 +16,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { PredictionModule } from './prediction/prediction.module';
 import { FormDraftModule } from './form-draft/form-draft.module';
 import { PublicSummaryModule } from './public-summary/public-summary.module';
+import { RegistrationModule } from './registration/registration.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { PublicSummaryModule } from './public-summary/public-summary.module';
     PredictionModule,
     FormDraftModule,
     PublicSummaryModule,
+    RegistrationModule,
   ],
   providers: [
     {

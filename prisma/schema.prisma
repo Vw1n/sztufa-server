@@ -9,7 +9,7 @@ datasource db {
 }
 
 model Team {
-  id              String    @id @default(cuid())
+  id              String              @id @default(cuid())
   teamName        String
   teamDoctor      String?
   headCoach       String?
@@ -21,46 +21,48 @@ model Team {
   teamLogo        String?
   homeJersey      String?
   awayJersey      String?
-  gender          String    @default("MALE") // MALE: 男子, FEMALE: 女子
+  gender          String              @default("MALE") // MALE: 男子, FEMALE: 女子
   players         Player[]
-  homeMatches     Match[]   @relation("HomeTeam")
-  awayMatches     Match[]   @relation("AwayTeam")
+  homeMatches     Match[]             @relation("HomeTeam")
+  awayMatches     Match[]             @relation("AwayTeam")
   users           User[]
   deletedAt       DateTime?
   seasonPlayers   SeasonTeamPlayer[]
   seasonProfiles  SeasonTeamProfile[]
   groupTeams      SeasonGroupTeam[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  registrations   TeamRegistration[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   @@index([teamName])
   @@index([deletedAt])
 }
 
 model Player {
-  id                  String  @id @default(cuid())
+  id                  String               @id @default(cuid())
   name                String
   studentId           String
-  legacyKey           String? @unique
+  legacyKey           String?              @unique
   jerseyNumber        String
   photo               String?
-  status              String  @default("active")
-  yellowCards         Int     @default(0)
-  redCards            Int     @default(0)
+  status              String               @default("active")
+  yellowCards         Int                  @default(0)
+  redCards            Int                  @default(0)
   suspendedAtMatchId  String?
-  suspendedAtMatch    Match?  @relation("PlayerSuspensionMatch", fields: [suspendedAtMatchId], references: [id], onDelete: SetNull)
+  suspendedAtMatch    Match?               @relation("PlayerSuspensionMatch", fields: [suspendedAtMatchId], references: [id], onDelete: SetNull)
   teamId              String
-  team                Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team                Team                 @relation(fields: [teamId], references: [id], onDelete: Cascade)
   goals               Goal[]
-  events              MatchEvent[] @relation("EventPlayer")
-  subEvents           MatchEvent[] @relation("EventSubPlayer")
-  assistEvents        MatchEvent[] @relation("EventAssistPlayer")
-  mvpMatches          Match[]      @relation("MatchMvpPlayer")
+  events              MatchEvent[]         @relation("EventPlayer")
+  subEvents           MatchEvent[]         @relation("EventSubPlayer")
+  assistEvents        MatchEvent[]         @relation("EventAssistPlayer")
+  mvpMatches          Match[]              @relation("MatchMvpPlayer")
   deletedAt           DateTime?
   seasonPlayers       SeasonTeamPlayer[]
   matchLineups        MatchLineup[]
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  registrationPlayers RegistrationPlayer[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@index([teamId])
   @@index([studentId])
@@ -69,38 +71,38 @@ model Player {
 }
 
 model Match {
-  id              String        @id @default(cuid())
-  legacyGameId    String?       @unique
-  homeTeamId      String
-  awayTeamId      String
-  homeTeam        Team          @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Cascade)
-  awayTeam        Team          @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Cascade)
-  homeScore       Int           @default(0)
-  awayScore       Int           @default(0)
-  homePenaltyScore Int?
-  awayPenaltyScore Int?
-  winnerTeamId    String?
-  decidedBy       String?
-  matchDate       DateTime
-  location        String
-  status          String        @default("scheduled")
-  goals           Goal[]
-  events          MatchEvent[]
-  seasonId        String?
-  season          Season?       @relation(fields: [seasonId], references: [id])
-  mvpPlayerId     String?
-  mvpPlayer       Player?       @relation("MatchMvpPlayer", fields: [mvpPlayerId], references: [id])
-  suspendedPlayers Player[]     @relation("PlayerSuspensionMatch")
-  mvpPlayerName   String?
-  lineups         MatchLineup[]
-  stage           String        @default("LEAGUE") // LEAGUE, GROUP, KNOCKOUT
-  groupName       String?
-  knockoutRound   String?
+  id                 String        @id @default(cuid())
+  legacyGameId       String?       @unique
+  homeTeamId         String
+  awayTeamId         String
+  homeTeam           Team          @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Cascade)
+  awayTeam           Team          @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Cascade)
+  homeScore          Int           @default(0)
+  awayScore          Int           @default(0)
+  homePenaltyScore   Int?
+  awayPenaltyScore   Int?
+  winnerTeamId       String?
+  decidedBy          String?
+  matchDate          DateTime
+  location           String
+  status             String        @default("scheduled")
+  goals              Goal[]
+  events             MatchEvent[]
+  seasonId           String?
+  season             Season?       @relation(fields: [seasonId], references: [id])
+  mvpPlayerId        String?
+  mvpPlayer          Player?       @relation("MatchMvpPlayer", fields: [mvpPlayerId], references: [id])
+  suspendedPlayers   Player[]      @relation("PlayerSuspensionMatch")
+  mvpPlayerName      String?
+  lineups            MatchLineup[]
+  stage              String        @default("LEAGUE") // LEAGUE, GROUP, KNOCKOUT
+  groupName          String?
+  knockoutRound      String?
   knockoutMatchIndex Int?
-  deletedAt       DateTime?
-  predictions     Prediction[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  deletedAt          DateTime?
+  predictions        Prediction[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   @@index([homeTeamId])
   @@index([awayTeamId])
@@ -195,21 +197,21 @@ model MatchEvent {
 }
 
 model News {
-  id           String   @id @default(cuid())
-  title        String
-  category     String
-  content      String   @default("")
-  description  String   @default("")
-  coverImage   String?
-  wechatUrl    String?
-  isPinned     Boolean  @default(false)
-  viewCount    Int      @default(0)
-  published    Boolean  @default(true)
-  publishedAt  DateTime @default(now())
-  date         String   @default("") // 格式如 "2026-06-10"
-  deletedAt    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String    @id @default(cuid())
+  title       String
+  category    String
+  content     String    @default("")
+  description String    @default("")
+  coverImage  String?
+  wechatUrl   String?
+  isPinned    Boolean   @default(false)
+  viewCount   Int       @default(0)
+  published   Boolean   @default(true)
+  publishedAt DateTime  @default(now())
+  date        String    @default("") // 格式如 "2026-06-10"
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([category])
   @@index([published])
@@ -218,18 +220,20 @@ model News {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  username  String   @unique
-  studentId String?  @unique
-  nickname  String?
-  password  String
-  role      String   @default("user")
-  teamId    String?
-  team      Team?    @relation(fields: [teamId], references: [id])
+  id                      String                   @id @default(cuid())
+  username                String                   @unique
+  studentId               String?                  @unique
+  nickname                String?
+  password                String
+  role                    String                   @default("user")
+  teamId                  String?
+  team                    Team?                    @relation(fields: [teamId], references: [id])
   seasonDeletionApprovals SeasonDeletionApproval[]
-  predictions Prediction[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  predictions             Prediction[]
+  submittedRegistrations  TeamRegistration[]       @relation("RegistrationSubmittedBy")
+  reviewedRegistrations   TeamRegistration[]       @relation("RegistrationReviewedBy")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
   @@index([username])
   @@index([studentId])
@@ -248,19 +252,20 @@ model AuditLog {
 }
 
 model Season {
-  id             String   @id @default(cuid())
-  name           String   @unique
-  status         String   @default("active") // active, archived
-  type           String   @default("LEAGUE") // LEAGUE, CUP
-  matches        Match[]
-  standingsCache Json?
-  statsCache     Json?
-  teamPlayers    SeasonTeamPlayer[]
-  teamProfiles   SeasonTeamProfile[]
-  groupTeams     SeasonGroupTeam[]
+  id                String                   @id @default(cuid())
+  name              String                   @unique
+  status            String                   @default("active") // active, archived
+  type              String                   @default("LEAGUE") // LEAGUE, CUP
+  matches           Match[]
+  standingsCache    Json?
+  statsCache        Json?
+  teamPlayers       SeasonTeamPlayer[]
+  teamProfiles      SeasonTeamProfile[]
+  groupTeams        SeasonGroupTeam[]
   deletionApprovals SeasonDeletionApproval[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  registrations     TeamRegistration[]
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
 }
 
 model SeasonTeamProfile {
@@ -339,13 +344,13 @@ model SeasonTeamPlayer {
 }
 
 model MatchLineup {
-  id         String   @id @default(cuid())
+  id         String @id @default(cuid())
   matchId    String
-  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  match      Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
   playerId   String
-  player     Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  teamType   String   // "home" | "away"
-  lineupType String   // "starting" | "substitute"
+  player     Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  teamType   String // "home" | "away"
+  lineupType String // "starting" | "substitute"
 
   @@unique([matchId, playerId])
   @@index([matchId])
@@ -356,7 +361,7 @@ model SeasonGroupTeam {
   id        String   @id @default(cuid())
   seasonId  String
   teamId    String
-  groupName String   // e.g. "A", "B", "C", "D"
+  groupName String // e.g. "A", "B", "C", "D"
   season    Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -411,4 +416,77 @@ model AdminFormDraft {
   @@index([formType, status, updatedAt])
   @@index([username, updatedAt])
   @@index([officialRecordId])
+}
+
+enum RegistrationStatus {
+  DRAFT
+  SUBMITTED
+  CHANGES_REQUESTED
+  APPROVED
+}
+
+model TeamRegistration {
+  id            String             @id @default(cuid())
+  seasonId      String
+  teamId        String
+  submittedById String
+  status        RegistrationStatus @default(DRAFT)
+  reviewComment String?
+  submittedAt   DateTime?
+  reviewedAt    DateTime?
+  reviewedById  String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  season      Season                @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  team        Team                  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  submittedBy User                  @relation("RegistrationSubmittedBy", fields: [submittedById], references: [id], onDelete: Cascade)
+  reviewedBy  User?                 @relation("RegistrationReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  teamData    RegistrationTeamData?
+  players     RegistrationPlayer[]
+
+  @@unique([seasonId, teamId])
+  @@index([seasonId, status, updatedAt])
+  @@index([teamId])
+  @@index([submittedById])
+  @@index([reviewedById])
+}
+
+model RegistrationTeamData {
+  id              String   @id @default(cuid())
+  registrationId  String   @unique
+  teamName        String
+  teamDoctor      String?
+  headCoach       String?
+  teamLeader      String?
+  coachPhone      String?
+  leaderPhone     String?
+  homeJerseyColor String
+  awayJerseyColor String
+  teamLogo        String?
+  homeJersey      String?
+  awayJersey      String?
+  gender          String   @default("MALE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  registration TeamRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+}
+
+model RegistrationPlayer {
+  id             String   @id @default(cuid())
+  registrationId String
+  playerId       String?
+  name           String
+  studentId      String
+  jerseyNumber   String
+  photo          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  registration TeamRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  player       Player?          @relation(fields: [playerId], references: [id], onDelete: SetNull)
+
+  @@index([registrationId])
+  @@index([playerId])
 }

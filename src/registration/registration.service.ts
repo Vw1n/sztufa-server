@@ -31,7 +31,7 @@ export class RegistrationService {
 
   private checkCoachTeamBinding(userCtx: UserContext): string {
     if (userCtx.role !== 'coach' || !userCtx.teamId) {
-      throw new ForbiddenException('仅绑定球队的领队账号可执行此操作');
+      throw new ForbiddenException('教练账号尚未绑定球队，请联系超级管理员先创建并绑定球队');
     }
     return userCtx.teamId;
   }

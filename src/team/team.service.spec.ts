@@ -99,6 +99,15 @@ describe('TeamService.createWithPlayers', () => {
     expect(auditLogService.log).not.toHaveBeenCalled();
   });
 
+  it('拒绝教练创建球队', async () => {
+    const { service, prisma } = createService();
+
+    await expect(service.createWithPlayers(dto, 'coach', { role: 'coach' })).rejects.toThrow(
+      '仅超级管理员可以创建球队',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('rejects duplicate jersey numbers before starting the transaction', async () => {
     const { service, prisma } = createService();
     const duplicated = {

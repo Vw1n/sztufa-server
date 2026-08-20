@@ -37,7 +37,7 @@ export class TeamController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('super_admin', 'coach')
+  @Roles('super_admin')
   @Post('with-players')
   @ApiOperation({ summary: '在单个事务中创建球队及全部球员' })
   createWithPlayers(@Body() dto: CreateTeamWithPlayersDto, @Req() req: any) {

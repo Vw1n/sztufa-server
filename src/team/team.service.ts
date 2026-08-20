@@ -234,6 +234,10 @@ export class TeamService {
     userCtx?: { role?: string },
     tx?: any,
   ) {
+    if (userCtx && userCtx.role !== 'super_admin') {
+      throw new ForbiddenException('仅超级管理员可以创建球队，请联系超级管理员创建并绑定球队');
+    }
+
     const isSuperAdmin = userCtx?.role === 'super_admin';
     const players = dto.players || [];
     const normalizedPlayers = players.map((player) => ({

@@ -61,6 +61,7 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
         });
         break;
       }
+      case 'P2021':
       case 'P2022': {
         const status = HttpStatus.INTERNAL_SERVER_ERROR;
         response.status(status).json({

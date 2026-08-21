@@ -733,6 +733,11 @@ export class RegistrationService {
           reviewedBy: { select: { id: true, username: true, nickname: true } },
         },
       });
+    }, {
+      // 审核会原子化物化球队资料、正式球员及赛季名单，跨区数据库
+      // 往返次数较多，不能沿用 Prisma 交互事务默认的 5 秒超时。
+      maxWait: 10_000,
+      timeout: 30_000,
     });
   }
 }

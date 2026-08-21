@@ -341,6 +341,10 @@ describe('RegistrationService', () => {
       );
 
       expect(teamRosterService.registerPlayer).toHaveBeenCalledTimes(3);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        maxWait: 10_000,
+        timeout: 30_000,
+      });
     });
   });
 

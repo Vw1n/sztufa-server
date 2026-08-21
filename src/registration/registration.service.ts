@@ -305,6 +305,25 @@ export class RegistrationService {
           }
         }
 
+        const requestedPlayerIds = [
+          ...new Set(
+            players
+              .map((player) => player.playerId?.trim())
+              .filter((playerId): playerId is string => Boolean(playerId)),
+          ),
+        ];
+        const validPlayers = requestedPlayerIds.length
+          ? await tx.player.findMany({
+              where: {
+                id: { in: requestedPlayerIds },
+                teamId,
+                deletedAt: null,
+              },
+              select: { id: true },
+            })
+          : [];
+        const validPlayerIds = new Set(validPlayers.map((player) => player.id));
+
         await tx.registrationPlayer.deleteMany({
           where: { registrationId: id },
         });
@@ -313,7 +332,11 @@ export class RegistrationService {
           await tx.registrationPlayer.createMany({
             data: players.map((p) => ({
               registrationId: id,
-              playerId: p.playerId || null,
+              // 报名名单是独立快照。来源球员已删除、已换队或 ID 无效时，
+              // 仅解除来源关联，保留教练填写的报名资料。
+              playerId: p.playerId && validPlayerIds.has(p.playerId.trim())
+                ? p.playerId.trim()
+                : null,
               name: (p.name || '').trim(),
               studentId: (p.studentId || '').trim(),
               jerseyNumber: (p.jerseyNumber || '').trim(),

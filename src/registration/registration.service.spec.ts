@@ -72,6 +72,7 @@ describe('RegistrationService', () => {
       },
       player: {
         findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn(),
         create: jest.fn(),
       },
@@ -160,6 +161,50 @@ describe('RegistrationService', () => {
           mockCoachUser,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should detach stale or cross-team player IDs while preserving registration snapshots', async () => {
+      prisma.teamRegistration.findUnique
+        .mockResolvedValueOnce({
+          id: 'reg-1',
+          teamId: 'team-1',
+          status: RegistrationStatus.DRAFT,
+          teamData: { teamName: 'Team Alpha' },
+        })
+        .mockResolvedValueOnce({
+          id: 'reg-1',
+          teamId: 'team-1',
+          status: RegistrationStatus.DRAFT,
+          teamData: { teamName: 'Team Alpha' },
+          players: [],
+        });
+      prisma.player.findMany.mockResolvedValue([{ id: 'player-valid' }]);
+
+      await service.save(
+        'reg-1',
+        {
+          players: [
+            { playerId: 'player-valid', name: 'Valid', studentId: '1', jerseyNumber: '9' },
+            { playerId: 'player-stale', name: 'Stale', studentId: '2', jerseyNumber: '10' },
+          ],
+        },
+        mockCoachUser,
+      );
+
+      expect(prisma.player.findMany).toHaveBeenCalledWith({
+        where: {
+          id: { in: ['player-valid', 'player-stale'] },
+          teamId: 'team-1',
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      expect(prisma.registrationPlayer.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({ playerId: 'player-valid', name: 'Valid' }),
+          expect.objectContaining({ playerId: null, name: 'Stale' }),
+        ],
+      });
     });
 
     it('should throw ConflictException (409) when saving in SUBMITTED status or if updateMany lock fails', async () => {

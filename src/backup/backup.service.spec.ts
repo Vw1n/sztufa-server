@@ -38,6 +38,7 @@ describe('BackupService (V3 & Security Spec)', () => {
     $transaction: jest.fn().mockImplementation(async (cb) => {
       return cb(mockPrismaService);
     }),
+    memberAccount: { findMany: jest.fn().mockResolvedValue([]) },
     user: { findMany: jest.fn().mockResolvedValue([{ id: 'u1', username: 'admin' }]) },
     team: { findMany: jest.fn().mockResolvedValue([]) },
     player: { findMany: jest.fn().mockResolvedValue([]) },
@@ -294,6 +295,7 @@ describe('BackupService (V3 & Security Spec)', () => {
       ]) {
         samplePayload[t] = [];
       }
+      samplePayload.MemberAccount = [];
       samplePayload.User = [{ id: 'u1', username: 'admin' }];
 
       const tablesJson = JSON.stringify(samplePayload);
@@ -307,6 +309,7 @@ describe('BackupService (V3 & Security Spec)', () => {
         checksum,
         tables: {
           User: 1,
+          MemberAccount: 0,
           Team: 0,
           Player: 0,
           Match: 0,

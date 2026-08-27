@@ -12,7 +12,7 @@ describe('PredictionService & StudentId Masking', () => {
 
   beforeEach(async () => {
     prismaMock = {
-      user: {
+      memberAccount: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
       },
@@ -62,9 +62,10 @@ describe('PredictionService & StudentId Masking', () => {
 
   describe('submitPrediction', () => {
     it('should throw ForbiddenException if user has no studentId', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({
+      prismaMock.memberAccount.findUnique.mockResolvedValue({
         id: 'u1',
-        role: 'user',
+        verificationStatus: 'APPROVED',
+        disabled: false,
         studentId: null,
       });
 
@@ -73,10 +74,11 @@ describe('PredictionService & StudentId Masking', () => {
       );
     });
 
-    it('should throw ForbiddenException if user is an admin account', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({
+    it('should reject an unverified member', async () => {
+      prismaMock.memberAccount.findUnique.mockResolvedValue({
         id: 'admin1',
-        role: 'super_admin',
+        verificationStatus: 'PENDING',
+        disabled: false,
         studentId: '2023999999',
       });
 
@@ -86,9 +88,10 @@ describe('PredictionService & StudentId Masking', () => {
     });
 
     it('should throw BadRequestException if current time is past deadline (within 5 mins before match)', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({
+      prismaMock.memberAccount.findUnique.mockResolvedValue({
         id: 'u1',
-        role: 'user',
+        verificationStatus: 'APPROVED',
+        disabled: false,
         studentId: '2023123456',
       });
 
@@ -106,9 +109,10 @@ describe('PredictionService & StudentId Masking', () => {
     });
 
     it('should allow prediction before deadline and upsert choice', async () => {
-      prismaMock.user.findUnique.mockResolvedValue({
+      prismaMock.memberAccount.findUnique.mockResolvedValue({
         id: 'u1',
-        role: 'user',
+        verificationStatus: 'APPROVED',
+        disabled: false,
         studentId: '2023123456',
       });
 
@@ -271,7 +275,7 @@ describe('PredictionService & StudentId Masking', () => {
         id: 'active-season-1',
         name: 'Active Season',
       });
-      prismaMock.user.findMany.mockResolvedValue([]);
+      prismaMock.memberAccount.findMany.mockResolvedValue([]);
 
       const result = await service.getLeaderboard('season', '');
       expect(result).toEqual({ list: [], currentUser: null });
@@ -288,7 +292,7 @@ describe('PredictionService & StudentId Masking', () => {
 
     it('should handle tied rankings correctly and attach unranked currentUser', async () => {
       prismaMock.season.findUnique.mockResolvedValue({ id: 's1' });
-      prismaMock.user.findMany.mockResolvedValue([
+      prismaMock.memberAccount.findMany.mockResolvedValue([
         {
           id: 'u1',
           username: 'user1',

@@ -6,6 +6,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "cards:cleanup:worker": "node scripts/card-cleanup-worker.js",
+    "test:integration:members": "jest --runInBand --config jest.integration.config.js src/members/.*integration\\.spec\\.ts",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",

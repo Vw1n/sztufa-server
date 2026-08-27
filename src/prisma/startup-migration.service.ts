@@ -26,7 +26,12 @@ export class StartupMigrationService implements OnModuleInit {
       }
     }
 
-    if (process.env.NODE_ENV !== 'test' && process.env.DATABASE_URL && !process.env.VERCEL) {
+    if (
+      process.env.NODE_ENV !== 'test' &&
+      process.env.DATABASE_URL &&
+      !process.env.VERCEL &&
+      process.env.SKIP_STARTUP_MIGRATE !== 'true'
+    ) {
       console.log('[Startup Migration] 检查并自动应用数据库迁移...');
       try {
         execSync('npx prisma migrate deploy', { stdio: 'inherit' });

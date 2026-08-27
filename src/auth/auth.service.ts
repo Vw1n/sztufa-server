@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
-import * as bcrypt from 'bcryptjs';
+import { hashPassword, verifyPassword } from './password';
 import { CreateUserDto } from './dto/create-user.dto';
 import { StudentRegisterDto } from './dto/student-register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -21,58 +21,15 @@ export class AuthService {
     private readonly auditLogService: AuditLogService,
   ) {}
 
-  async registerStudent(dto: StudentRegisterDto) {
-    const username = dto.username.trim();
-    const studentId = dto.studentId.trim();
-    const nickname = dto.nickname?.trim() || username;
-
-    const existingUser = await this.prisma.user.findUnique({
-      where: { username },
-    });
-    if (existingUser) {
-      throw new ConflictException('用户名已被注册');
-    }
-
-    const existingStudentId = await this.prisma.user.findUnique({
-      where: { studentId },
-    });
-    if (existingStudentId) {
-      throw new ConflictException('该学号已被其他账号绑定，请联系管理员核验');
-    }
-
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
-
-    const user = await this.prisma.user.create({
-      data: {
-        username,
-        password: hashedPassword,
-        role: 'user',
-        studentId,
-        nickname,
-      },
-      select: {
-        id: true,
-        username: true,
-        studentId: true,
-        nickname: true,
-        role: true,
-        createdAt: true,
-      },
-    });
-
-    await this.auditLogService.log(
-      'system',
-      'STUDENT_REGISTER',
-      `普通用户自主注册: "${user.username}" (学号: ${user.studentId})`,
-    );
-
-    const token = this.jwtService.sign({ userId: user.id, role: user.role });
-    return { user, token };
+  async registerStudent(_dto: StudentRegisterDto) {
+    throw new BadRequestException('旧注册接口已关闭，请使用校园卡注册页面');
   }
 
   async register(createUserDto: CreateUserDto) {
     const { username, password, studentId, nickname } = createUserDto;
-    const role = createUserDto.role || 'user';
+    const role = createUserDto.role || 'match_scorer';
+    if (!['super_admin', 'coach', 'match_scorer', 'news_editor'].includes(role))
+      throw new BadRequestException('后台仅能创建工作人员账号');
     let teamId = createUserDto.teamId;
 
     const trimmedUsername = username?.trim();
@@ -107,7 +64,7 @@ export class AuthService {
       }
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await hashPassword(password);
 
     // P0-6: 校验球队绑定规则
     // 教练可以不绑定球队，管理员可以后续绑定
@@ -150,21 +107,28 @@ export class AuthService {
       `新建账号: "${user.username}" (角色: ${user.role}, 学号: ${user.studentId || '无'})`,
     );
 
-    const token = this.jwtService.sign({ userId: user.id, role: user.role });
-    return { user, token };
+    return { user };
   }
 
   async login(loginDto: LoginDto) {
     const { username, password } = loginDto;
-    const user = await this.prisma.user.findUnique({ where: { username } });
+    const user = await this.prisma.user.findUnique({ where: { username: username.trim() } });
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user || user.role === 'user' || !(await verifyPassword(password, user.password))) {
       throw new UnauthorizedException('用户名或密码错误');
     }
 
     await this.auditLogService.log(username, 'USER_LOGIN', `用户 "${username}" 成功登录系统`);
 
-    const token = this.jwtService.sign({ userId: user.id, role: user.role });
+    const token = this.jwtService.sign(
+      {
+        userId: user.id,
+        role: user.role,
+        accountType: 'staff',
+        sessionVersion: user.sessionVersion,
+      },
+      { audience: 'staff', algorithm: 'HS256' },
+    );
     return {
       user: {
         id: user.id,
@@ -179,6 +143,12 @@ export class AuthService {
   }
 
   async validateUser(payload: any) {
+    if (
+      payload.accountType !== 'staff' ||
+      payload.aud !== 'staff' ||
+      typeof payload.userId !== 'string'
+    )
+      return null;
     const user = await this.prisma.user.findUnique({
       where: { id: payload.userId },
       select: {
@@ -188,13 +158,17 @@ export class AuthService {
         nickname: true,
         role: true,
         teamId: true,
+        sessionVersion: true,
       },
     });
-    return user;
+    return user && user.role !== 'user' && user.sessionVersion === payload.sessionVersion
+      ? user
+      : null;
   }
 
   async getAllUsers() {
     return this.prisma.user.findMany({
+      where: { role: { in: ['super_admin', 'coach', 'match_scorer', 'news_editor'] } },
       select: {
         id: true,
         username: true,
@@ -277,103 +251,124 @@ export class AuthService {
     operatorUsername: string = 'admin',
     operatorId?: string,
   ) {
-    const userBefore = await this.prisma.user.findUnique({
-      where: { id },
-      include: { team: true },
-    });
-    if (!userBefore) {
-      throw new NotFoundException('该用户账号不存在');
-    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        if (!['super_admin', 'coach', 'match_scorer', 'news_editor'].includes(role))
+          throw new BadRequestException('不能将后台账号转换为普通用户');
+        const userBefore = await tx.user.findUnique({
+          where: { id },
+          include: { team: true },
+        });
+        if (!userBefore) {
+          throw new NotFoundException('该用户账号不存在');
+        }
 
-    // P0-5: 禁止当前用户降级自己
-    if (operatorId && id === operatorId && role !== 'super_admin') {
-      throw new BadRequestException('不能降级自己的账号，请联系其他超级管理员操作');
-    }
+        // P0-5: 禁止当前用户降级自己
+        if (operatorId && id === operatorId && role !== 'super_admin') {
+          throw new BadRequestException('不能降级自己的账号，请联系其他超级管理员操作');
+        }
 
-    // P0-5: 保护最后一个超级管理员
-    if (userBefore.role === 'super_admin' && role !== 'super_admin') {
-      const isLast = await this.isLastSuperAdmin(id);
-      if (isLast) {
-        throw new BadRequestException('不能降级最后一个超级管理员，否则系统将无法管理');
-      }
-    }
+        // P0-5: 保护最后一个超级管理员
+        if (userBefore.role === 'super_admin' && role !== 'super_admin') {
+          const isLast = (await tx.user.count({ where: { role: 'super_admin' } })) <= 1;
+          if (isLast) {
+            throw new BadRequestException('不能降级最后一个超级管理员，否则系统将无法管理');
+          }
+        }
 
-    // P0-6: 校验球队绑定规则
-    // 教练可以不绑定球队，管理员可以后续绑定
-    // 非教练角色自动清空 teamId
-    if (role !== 'coach' && teamId) {
-      teamId = null;
-    }
+        // P0-6: 校验球队绑定规则
+        // 教练可以不绑定球队，管理员可以后续绑定
+        // 非教练角色自动清空 teamId
+        if (role !== 'coach' && teamId) {
+          teamId = null;
+        }
 
-    // 校验球队是否存在（如果提供了 teamId）
-    if (teamId) {
-      const team = await this.prisma.team.findUnique({ where: { id: teamId } });
-      if (!team) {
-        throw new BadRequestException('绑定的球队不存在');
-      }
-    }
+        // 校验球队是否存在（如果提供了 teamId）
+        if (teamId) {
+          const team = await tx.team.findUnique({ where: { id: teamId } });
+          if (!team) {
+            throw new BadRequestException('绑定的球队不存在');
+          }
+        }
 
-    const updatedUser = await this.prisma.user.update({
-      where: { id },
-      data: {
-        role,
-        teamId: teamId || null,
+        const updatedUser = await tx.user.update({
+          where: { id },
+          data: {
+            role,
+            sessionVersion: { increment: 1 },
+            teamId: teamId || null,
+          },
+          select: {
+            id: true,
+            username: true,
+            role: true,
+            teamId: true,
+            team: true,
+          },
+        });
+
+        const diffs: string[] = [];
+        if (userBefore.role !== role) {
+          diffs.push(`角色: ${userBefore.role}->${role}`);
+        }
+        if (userBefore.teamId !== teamId) {
+          const oldTeamName = userBefore.team?.teamName || '无';
+          const newTeamName = updatedUser.team?.teamName || '无';
+          diffs.push(`绑定球队: ${oldTeamName}->${newTeamName}`);
+        }
+
+        const details =
+          diffs.length > 0
+            ? `修改用户 "${updatedUser.username}" 权限: ${diffs.join(', ')}`
+            : `保存用户 "${updatedUser.username}" 权限(未改动)`;
+
+        await tx.auditLog.create({
+          data: { username: operatorUsername, action: 'UPDATE_USER_ROLE', details },
+        });
+
+        return updatedUser;
       },
-      select: {
-        id: true,
-        username: true,
-        role: true,
-        teamId: true,
-        team: true,
-      },
-    });
-
-    const diffs: string[] = [];
-    if (userBefore.role !== role) {
-      diffs.push(`角色: ${userBefore.role}->${role}`);
-    }
-    if (userBefore.teamId !== teamId) {
-      const oldTeamName = userBefore.team?.teamName || '无';
-      const newTeamName = updatedUser.team?.teamName || '无';
-      diffs.push(`绑定球队: ${oldTeamName}->${newTeamName}`);
-    }
-
-    const details =
-      diffs.length > 0
-        ? `修改用户 "${updatedUser.username}" 权限: ${diffs.join(', ')}`
-        : `保存用户 "${updatedUser.username}" 权限(未改动)`;
-
-    await this.auditLogService.log(operatorUsername, 'UPDATE_USER_ROLE', details);
-
-    return updatedUser;
+      { isolationLevel: 'Serializable' },
+    );
   }
 
   async deleteUser(id: string, operatorUsername: string = 'admin', operatorId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) {
-      throw new NotFoundException('该用户账号不存在');
-    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        const user = await tx.user.findUnique({ where: { id } });
+        if (!user) {
+          throw new NotFoundException('该用户账号不存在');
+        }
 
-    // P0-5: 禁止当前用户删除自己
-    if (operatorId && id === operatorId) {
-      throw new BadRequestException('不能删除自己的账号，请联系其他超级管理员操作');
-    }
+        // P0-5: 禁止当前用户删除自己
+        if (operatorId && id === operatorId) {
+          throw new BadRequestException('不能删除自己的账号，请联系其他超级管理员操作');
+        }
 
-    // P0-5: 保护最后一个超级管理员
-    if (user.role === 'super_admin') {
-      const isLast = await this.isLastSuperAdmin(id);
-      if (isLast) {
-        throw new BadRequestException('不能删除最后一个超级管理员，否则系统将无法管理');
-      }
-    }
+        // P0-5: 保护最后一个超级管理员
+        if (user.role === 'super_admin') {
+          const isLast = (await tx.user.count({ where: { role: 'super_admin' } })) <= 1;
+          if (isLast) {
+            throw new BadRequestException('不能删除最后一个超级管理员，否则系统将无法管理');
+          }
+        }
 
-    const deletedUser = await this.prisma.user.delete({
-      where: { id },
-    });
+        const deletedUser = await tx.user.delete({
+          where: { id },
+        });
 
-    await this.auditLogService.log(operatorUsername, 'DELETE_USER', `删除账号: "${user.username}"`);
+        await tx.auditLog.create({
+          data: {
+            username: operatorUsername,
+            action: 'DELETE_USER',
+            details: `删除账号: ${user.id}`,
+          },
+        });
 
-    return deletedUser;
+        return { id: deletedUser.id, username: deletedUser.username };
+      },
+      { isolationLevel: 'Serializable' },
+    );
   }
 
   async resetPassword(id: string, newPassword: string, operatorUsername: string = 'admin') {
@@ -381,11 +376,11 @@ export class AuthService {
     if (!user) {
       throw new NotFoundException('该用户账号不存在');
     }
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await hashPassword(newPassword);
 
     const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: { password: hashedPassword },
+      data: { password: hashedPassword, sessionVersion: { increment: 1 } },
       select: {
         id: true,
         username: true,

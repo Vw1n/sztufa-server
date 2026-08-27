@@ -154,13 +154,13 @@ export class PredictionService {
   }
 
   async submitPrediction(userId: string, matchId: string, choice: PredictionChoice) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.memberAccount.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('用户不存在');
     }
 
-    if (user.role !== 'user') {
-      throw new ForbiddenException('管理账号不参与竞猜');
+    if (user.disabled || user.verificationStatus !== 'APPROVED') {
+      throw new ForbiddenException('校园卡审核通过后才能参与竞猜');
     }
 
     if (!user.studentId || !user.studentId.trim()) {
@@ -249,7 +249,7 @@ export class PredictionService {
   }
 
   async getMyStats(userId: string, seasonId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.memberAccount.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('用户不存在');
     }
@@ -329,11 +329,11 @@ export class PredictionService {
     }
 
     const userWhere: any = {
-      role: 'user',
+      disabled: false,
       studentId: { not: null },
     };
 
-    const regularUsers = await this.prisma.user.findMany({
+    const regularUsers = await this.prisma.memberAccount.findMany({
       where: userWhere,
       select: {
         id: true,

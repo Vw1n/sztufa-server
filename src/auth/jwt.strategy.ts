@@ -13,6 +13,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
+      audience: 'staff',
+      algorithms: ['HS256'],
       secretOrKey: configService.get<string>('JWT_SECRET', 'local-development-secret-change-me'),
     });
   }

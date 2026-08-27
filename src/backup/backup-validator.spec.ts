@@ -119,6 +119,8 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
 
   it('应该将包含重复复合唯一键（Prediction 重复 userId+matchId）的 V2 归类为 quarantine', () => {
     const v2 = buildValidV2();
+    v2.tables.MemberAccount = [{ id: 'u1', username: 'student' }];
+    v2.manifest.tables.MemberAccount = 1;
     v2.tables.Prediction = [
       { id: 'pr1', userId: 'u1', matchId: 'm1' },
       { id: 'pr2', userId: 'u1', matchId: 'm1' },

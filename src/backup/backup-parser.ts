@@ -664,15 +664,17 @@ export async function parseAndValidateBackupStream(
     }
 
     // 解析完成后的全局完整性断言
-    if (seenTableNames.size !== 17) {
+    if (seenTableNames.size !== MANDATORY_BACKUP_TABLES.length) {
       const missingTables = MANDATORY_BACKUP_TABLES.filter((t) => !seenTableNames.has(t));
       throw new BadRequestException(`备份数据流缺失必需表: ${missingTables.join(', ')}`);
     }
 
     if (manifest) {
       const manifestTableKeys = Object.keys(manifest.tables || {});
-      if (manifestTableKeys.length !== 17) {
-        throw new BadRequestException('Manifest.tables 必须精确包含 17 张表');
+      if (manifestTableKeys.length !== MANDATORY_BACKUP_TABLES.length) {
+        throw new BadRequestException(
+          `Manifest.tables 必须精确包含 ${MANDATORY_BACKUP_TABLES.length} 张表`,
+        );
       }
       for (const t of MANDATORY_BACKUP_TABLES) {
         if (

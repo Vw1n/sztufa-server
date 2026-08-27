@@ -25,8 +25,8 @@ export class CreateUserDto {
   @ApiProperty({ description: '角色', example: 'admin', required: false })
   @IsOptional()
   @IsString()
-  @IsEnum(['super_admin', 'coach', 'match_scorer', 'news_editor', 'user'], {
-    message: '角色必须是 super_admin, coach, match_scorer, news_editor 或 user',
+  @IsEnum(['super_admin', 'coach', 'match_scorer', 'news_editor'], {
+    message: '角色必须是 super_admin, coach, match_scorer, news_editor',
   })
   role?: string;
 

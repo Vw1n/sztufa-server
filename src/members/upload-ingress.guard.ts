@@ -18,8 +18,9 @@ export class UploadIngressGuard implements CanActivate {
 
     let isClosed = false;
     let releaseHeldSlot: (() => void) | null = null;
-    let receiveDeadline: NodeJS.Timeout | undefined;
-    const received = () => { if (receiveDeadline) clearTimeout(receiveDeadline); };
+    const received = () => {
+      if (receiveDeadline) clearTimeout(receiveDeadline);
+    };
 
     const closeHandler = () => {
       isClosed = true;
@@ -35,7 +36,7 @@ export class UploadIngressGuard implements CanActivate {
     req.once('error', closeHandler);
 
     // 绝对接收期限，不是可被持续滴流重置的 socket 空闲超时。
-    receiveDeadline = setTimeout(() => {
+    const receiveDeadline = setTimeout(() => {
       isClosed = true;
       req.destroy(new ServiceUnavailableException('文件上传接收超时'));
       closeHandler();
@@ -71,9 +72,7 @@ export class UploadIngressGuard implements CanActivate {
     } catch (err: any) {
       closeHandler();
       if (err?.status === 503 || err instanceof ServiceUnavailableException) {
-        throw new ServiceUnavailableException(
-          '上传服务连接繁忙或连接已中断，请稍后重试',
-        );
+        throw new ServiceUnavailableException('上传服务连接繁忙或连接已中断，请稍后重试');
       }
       throw err;
     }

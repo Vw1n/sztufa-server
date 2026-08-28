@@ -5,9 +5,14 @@ export const loginLimitPrefix = (path: string, key: string) =>
   `rolling:${createHash('sha256').update(`${path}:${key}`).digest('hex')}:`;
 
 /** PostgreSQL row lock serializes each key across processes; no schema change needed. */
-export async function consumeRollingLogin(prisma: PrismaService, path: string, key: string, limit: number) {
+export async function consumeRollingLogin(
+  prisma: PrismaService,
+  path: string,
+  key: string,
+  limit: number,
+) {
   const prefix = loginLimitPrefix(path, key);
-  return prisma.$transaction(async tx => {
+  return prisma.$transaction(async (tx) => {
     await tx.authRateLimit.upsert({
       where: { id: `${prefix}lock` },
       create: { id: `${prefix}lock`, count: 1, expiresAt: new Date(Date.now() + 1200_000) },
@@ -18,9 +23,13 @@ export async function consumeRollingLogin(prisma: PrismaService, path: string, k
     await tx.authRateLimit.deleteMany({ where: { ...events, expiresAt: { lte: now } } });
     const used = await tx.authRateLimit.count({ where: { ...events, expiresAt: { gt: now } } });
     if (used >= limit) return false;
-    await tx.authRateLimit.create({ data: {
-      id: `${prefix}event:${randomUUID()}`, count: 1, expiresAt: new Date(+now + 600_000),
-    } });
+    await tx.authRateLimit.create({
+      data: {
+        id: `${prefix}event:${randomUUID()}`,
+        count: 1,
+        expiresAt: new Date(+now + 600_000),
+      },
+    });
     return true;
   });
 }

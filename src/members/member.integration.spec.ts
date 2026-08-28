@@ -26,7 +26,9 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
 
   const store = {
     normalize: jest.fn().mockImplementation(async () => Buffer.from('webp-card-test')),
-    put: jest.fn().mockImplementation(async (key: string) => { trackedObjectKeys.add(key); }),
+    put: jest.fn().mockImplementation(async (key: string) => {
+      trackedObjectKeys.add(key);
+    }),
     read: jest.fn().mockResolvedValue(Buffer.from('webp-card-test')),
     remove: jest.fn().mockResolvedValue(undefined),
   } as unknown as CardStoreService;
@@ -79,26 +81,23 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
 
   afterEach(async () => {
     for (const memberId of Array.from(trackedMemberIds)) {
-        const assets = await prisma.campusCardAsset.findMany({
-          where: { memberId },
-          select: { id: true, objectKey: true },
-        });
-        for (const a of assets) {
-          trackedObjectKeys.add(a.objectKey);
-        }
+      const assets = await prisma.campusCardAsset.findMany({
+        where: { memberId },
+        select: { id: true, objectKey: true },
+      });
+      for (const a of assets) {
+        trackedObjectKeys.add(a.objectKey);
+      }
 
-        // 本套件存储为 mock；任何清理错误仍必须中止账本删除。
-        for (const a of assets) await store.remove(a.objectKey);
-        await prisma.campusCardAsset.deleteMany({ where: { memberId } });
-        await prisma.auditLog.deleteMany({
-          where: {
-            OR: [
-              { username: memberId },
-              { details: { contains: memberId } },
-            ],
-          },
-        });
-        await prisma.memberAccount.deleteMany({ where: { id: memberId } });
+      // 本套件存储为 mock；任何清理错误仍必须中止账本删除。
+      for (const a of assets) await store.remove(a.objectKey);
+      await prisma.campusCardAsset.deleteMany({ where: { memberId } });
+      await prisma.auditLog.deleteMany({
+        where: {
+          OR: [{ username: memberId }, { details: { contains: memberId } }],
+        },
+      });
+      await prisma.memberAccount.deleteMany({ where: { id: memberId } });
       trackedMemberIds.delete(memberId);
     }
     for (const key of trackedObjectKeys) {
@@ -127,8 +126,9 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
       clock.mockReturnValue(boundary + 1000);
       expect(await consumeRollingLogin(prisma as never, path, key, 10)).toBe(false);
       clock.mockReturnValue(boundary + 600_001);
-      const results = await Promise.all(Array.from({ length: 12 }, () =>
-        consumeRollingLogin(prisma as never, path, key, 10)));
+      const results = await Promise.all(
+        Array.from({ length: 12 }, () => consumeRollingLogin(prisma as never, path, key, 10)),
+      );
       expect(results.filter(Boolean)).toHaveLength(10);
     } finally {
       clock.mockRestore();
@@ -138,11 +138,16 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
 
   it('25 个未决清理任务再次到期时，仍优先处理尚未尝试的正常材料', async () => {
     const keys = Array.from({ length: 26 }, (_, i) => `campus-cards/fair-${Date.now()}-${i}.webp`);
-    keys.forEach(key => trackedObjectKeys.add(key));
-    await prisma.campusCardAsset.createMany({ data: keys.map((objectKey, i) => ({
-      objectKey, state: 'DELETE_PENDING', uploadSettled: i === 25,
-      deleteAfter: new Date(1000 + i), nextAttemptAt: new Date(1000 + i),
-    })) });
+    keys.forEach((key) => trackedObjectKeys.add(key));
+    await prisma.campusCardAsset.createMany({
+      data: keys.map((objectKey, i) => ({
+        objectKey,
+        state: 'DELETE_PENDING',
+        uploadSettled: i === 25,
+        deleteAfter: new Date(1000 + i),
+        nextAttemptAt: new Date(1000 + i),
+      })),
+    });
     expect((await service.cleanup()).deleted).toBe(0);
     // Make retries due again without waiting, as with a scheduler slower than retry delay.
     await prisma.campusCardAsset.updateMany({
@@ -150,8 +155,14 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
       data: { nextAttemptAt: new Date(Date.now() - 1000) },
     });
     expect((await service.cleanup()).deleted).toBe(1);
-    expect((await prisma.campusCardAsset.findUniqueOrThrow({ where: { objectKey: keys[25] } })).state).toBe('DELETED');
-    expect(await prisma.campusCardAsset.count({ where: { objectKey: { in: keys.slice(0, 25) }, state: 'DELETED' } })).toBe(0);
+    expect(
+      (await prisma.campusCardAsset.findUniqueOrThrow({ where: { objectKey: keys[25] } })).state,
+    ).toBe('DELETED');
+    expect(
+      await prisma.campusCardAsset.count({
+        where: { objectKey: { in: keys.slice(0, 25) }, state: 'DELETED' },
+      }),
+    ).toBe(0);
   });
 
   it('同一申请版本并发审核：两并发请求仅恰好 1 个获胜，另 1 个被拒绝，数据库保持一致', async () => {
@@ -163,9 +174,7 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
     ]);
 
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
-    const rejected = results.filter(
-      (r): r is PromiseRejectedResult => r.status === 'rejected',
-    );
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
 
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
@@ -233,33 +242,52 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
       // 在真实事务完成 count 后设置屏障，确保不是偶然串行执行。
       let arrived = 0;
       let release!: () => void;
-      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       const transaction = prisma.$transaction.bind(prisma);
       const spy = jest.spyOn(prisma, '$transaction').mockImplementation(((fn: any, options: any) =>
-        transaction(async (tx: any) => fn(new Proxy(tx, {
-          get(target, prop) {
-            if (prop !== 'campusCardAsset') return target[prop];
-            return new Proxy(target.campusCardAsset, {
-              get(delegate, method) {
-                if (method === 'count') return async (args: any) => {
-                  const count = await delegate.count(args);
-                  if (++arrived <= 2) { if (arrived === 2) release(); await barrier; }
-                  return count;
-                };
-                if (method === 'create') return async (args: any) => {
-                  trackedObjectKeys.add(args.data.objectKey);
-                  return delegate.create(args);
-                };
-                return delegate[method];
-              },
-            });
-          },
-        })), { ...options, timeout: 15000 })) as any);
+        transaction(
+          async (tx: any) =>
+            fn(
+              new Proxy(tx, {
+                get(target, prop) {
+                  if (prop !== 'campusCardAsset') return target[prop];
+                  return new Proxy(target.campusCardAsset, {
+                    get(delegate, method) {
+                      if (method === 'count')
+                        return async (args: any) => {
+                          const count = await delegate.count(args);
+                          if (++arrived <= 2) {
+                            if (arrived === 2) release();
+                            await barrier;
+                          }
+                          return count;
+                        };
+                      if (method === 'create')
+                        return async (args: any) => {
+                          trackedObjectKeys.add(args.data.objectKey);
+                          return delegate.create(args);
+                        };
+                      return delegate[method];
+                    },
+                  });
+                },
+              }),
+            ),
+          { ...options, timeout: 15000 },
+        )) as any);
       let results: PromiseSettledResult<any>[];
       try {
-        results = await Promise.allSettled(Array.from({ length: 2 }, () =>
-          (service as any).stage({ buffer: Buffer.from('fake-png') })));
-      } finally { release(); spy.mockRestore(); }
+        results = await Promise.allSettled(
+          Array.from({ length: 2 }, () =>
+            (service as any).stage({ buffer: Buffer.from('fake-png') }),
+          ),
+        );
+      } finally {
+        release();
+        spy.mockRestore();
+      }
 
       const fulfilled = results.filter((r) => r.status === 'fulfilled');
       const rejected = results.filter((r) => r.status === 'rejected');
@@ -288,20 +316,32 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
   it('真实 stage/cleanup 竞争：在途 PUT 的 404 不释放容量，确认写入完成后才可删除', async () => {
     let finish!: () => void;
     let started!: (key: string) => void;
-    const pending = new Promise<void>((resolve) => { finish = resolve; });
-    const writing = new Promise<string>((resolve) => { started = resolve; });
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const writing = new Promise<string>((resolve) => {
+      started = resolve;
+    });
     let exists = false;
     (store.put as jest.Mock).mockImplementationOnce(async (key: string) => {
-      trackedObjectKeys.add(key); started(key); await pending; exists = true;
+      trackedObjectKeys.add(key);
+      started(key);
+      await pending;
+      exists = true;
     });
-    const remove = jest.spyOn(store, 'remove').mockImplementation(async () => { exists = false; });
+    const remove = jest.spyOn(store, 'remove').mockImplementation(async () => {
+      exists = false;
+    });
     const upload = (service as any).stage({ buffer: Buffer.from('fake-png') });
     try {
       const key = await writing;
       const asset = await prisma.campusCardAsset.findUniqueOrThrow({ where: { objectKey: key } });
-      await prisma.campusCardAsset.update({ where: { id: asset.id }, data: {
-        leaseUntil: new Date(Date.now() - 1000),
-      } });
+      await prisma.campusCardAsset.update({
+        where: { id: asset.id },
+        data: {
+          leaseUntil: new Date(Date.now() - 1000),
+        },
+      });
       await service.cleanup();
       const uncertain = await prisma.campusCardAsset.findUniqueOrThrow({ where: { id: asset.id } });
       expect(uncertain.state).toBe('DELETE_PENDING');
@@ -310,10 +350,19 @@ describe('MemberService PostgreSQL 事务与并发集成测试', () => {
       finish();
       await expect(upload).rejects.toBeInstanceOf(ServiceUnavailableException);
       expect(exists).toBe(true);
-      await prisma.campusCardAsset.update({ where: { id: asset.id }, data: { nextAttemptAt: new Date(0) } });
+      await prisma.campusCardAsset.update({
+        where: { id: asset.id },
+        data: { nextAttemptAt: new Date(0) },
+      });
       await service.cleanup();
       expect(exists).toBe(false);
-      expect((await prisma.campusCardAsset.findUniqueOrThrow({ where: { id: asset.id } })).state).toBe('DELETED');
-    } finally { finish(); await upload.catch(() => undefined); remove.mockRestore(); }
+      expect(
+        (await prisma.campusCardAsset.findUniqueOrThrow({ where: { id: asset.id } })).state,
+      ).toBe('DELETED');
+    } finally {
+      finish();
+      await upload.catch(() => undefined);
+      remove.mockRestore();
+    }
   });
 });

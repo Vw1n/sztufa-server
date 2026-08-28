@@ -2,8 +2,12 @@ import { redactLog } from './redacting-logger';
 
 describe('日志脱敏', () => {
   it('隐藏结构化密码、Token、连接串与完整学号', () => {
-    const output = redactLog({ password: 'test secret', token: 'abc-secret', studentId: '2026123456',
-      error: 'postgresql://user:pass@localhost:5432/test' });
+    const output = redactLog({
+      password: 'test secret',
+      token: 'abc-secret',
+      studentId: '2026123456',
+      error: 'postgresql://user:pass@localhost:5432/test',
+    });
     for (const secret of ['test secret', 'abc-secret', '2026123456', 'user:pass']) {
       expect(output).not.toContain(secret);
     }

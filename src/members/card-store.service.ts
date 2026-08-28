@@ -43,9 +43,11 @@ export class CardStoreService {
     }
     return sharpLimiter.run(async () => {
       try {
-        const input = sharp(file.buffer, { limitInputPixels: 20_000_000, animated: false }).timeout({
-          seconds: 10,
-        });
+        const input = sharp(file.buffer, { limitInputPixels: 20_000_000, animated: false }).timeout(
+          {
+            seconds: 10,
+          },
+        );
         const metadata = await input.metadata();
         if (!['jpeg', 'png', 'webp'].includes(metadata.format || '') || (metadata.pages || 1) > 1)
           throw new Error('format');

@@ -14,13 +14,21 @@ describe('UploadIngressGuard', () => {
     jest.useFakeTimers();
     const req = Object.assign(new EventEmitter(), { destroyed: false, destroy: jest.fn() });
     const res = Object.assign(new EventEmitter(), { writableEnded: false });
-    const ctx = { switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }) } as ExecutionContext;
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
+    } as ExecutionContext;
     try {
       await guard.canActivate(ctx);
-      for (let i = 0; i < 15; i++) { req.emit('data', Buffer.from('x')); await jest.advanceTimersByTimeAsync(1000); }
+      for (let i = 0; i < 15; i++) {
+        req.emit('data', Buffer.from('x'));
+        await jest.advanceTimersByTimeAsync(1000);
+      }
       expect(req.destroy).toHaveBeenCalledTimes(1);
       expect(uploadIngressLimiter.stats.running).toBe(0);
-    } finally { res.emit('close'); jest.useRealTimers(); }
+    } finally {
+      res.emit('close');
+      jest.useRealTimers();
+    }
   });
 
   it('正常上传流程：完成请求后应正确释放并发槽位', async () => {

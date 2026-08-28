@@ -47,8 +47,12 @@ export function assertSafeTestEnvironment(params: {
   const storageUrl = new URL(storageEndpoint);
   if (
     !['127.0.0.1', 'localhost', '[::1]'].includes(storageUrl.hostname) ||
-    storageUrl.port !== '9000' || storageUrl.protocol !== 'http:' ||
-    storageUrl.username || storageUrl.password || storageUrl.search || storageUrl.hash ||
+    storageUrl.port !== '9000' ||
+    storageUrl.protocol !== 'http:' ||
+    storageUrl.username ||
+    storageUrl.password ||
+    storageUrl.search ||
+    storageUrl.hash ||
     storageUrl.pathname !== '/'
   ) {
     throw new Error(

@@ -100,43 +100,41 @@ export class MemberService {
     const MAX_UNRELEASED_ASSETS = 500;
     const objectKey = `campus-cards/${randomUUID()}.webp`;
 
-    const asset = await reserveCardCapacity(() => this.prisma.$transaction(
-      async (tx) => {
-        const unreleasedCount = await tx.campusCardAsset.count({
-          where: {
-            state: { not: 'DELETED' },
-          },
-        });
+    const asset = await reserveCardCapacity(() =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const unreleasedCount = await tx.campusCardAsset.count({
+            where: {
+              state: { not: 'DELETED' },
+            },
+          });
 
-        if (unreleasedCount >= MAX_UNRELEASED_ASSETS) {
-          throw new ServiceUnavailableException(
-            '系统材料暂存容量已满，正在执行自动清理，请稍后再试',
-          );
-        }
+          if (unreleasedCount >= MAX_UNRELEASED_ASSETS) {
+            throw new ServiceUnavailableException(
+              '系统材料暂存容量已满，正在执行自动清理，请稍后再试',
+            );
+          }
 
-        return tx.campusCardAsset.create({
-          data: {
-            objectKey,
-            state: 'STAGING',
-            uploadSettled: false,
-            deleteAfter: new Date(Date.now() + 86400_000),
-            leaseUntil: new Date(Date.now() + 60_000),
-          },
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    ));
+          return tx.campusCardAsset.create({
+            data: {
+              objectKey,
+              state: 'STAGING',
+              uploadSettled: false,
+              deleteAfter: new Date(Date.now() + 86400_000),
+              leaseUntil: new Date(Date.now() + 60_000),
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
+    );
 
     let writeStarted = false;
     try {
       // 3. 检查租约是否仍然有效
-      const createdAtMs = asset?.createdAt
-        ? new Date(asset.createdAt).getTime()
-        : Date.now();
+      const createdAtMs = asset?.createdAt ? new Date(asset.createdAt).getTime() : Date.now();
       if (Date.now() > createdAtMs + 60_000) {
-        throw new ServiceUnavailableException(
-          '上传处理超时，预占额度已过期，请重新提交',
-        );
+        throw new ServiceUnavailableException('上传处理超时，预占额度已过期，请重新提交');
       }
 
       // 4. 写入 S3 存储
@@ -163,9 +161,7 @@ export class MemberService {
       });
 
       if (confirmed.count !== 1) {
-        throw new ServiceUnavailableException(
-          '上传处理超时，预占租约已失效，请重新提交',
-        );
+        throw new ServiceUnavailableException('上传处理超时，预占租约已失效，请重新提交');
       }
 
       return asset;
@@ -184,7 +180,9 @@ export class MemberService {
               ...(!writeStarted ? { uploadSettled: true } : {}),
             },
           })
-          .catch(() => this.logger.error(`校园卡上传失败状态持久化失败，保留暂存账本：${asset.id}`));
+          .catch(() =>
+            this.logger.error(`校园卡上传失败状态持久化失败，保留暂存账本：${asset.id}`),
+          );
       }
       throw err;
     }
@@ -492,8 +490,12 @@ export class MemberService {
       const idsToDelete = [
         createHash('sha256').update(`${paths[0]}:${currentSlot}:${key}`).digest('hex'),
         createHash('sha256').update(`${paths[1]}:${currentSlot}:${key}`).digest('hex'),
-        createHash('sha256').update(`${paths[0]}:${currentSlot - 1}:${key}`).digest('hex'),
-        createHash('sha256').update(`${paths[1]}:${currentSlot - 1}:${key}`).digest('hex'),
+        createHash('sha256')
+          .update(`${paths[0]}:${currentSlot - 1}:${key}`)
+          .digest('hex'),
+        createHash('sha256')
+          .update(`${paths[1]}:${currentSlot - 1}:${key}`)
+          .digest('hex'),
       ];
 
       await tx.authRateLimit.deleteMany({

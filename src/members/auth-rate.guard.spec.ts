@@ -145,7 +145,12 @@ describe('认证限流算法（内存持久层替身）与真实密码重置服�
       auditLog: { create: jest.fn() },
       $transaction: async (fn: any) => fn(servicePrisma),
     });
-    const service = new MemberService(servicePrisma as never, {} as never, {} as never, {} as never);
+    const service = new MemberService(
+      servicePrisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
     await service.resetPassword('victim', 'ReplacementPass!2026', 'admin', '192.0.2.1');
     expect(limits.has(accountHash)).toBe(false);
 
@@ -162,9 +167,7 @@ describe('认证限流算法（内存持久层替身）与真实密码重置服�
     await expect(guard.canActivate(legitCtx as never)).resolves.toBe(true);
 
     // 来源攻击 IP 桶依然存在且持续累加计次
-    const ipHash = createHash('sha256')
-      .update(`${path}:${slot}:ip:${attackerIp}`)
-      .digest('hex');
+    const ipHash = createHash('sha256').update(`${path}:${slot}:ip:${attackerIp}`).digest('hex');
     expect(limits.has(ipHash)).toBe(true);
     expect(limits.get(ipHash)?.count).toBeGreaterThanOrEqual(10);
   });

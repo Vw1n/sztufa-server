@@ -172,22 +172,31 @@ describe('校园卡审核和持久化清理', () => {
   });
   it('25 条未决记录重试后让出名额，不饿死后面的正常删除', async () => {
     const rows = Array.from({ length: 26 }, (_, i) => ({
-      id: `queue-${i}`, objectKey: `queue-${i}`, state: 'DELETE_PENDING',
-      uploadSettled: i === 25, memberId: null,
-      deleteAfter: new Date(i), nextAttemptAt: new Date(i), leaseUntil: null,
+      id: `queue-${i}`,
+      objectKey: `queue-${i}`,
+      state: 'DELETE_PENDING',
+      uploadSettled: i === 25,
+      memberId: null,
+      deleteAfter: new Date(i),
+      nextAttemptAt: new Date(i),
+      leaseUntil: null,
     }));
     prisma.campusCardAsset.findMany.mockImplementation(async ({ orderBy, take }: any) => {
       expect(orderBy).toEqual([{ nextAttemptAt: 'asc' }, { deleteAfter: 'asc' }, { id: 'asc' }]);
-      return rows.filter(r => r.state !== 'DELETED')
-        .sort((a, b) => +a.nextAttemptAt - +b.nextAttemptAt).slice(0, take).map(r => ({ ...r }));
+      return rows
+        .filter((r) => r.state !== 'DELETED')
+        .sort((a, b) => +a.nextAttemptAt - +b.nextAttemptAt)
+        .slice(0, take)
+        .map((r) => ({ ...r }));
     });
     prisma.campusCardAsset.update.mockImplementation(async ({ where, data }: any) =>
-      Object.assign(rows.find(r => r.id === where.id)!, data));
+      Object.assign(rows.find((r) => r.id === where.id)!, data),
+    );
     expect((await service.cleanup()).deleted).toBe(0);
     // Even when the unresolved items become due again, the untouched row is older.
     expect((await service.cleanup()).deleted).toBe(1);
-    expect(rows.find(r => r.id === 'queue-25')?.state).toBe('DELETED');
-    expect(rows.filter(r => r.state !== 'DELETED')).toHaveLength(25);
+    expect(rows.find((r) => r.id === 'queue-25')?.state).toBe('DELETED');
+    expect(rows.filter((r) => r.state !== 'DELETED')).toHaveLength(25);
   });
   it('没有校园卡不能创建账号', async () => {
     prisma.memberAccount.findUnique.mockResolvedValue(null);
@@ -249,7 +258,10 @@ describe('校园卡审核和持久化清理', () => {
 
     // 正常补交
     prisma.memberAccount.findUniqueOrThrow.mockResolvedValue({ ...member });
-    prisma.campusCardAsset.create.mockResolvedValue({ id: 'a2', objectKey: 'campus-cards/a2.webp' });
+    prisma.campusCardAsset.create.mockResolvedValue({
+      id: 'a2',
+      objectKey: 'campus-cards/a2.webp',
+    });
     prisma.memberAccount.updateMany.mockResolvedValue({ count: 1 });
     prisma.campusCardAsset.updateMany.mockResolvedValue({ count: 1 });
     prisma.campusCardAsset.update.mockResolvedValue({ id: 'a2' });
@@ -374,28 +386,55 @@ describe('校园卡审核和持久化清理', () => {
     let objectExists = false;
     let finishUpload!: () => void;
     let uploadStarted!: () => void;
-    const started = new Promise<void>((resolve) => { uploadStarted = resolve; });
-    const held = new Promise<void>((resolve) => { finishUpload = resolve; });
-    const apply = (data: any) => Object.assign(row, data, {
-      attempts: typeof data.attempts === 'object' ? row.attempts + data.attempts.increment : row.attempts,
+    const started = new Promise<void>((resolve) => {
+      uploadStarted = resolve;
     });
+    const held = new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    });
+    const apply = (data: any) =>
+      Object.assign(row, data, {
+        attempts:
+          typeof data.attempts === 'object' ? row.attempts + data.attempts.increment : row.attempts,
+      });
     prisma.campusCardAsset.create.mockImplementation(async ({ data }: any) => {
-      row = { id: 'slow', memberId: null, attempts: 0, deletedAt: null, ...data, createdAt: new Date() };
+      row = {
+        id: 'slow',
+        memberId: null,
+        attempts: 0,
+        deletedAt: null,
+        ...data,
+        createdAt: new Date(),
+      };
       return { ...row };
     });
     prisma.campusCardAsset.updateMany.mockImplementation(async ({ where, data }: any) => {
       if (typeof where.state === 'string' && row.state !== where.state) return { count: 0 };
-      if (where.leaseUntil?.gte && (!row.leaseUntil || row.leaseUntil < where.leaseUntil.gte)) return { count: 0 };
+      if (where.leaseUntil?.gte && (!row.leaseUntil || row.leaseUntil < where.leaseUntil.gte))
+        return { count: 0 };
       if (where.OR && row.leaseUntil && row.leaseUntil >= new Date()) return { count: 0 };
       apply(data);
       return { count: 1 };
     });
-    prisma.campusCardAsset.update.mockImplementation(async ({ data }: any) => { apply(data); return row; });
+    prisma.campusCardAsset.update.mockImplementation(async ({ data }: any) => {
+      apply(data);
+      return row;
+    });
     prisma.campusCardAsset.findMany.mockImplementation(async () =>
-      row.state !== 'DELETED' && row.deleteAfter <= new Date() &&
-      (!row.leaseUntil || row.leaseUntil < new Date()) ? [{ ...row }] : []);
-    store.put.mockImplementation(async () => { uploadStarted(); await held; objectExists = true; });
-    store.remove.mockImplementation(async () => { objectExists = false; });
+      row.state !== 'DELETED' &&
+      row.deleteAfter <= new Date() &&
+      (!row.leaseUntil || row.leaseUntil < new Date())
+        ? [{ ...row }]
+        : [],
+    );
+    store.put.mockImplementation(async () => {
+      uploadStarted();
+      await held;
+      objectExists = true;
+    });
+    store.remove.mockImplementation(async () => {
+      objectExists = false;
+    });
     try {
       const upload = (service as any).stage({ buffer: Buffer.from('image') });
       await started;
@@ -413,18 +452,27 @@ describe('校园卡审核和持久化清理', () => {
       await service.cleanup();
       expect(row.state).toBe('DELETED');
       expect(objectExists).toBe(false);
-    } finally { finishUpload(); jest.useRealTimers(); }
+    } finally {
+      finishUpload();
+      jest.useRealTimers();
+    }
   });
 
   it('PUT 结果不明时保留未决标记，不能直接补偿后释放容量', async () => {
     store.put.mockRejectedValue(new Error('network outcome unknown'));
-    await expect((service as any).stage({ buffer: Buffer.from('image') })).rejects.toThrow('network outcome unknown');
-    expect(prisma.campusCardAsset.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ uploadSettled: false }),
-    }));
-    expect(prisma.campusCardAsset.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ uploadSettled: true }),
-    }));
+    await expect((service as any).stage({ buffer: Buffer.from('image') })).rejects.toThrow(
+      'network outcome unknown',
+    );
+    expect(prisma.campusCardAsset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ uploadSettled: false }),
+      }),
+    );
+    expect(prisma.campusCardAsset.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ uploadSettled: true }),
+      }),
+    );
     expect(store.remove).not.toHaveBeenCalled();
   });
 });

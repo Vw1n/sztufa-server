@@ -7,19 +7,13 @@ import { CardStoreService } from './card-store.service';
 import { createHash } from 'crypto';
 import { loginLimitPrefix } from '../common/rolling-login-limit';
 import { trustedProxyConfig } from '../common/trusted-proxy';
-import {
-  S3Client,
-  HeadObjectCommand,
-  DeleteObjectCommand,
-} from '@aws-sdk/client-s3';
+import { S3Client, HeadObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 
 import { assertSafeTestEnvironment } from '../common/test-env-whitelist';
 
 const databaseUrl = process.env.DATABASE_URL || '';
-const storageEndpoint =
-  process.env.CARD_R2_ENDPOINT || '';
-const bucketName =
-  process.env.CARD_R2_BUCKET_NAME || '';
+const storageEndpoint = process.env.CARD_R2_ENDPOINT || '';
+const bucketName = process.env.CARD_R2_BUCKET_NAME || '';
 
 assertSafeTestEnvironment({
   databaseUrl,
@@ -74,9 +68,15 @@ describe('Member HTTP Integration (真实会话生命周期与权限契约链)',
 
     app = moduleFixture.createNestApplication();
     // 仅信任测试进程的回环连接，真实经过 Express 解析转发头。
-    app.getHttpAdapter().getInstance().set('trust proxy', trustedProxyConfig({
-      TRUST_PROXY: '127.0.0.1/32,::1/128',
-    }));
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .set(
+        'trust proxy',
+        trustedProxyConfig({
+          TRUST_PROXY: '127.0.0.1/32,::1/128',
+        }),
+      );
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -165,15 +165,14 @@ describe('Member HTTP Integration (真实会话生命周期与权限契约链)',
       }
 
       // 3. 只有在 S3 物理删除 100% 确认后，方可删除数据库记录
-      await prisma.campusCardAsset.deleteMany({ where: { objectKey: { in: [...trackedObjectKeys] } } });
+      await prisma.campusCardAsset.deleteMany({
+        where: { objectKey: { in: [...trackedObjectKeys] } },
+      });
       if (memberId) {
         await prisma.campusCardAsset.deleteMany({ where: { memberId } });
         await prisma.auditLog.deleteMany({
           where: {
-            OR: [
-              { username: memberId },
-              { details: { contains: memberId } },
-            ],
+            OR: [{ username: memberId }, { details: { contains: memberId } }],
           },
         });
         await prisma.memberAccount.deleteMany({ where: { id: memberId } });
@@ -364,37 +363,67 @@ describe('Member HTTP Integration (真实会话生命周期与权限契约链)',
     const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.now());
     const slot = Math.floor(Date.now() / 600_000);
     const attackerIp = '192.0.2.81';
-    const idFor = (key: string) => createHash('sha256')
-      .update(`/api/v1/member-auth/login:${slot}:${key}`).digest('hex');
+    const idFor = (key: string) =>
+      createHash('sha256').update(`/api/v1/member-auth/login:${slot}:${key}`).digest('hex');
     const accountId = idFor(`account:${username}`);
     const ipId = idFor(`ip:${attackerIp}`);
     const prefixFor = (key: string) => loginLimitPrefix('/api/v1/member-auth/login', key);
-    const rollingWhere = { OR: [`account:${username}`, `ip:${attackerIp}`, 'ip:192.0.2.82']
-      .map(key => ({ id: { startsWith: prefixFor(key) } })) };
+    const rollingWhere = {
+      OR: [`account:${username}`, `ip:${attackerIp}`, 'ip:192.0.2.82'].map((key) => ({
+        id: { startsWith: prefixFor(key) },
+      })),
+    };
     try {
       await prisma.authRateLimit.deleteMany({ where: { id: { in: [accountId, ipId] } } });
       await prisma.authRateLimit.deleteMany({ where: rollingWhere });
       for (let i = 0; i < 10; i++) {
-        await request(app.getHttpServer()).post('/api/v1/member-auth/login')
-          .set('X-Forwarded-For', attackerIp).send({ username, password: 'wrong-password' }).expect(401);
+        await request(app.getHttpServer())
+          .post('/api/v1/member-auth/login')
+          .set('X-Forwarded-For', attackerIp)
+          .send({ username, password: 'wrong-password' })
+          .expect(401);
       }
-      await request(app.getHttpServer()).post('/api/v1/member-auth/login')
-        .set('X-Forwarded-For', attackerIp).send({ username, password: newPassword }).expect(429);
+      await request(app.getHttpServer())
+        .post('/api/v1/member-auth/login')
+        .set('X-Forwarded-For', attackerIp)
+        .send({ username, password: newPassword })
+        .expect(429);
       await prisma.authRateLimit.update({ where: { id: ipId }, data: { count: 100 } });
-      await request(app.getHttpServer()).patch(`/api/v1/admin/members/${memberId}/reset-password`)
-        .set('Authorization', `Bearer ${adminToken}`).send({ password: newPassword }).expect(200);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/members/${memberId}/reset-password`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ password: newPassword })
+        .expect(200);
       expect(await prisma.authRateLimit.findUnique({ where: { id: accountId } })).toBeNull();
-      expect(await prisma.authRateLimit.count({ where: { id: { startsWith: `${prefixFor(`account:${username}`)}event:` } } })).toBe(0);
-      expect(await prisma.authRateLimit.count({ where: { id: { startsWith: prefixFor(`ip:${attackerIp}`) } } })).toBeGreaterThan(0);
-      expect((await prisma.authRateLimit.findUniqueOrThrow({ where: { id: ipId } })).count).toBe(100);
-      await request(app.getHttpServer()).post('/api/v1/member-auth/login')
-        .set('X-Forwarded-For', attackerIp).send({ username, password: newPassword }).expect(429);
-      await request(app.getHttpServer()).post('/api/v1/member-auth/login')
-        .set('X-Forwarded-For', '192.0.2.82').send({ username, password: newPassword }).expect(201);
+      expect(
+        await prisma.authRateLimit.count({
+          where: { id: { startsWith: `${prefixFor(`account:${username}`)}event:` } },
+        }),
+      ).toBe(0);
+      expect(
+        await prisma.authRateLimit.count({
+          where: { id: { startsWith: prefixFor(`ip:${attackerIp}`) } },
+        }),
+      ).toBeGreaterThan(0);
+      expect((await prisma.authRateLimit.findUniqueOrThrow({ where: { id: ipId } })).count).toBe(
+        100,
+      );
+      await request(app.getHttpServer())
+        .post('/api/v1/member-auth/login')
+        .set('X-Forwarded-For', attackerIp)
+        .send({ username, password: newPassword })
+        .expect(429);
+      await request(app.getHttpServer())
+        .post('/api/v1/member-auth/login')
+        .set('X-Forwarded-For', '192.0.2.82')
+        .send({ username, password: newPassword })
+        .expect(201);
     } finally {
       clock.mockRestore();
       await prisma.authRateLimit.deleteMany({ where: rollingWhere });
-      await prisma.authRateLimit.deleteMany({ where: { id: { in: [accountId, ipId, idFor('ip:192.0.2.82')] } } });
+      await prisma.authRateLimit.deleteMany({
+        where: { id: { in: [accountId, ipId, idFor('ip:192.0.2.82')] } },
+      });
     }
   });
 });

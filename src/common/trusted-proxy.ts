@@ -13,8 +13,14 @@ export function trustedProxyConfig(env: NodeJS.ProcessEnv = process.env): false 
   for (const value of entries) {
     const [ip, prefix, extra] = value.split('/');
     const version = isIP(ip);
-    if (!version || extra !== undefined || (prefix !== undefined &&
-      (!/^\d+$/.test(prefix) || Number(prefix) < 1 || Number(prefix) > (version === 4 ? 32 : 128)))) {
+    if (
+      !version ||
+      extra !== undefined ||
+      (prefix !== undefined &&
+        (!/^\d+$/.test(prefix) ||
+          Number(prefix) < 1 ||
+          Number(prefix) > (version === 4 ? 32 : 128)))
+    ) {
       throw new Error('TRUST_PROXY 只能包含受控代理 IP/CIDR；禁止宽泛命名网段与 /0');
     }
   }

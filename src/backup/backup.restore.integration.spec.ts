@@ -182,6 +182,14 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
     const user1 = await prisma.user.create({
       data: { id: 'u1', username: 'admin', password: 'hashed_pwd_123', role: 'super_admin' },
     });
+    const member1 = await prisma.memberAccount.create({
+      data: {
+        id: 'member1',
+        username: 'member_fixture',
+        password: 'hashed_member_pwd',
+        verificationStatus: 'APPROVED',
+      },
+    });
     await prisma.user.create({
       data: { id: 'u2', username: 'coach1', password: 'hashed_pwd_456', role: 'coach' },
     });
@@ -240,7 +248,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
     await prisma.prediction.create({
       data: {
         id: 'pred1',
-        userId: user1.id,
+        userId: member1.id,
         matchId: match1.id,
         choice: 'HOME_WIN',
         status: 'PENDING',
@@ -457,27 +465,45 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       await testPrisma.auditLog.updateMany({ data: { details: '被篡改的日志' } });
       await testPrisma.user.update({ where: { id: 'u1' }, data: { username: 'corrupted_user_1' } });
       await testPrisma.user.update({ where: { id: 'u2' }, data: { username: 'corrupted_user_2' } });
+      await testPrisma.memberAccount.update({
+        where: { id: 'member1' },
+        data: { username: 'corrupted_member' },
+      });
 
       const corruptedSnapshot = await compute17TableSnapshot(testPrisma);
       expect(corruptedSnapshot.hash).not.toBe(preExportSnapshot.hash);
 
       // 5. 执行 restoreBackup 恢复
-      const restoreResult = await service.restoreBackup('admin', backupInfo.key, 'CONFIRM_RESTORE');
+      const restoreEpoch = Math.floor(Date.now() / 1000);
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(restoreEpoch * 1000);
+      let restoreResult: string;
+      try {
+        restoreResult = await service.restoreBackup('admin', backupInfo.key, 'CONFIRM_RESTORE');
+      } finally {
+        clock.mockRestore();
+      }
       expect(restoreResult).toBe('数据库还原成功');
 
       // 6. 测量恢复后全库 17 表规范化快照并做 100% 深度相等断言
       const postRestoreSnapshot = await compute17TableSnapshot(testPrisma);
 
       expect(postRestoreSnapshot.counts).toEqual(preExportSnapshot.counts);
-      expect(postRestoreSnapshot.hash).toBe(preExportSnapshot.hash);
-      expect(postRestoreSnapshot.snapshot).toEqual(preExportSnapshot.snapshot);
+      // 恢复必须撤销旧会话：仅 sessionVersion 按明确规则变化，其余字段仍深度相等。
+      const expectedSnapshot = JSON.parse(JSON.stringify(preExportSnapshot.snapshot));
+      for (const table of ['User', 'MemberAccount']) {
+        for (const row of expectedSnapshot[table]) row.sessionVersion = restoreEpoch;
+      }
+      expect(postRestoreSnapshot.snapshot).toEqual(expectedSnapshot);
+      expect(postRestoreSnapshot.hash).toBe(
+        crypto.createHash('sha256').update(JSON.stringify(expectedSnapshot)).digest('hex'),
+      );
 
       // 7. 关键外键关系单独校验
       const restoredMatch = await testPrisma.match.findUnique({ where: { id: 'm1' } });
       expect(restoredMatch?.mvpPlayerId).toBe('p1');
 
       const restoredPred = await testPrisma.prediction.findUnique({ where: { id: 'pred1' } });
-      expect(restoredPred?.userId).toBe('u1');
+      expect(restoredPred?.userId).toBe('member1');
       expect(restoredPred?.matchId).toBe('m1');
 
       const restoredLineup = await testPrisma.matchLineup.findUnique({ where: { id: 'ml1' } });

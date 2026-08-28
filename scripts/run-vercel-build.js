@@ -1,6 +1,20 @@
 const { spawnSync } = require('node:child_process');
 
 const environment = { ...process.env };
+// 临时只读诊断：仅开发预览输出主机名，不连接数据库或输出凭证。
+if (
+  environment.VERCEL_ENV === 'preview' &&
+  environment.VERCEL_GIT_COMMIT_REF === 'develop'
+) {
+  for (const key of ['DATABASE_URL', 'DIRECT_URL']) {
+    try {
+      const hostname = new URL(environment[key]).hostname;
+      console.log(`[开发库主机核对] ${key}: ${hostname}`);
+    } catch {
+      console.log(`[开发库主机核对] ${key}: 未配置或格式无效`);
+    }
+  }
+}
 const isDatabaseLessPreview =
   environment.VERCEL_ENV === 'preview' &&
   !environment.DIRECT_URL &&

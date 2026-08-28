@@ -38,10 +38,16 @@ describe('StartupMigrationService', () => {
 
   it('非 test 环境下当 prisma migrate deploy 失败时应抛出错误并终止初始化', async () => {
     const originalEnv = process.env.NODE_ENV;
+    const originalDbUrl = process.env.DATABASE_URL;
+    const originalSkip = process.env.SKIP_STARTUP_MIGRATE;
+    const originalVercel = process.env.VERCEL;
+
     process.env.NODE_ENV = 'production';
+    process.env.DATABASE_URL = 'postgresql://test-migrate/db';
+    delete process.env.SKIP_STARTUP_MIGRATE;
     delete process.env.VERCEL;
 
-    (execSync as jest.Mock).mockImplementation(() => {
+    (execSync as unknown as jest.Mock).mockImplementation(() => {
       throw new Error('Migration database error');
     });
 
@@ -53,7 +59,17 @@ describe('StartupMigrationService', () => {
       await expect(service.onModuleInit()).rejects.toThrow('Migration database error');
       expect(runSpy).not.toHaveBeenCalled();
     } finally {
-      process.env.NODE_ENV = originalEnv;
+      if (originalEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalEnv;
+
+      if (originalDbUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = originalDbUrl;
+
+      if (originalSkip === undefined) delete process.env.SKIP_STARTUP_MIGRATE;
+      else process.env.SKIP_STARTUP_MIGRATE = originalSkip;
+
+      if (originalVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = originalVercel;
     }
   });
 

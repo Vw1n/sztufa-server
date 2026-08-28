@@ -1,5 +1,6 @@
 export const MANDATORY_BACKUP_TABLES = [
   'User',
+  'MemberAccount',
   'Team',
   'Player',
   'Season',
@@ -36,6 +37,12 @@ export const TABLE_METADATA_MAP: Record<MandatoryBackupTableName, TableMeta> = {
     cursorField: 'id',
     dateFields: ['createdAt', 'updatedAt'],
     foreignKeys: [{ field: 'teamId', targetTable: 'Team' }],
+  },
+  MemberAccount: {
+    tableName: 'MemberAccount',
+    prismaDelegateName: 'memberAccount',
+    cursorField: 'id',
+    dateFields: ['createdAt', 'updatedAt', 'reviewedAt'],
   },
   Team: {
     tableName: 'Team',
@@ -78,7 +85,7 @@ export const TABLE_METADATA_MAP: Record<MandatoryBackupTableName, TableMeta> = {
     dateFields: ['submittedAt', 'settledAt', 'createdAt', 'updatedAt'],
     compositeUniqueKeys: [['userId', 'matchId']],
     foreignKeys: [
-      { field: 'userId', targetTable: 'User' },
+      { field: 'userId', targetTable: 'MemberAccount' },
       { field: 'matchId', targetTable: 'Match' },
     ],
   },
@@ -206,6 +213,7 @@ export const RESTORE_DELETE_ORDER: MandatoryBackupTableName[] = [
   'Match',
   'Team',
   'User',
+  'MemberAccount',
   'Season',
   'News',
   'AuditLog',
@@ -215,6 +223,7 @@ export const RESTORE_DELETE_ORDER: MandatoryBackupTableName[] = [
 
 export const RESTORE_INSERT_ORDER: MandatoryBackupTableName[] = [
   'User',
+  'MemberAccount',
   'Season',
   'Team',
   'Player',

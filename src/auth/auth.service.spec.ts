@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { BadRequestException } from '@nestjs/common';
+import { hashPassword } from './password';
+import * as bcrypt from 'bcryptjs';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -46,10 +48,49 @@ describe('AuthService', () => {
 
     service = module.get<AuthService>(AuthService);
     prismaService = module.get<PrismaService>(PrismaService);
+    (prismaService as any).auditLog = { create: jest.fn() };
+    (prismaService as any).$transaction = jest.fn(async (fn) => fn(prismaService));
   });
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('新口令不截断 72 字节之后的内容，登录令牌仅用于后台', async () => {
+    const password = `${'campus-long-pass-'.repeat(5)}A`;
+    (prismaService.user.findUnique as jest.Mock).mockResolvedValue({
+      id: 'staff-1',
+      username: 'admin',
+      role: 'super_admin',
+      sessionVersion: 0,
+      password: await hashPassword(password),
+    });
+    await expect(service.login({ username: 'admin', password })).resolves.toHaveProperty('token');
+    await expect(
+      service.login({ username: 'admin', password: `${password.slice(0, -1)}B` }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect((service as any).jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({ accountType: 'staff', sessionVersion: 0 }),
+      expect.objectContaining({ audience: 'staff' }),
+    );
+  });
+
+  it('旧 bcrypt 口令仍可登录，旧普通用户不能使用后台认证', async () => {
+    const user = {
+      id: 'legacy-1',
+      username: 'legacy',
+      role: 'coach',
+      sessionVersion: 0,
+      password: await bcrypt.hash('legacy-short', 4),
+    };
+    (prismaService.user.findUnique as jest.Mock).mockResolvedValue(user);
+    await expect(
+      service.login({ username: 'legacy', password: 'legacy-short' }),
+    ).resolves.toHaveProperty('token');
+    (prismaService.user.findUnique as jest.Mock).mockResolvedValue({ ...user, role: 'user' });
+    await expect(
+      service.login({ username: 'legacy', password: 'legacy-short' }),
+    ).rejects.toMatchObject({ status: 401 });
   });
 
   describe('getCurrentUser (via validateUser)', () => {
@@ -57,6 +98,7 @@ describe('AuthService', () => {
       const mockUser = {
         id: '1',
         username: 'admin',
+        sessionVersion: 0,
         studentId: null,
         nickname: 'admin',
         role: 'super_admin',
@@ -64,7 +106,12 @@ describe('AuthService', () => {
       };
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
-      const result = await service.validateUser({ userId: '1' });
+      const result = await service.validateUser({
+        userId: '1',
+        accountType: 'staff',
+        aud: 'staff',
+        sessionVersion: 0,
+      });
       expect(result).toEqual(mockUser);
       expect(prismaService.user.findUnique).toHaveBeenCalledWith({
         where: { id: '1' },
@@ -75,6 +122,7 @@ describe('AuthService', () => {
           nickname: true,
           role: true,
           teamId: true,
+          sessionVersion: true,
         },
       });
     });
@@ -82,36 +130,37 @@ describe('AuthService', () => {
     it('should return null when user not found', async () => {
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
 
-      const result = await service.validateUser({ userId: '999' });
+      const result = await service.validateUser({
+        userId: '999',
+        accountType: 'staff',
+        aud: 'staff',
+        sessionVersion: 0,
+      });
       expect(result).toBeNull();
     });
   });
 
-  describe('registerStudent', () => {
-    it('should create student user successfully', async () => {
-      const mockUser = {
-        id: 's1',
-        username: 'student1',
-        studentId: '2023001122',
-        nickname: '学生一号',
-        role: 'user',
-        createdAt: new Date(),
-      };
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
-      (prismaService.user.create as jest.Mock).mockResolvedValue(mockUser);
-
-      const result = await service.registerStudent({
-        username: 'student1',
-        studentId: '2023001122',
-        password: 'password123',
-        nickname: '学生一号',
-      });
-
-      expect(result.user.studentId).toBe('2023001122');
-      expect(result.token).toBe('test-token');
-    });
+  it('旧注册入口不可绕过校园卡审核', async () => {
+    await expect(
+      service.registerStudent({
+        username: 'student',
+        password: 'Long-campus-pass!2026',
+        studentId: '20260001',
+      }),
+    ).rejects.toThrow('旧注册接口已关闭');
+    expect(prismaService.user.create).not.toHaveBeenCalled();
   });
-
+  it('后台不可创建普通用户', async () => {
+    await expect(
+      service.register({ username: 'student', password: 'Long-campus-pass!2026', role: 'user' }),
+    ).rejects.toThrow('后台仅能创建工作人员');
+  });
+  it('拒绝旧令牌及普通用户受众', async () => {
+    expect(await service.validateUser({ userId: '1' })).toBeNull();
+    expect(
+      await service.validateUser({ userId: '1', accountType: 'member', aud: 'member' }),
+    ).toBeNull();
+  });
   describe('createUser (register)', () => {
     it('should create user with valid data', async () => {
       const mockUser = {
@@ -119,7 +168,7 @@ describe('AuthService', () => {
         username: 'newuser',
         studentId: '2023123456',
         nickname: 'newuser',
-        role: 'user',
+        role: 'match_scorer',
         teamId: null,
         createdAt: new Date(),
       };
@@ -128,12 +177,12 @@ describe('AuthService', () => {
       const result = await service.register({
         username: 'newuser',
         studentId: '2023123456',
-        password: 'password123',
-        role: 'user',
+        password: 'Long-campus-pass!2026',
+        role: 'match_scorer',
       });
 
       expect(result.user).toBeDefined();
-      expect(result.token).toBe('test-token');
+      expect(result).not.toHaveProperty('token');
       expect(prismaService.user.create).toHaveBeenCalled();
     });
 
@@ -143,7 +192,7 @@ describe('AuthService', () => {
       await expect(
         service.register({
           username: 'coach',
-          password: 'password123',
+          password: 'Long-campus-pass!2026',
           role: 'coach',
           teamId: 'invalid-team',
         }),
@@ -155,7 +204,7 @@ describe('AuthService', () => {
         id: '1',
         username: 'user',
         studentId: '2023123456',
-        role: 'user',
+        role: 'match_scorer',
         teamId: null,
         createdAt: new Date(),
       };
@@ -164,8 +213,8 @@ describe('AuthService', () => {
       await service.register({
         username: 'user',
         studentId: '2023123456',
-        password: 'password123',
-        role: 'user',
+        password: 'Long-campus-pass!2026',
+        role: 'match_scorer',
         teamId: 'some-team',
       });
 
@@ -188,7 +237,7 @@ describe('AuthService', () => {
     });
 
     it('should allow deleting other users', async () => {
-      const mockUser = { id: '2', username: 'other', role: 'user' };
+      const mockUser = { id: '2', username: 'other', role: 'match_scorer' };
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prismaService.user.delete as jest.Mock).mockResolvedValue(mockUser);
 
@@ -224,7 +273,7 @@ describe('AuthService', () => {
       const mockUser = { id: '1', username: 'admin', role: 'super_admin', team: null };
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
 
-      await expect(service.updateUserRole('1', 'user', null, 'admin', '1')).rejects.toThrow(
+      await expect(service.updateUserRole('1', 'match_scorer', null, 'admin', '1')).rejects.toThrow(
         '不能降级自己的账号',
       );
     });
@@ -246,9 +295,9 @@ describe('AuthService', () => {
       (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prismaService.user.count as jest.Mock).mockResolvedValue(1);
 
-      await expect(service.updateUserRole('1', 'user', null, 'other-admin', '2')).rejects.toThrow(
-        '不能降级最后一个超级管理员',
-      );
+      await expect(
+        service.updateUserRole('1', 'match_scorer', null, 'other-admin', '2'),
+      ).rejects.toThrow('不能降级最后一个超级管理员');
     });
   });
 });

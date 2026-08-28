@@ -1,10 +1,10 @@
+import { MemberAuthGuard, OptionalMemberAuthGuard } from '../members/member-auth.guard';
 import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { PredictionService } from './prediction.service';
 import { SubmitPredictionDto } from './dto/submit-prediction.dto';
 import { PredictionListQueryDto } from './dto/prediction-list-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
@@ -13,7 +13,7 @@ import { Roles } from '../auth/roles.decorator';
 export class PredictionController {
   constructor(private readonly predictionService: PredictionService) {}
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(OptionalMemberAuthGuard)
   @Get('matches')
   @ApiOperation({ summary: '获取可竞猜比赛列表' })
   @ApiQuery({ name: 'seasonId', required: false })
@@ -29,7 +29,7 @@ export class PredictionController {
     );
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(OptionalMemberAuthGuard)
   @Get('matches/:matchId')
   @ApiOperation({ summary: '获取单场竞猜详情' })
   async getMatchDetail(@Param('matchId') matchId: string, @Req() req: any) {
@@ -38,7 +38,7 @@ export class PredictionController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(MemberAuthGuard)
   @Put('matches/:matchId')
   @ApiOperation({ summary: '提交或修改竞猜选项' })
   async submitPrediction(
@@ -51,7 +51,7 @@ export class PredictionController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(MemberAuthGuard)
   @Get('me')
   @ApiOperation({ summary: '获取个人竞猜记录' })
   @ApiQuery({ name: 'seasonId', required: false })
@@ -63,7 +63,7 @@ export class PredictionController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(MemberAuthGuard)
   @Get('me/stats')
   @ApiOperation({ summary: '获取个人竞猜统计' })
   @ApiQuery({ name: 'seasonId', required: false })
@@ -72,7 +72,7 @@ export class PredictionController {
     return this.predictionService.getMyStats(userId, seasonId);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(OptionalMemberAuthGuard)
   @Get('leaderboard')
   @ApiOperation({ summary: '获取竞猜排行榜' })
   @ApiQuery({ name: 'scope', required: false, description: 'season | all' })

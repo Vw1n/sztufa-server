@@ -13,13 +13,15 @@ const isSafeLocalDatabase = Boolean(
 const describeWithLocalPostgres = isSafeLocalDatabase ? describe : describe.skip;
 
 describeWithLocalPostgres('RegistrationService PostgreSQL integration', () => {
-  const prisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
+  let prisma: PrismaClient;
+  let service: RegistrationService;
+  let auditLogService: AuditLogService;
+  beforeAll(() => {
+    prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    auditLogService = new AuditLogService(prisma as never);
+    const teamRosterService = new TeamRosterService(prisma as never);
+    service = new RegistrationService(prisma as never, auditLogService, teamRosterService);
   });
-
-  const auditLogService = new AuditLogService(prisma as never);
-  const teamRosterService = new TeamRosterService(prisma as never);
-  const service = new RegistrationService(prisma as never, auditLogService, teamRosterService);
 
   const cleanupFixtures: Array<{
     seasonId: string;

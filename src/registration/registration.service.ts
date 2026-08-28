@@ -334,9 +334,8 @@ export class RegistrationService {
               registrationId: id,
               // 报名名单是独立快照。来源球员已删除、已换队或 ID 无效时，
               // 仅解除来源关联，保留教练填写的报名资料。
-              playerId: p.playerId && validPlayerIds.has(p.playerId.trim())
-                ? p.playerId.trim()
-                : null,
+              playerId:
+                p.playerId && validPlayerIds.has(p.playerId.trim()) ? p.playerId.trim() : null,
               name: (p.name || '').trim(),
               studentId: (p.studentId || '').trim(),
               jerseyNumber: (p.jerseyNumber || '').trim(),
@@ -552,192 +551,197 @@ export class RegistrationService {
       throw new ForbiddenException('仅超级管理员可审批通过报名');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // 1. 原子化条件更新：状态必须为 SUBMITTED
-      const updateResult = await tx.teamRegistration.updateMany({
-        where: {
-          id,
-          status: RegistrationStatus.SUBMITTED,
-        },
-        data: {
-          status: RegistrationStatus.APPROVED,
-          reviewComment: reviewDto.reviewComment?.trim() || null,
-          reviewedAt: new Date(),
-          reviewedById: userCtx.id,
-        },
-      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        // 1. 原子化条件更新：状态必须为 SUBMITTED
+        const updateResult = await tx.teamRegistration.updateMany({
+          where: {
+            id,
+            status: RegistrationStatus.SUBMITTED,
+          },
+          data: {
+            status: RegistrationStatus.APPROVED,
+            reviewComment: reviewDto.reviewComment?.trim() || null,
+            reviewedAt: new Date(),
+            reviewedById: userCtx.id,
+          },
+        });
 
-      if (updateResult.count !== 1) {
-        throw new ConflictException('报名记录不存在或当前状态非待审核 (已被其他管理员审批或撤回)');
-      }
+        if (updateResult.count !== 1) {
+          throw new ConflictException(
+            '报名记录不存在或当前状态非待审核 (已被其他管理员审批或撤回)',
+          );
+        }
 
-      // 2. 读取完整的报名数据
-      const registration = await tx.teamRegistration.findUnique({
-        where: { id },
-        include: {
-          teamData: true,
-          players: true,
-        },
-      });
+        // 2. 读取完整的报名数据
+        const registration = await tx.teamRegistration.findUnique({
+          where: { id },
+          include: {
+            teamData: true,
+            players: true,
+          },
+        });
 
-      if (!registration || !registration.teamData) {
-        throw new NotFoundException('报名或球队资料不存在');
-      }
+        if (!registration || !registration.teamData) {
+          throw new NotFoundException('报名或球队资料不存在');
+        }
 
-      const { seasonId, teamId, teamData, players } = registration;
+        const { seasonId, teamId, teamData, players } = registration;
 
-      // 3. 物化 SeasonTeamProfile 记录
-      await tx.seasonTeamProfile.upsert({
-        where: { seasonId_teamId: { seasonId, teamId } },
-        create: {
-          seasonId,
-          teamId,
-          teamName: teamData.teamName,
-          teamDoctor: teamData.teamDoctor,
-          headCoach: teamData.headCoach,
-          teamLeader: teamData.teamLeader,
-          coachPhone: teamData.coachPhone,
-          leaderPhone: teamData.leaderPhone,
-          homeJerseyColor: teamData.homeJerseyColor,
-          awayJerseyColor: teamData.awayJerseyColor,
-          teamLogo: teamData.teamLogo,
-          homeJersey: teamData.homeJersey,
-          awayJersey: teamData.awayJersey,
-          gender: teamData.gender,
-          isRegistered: true,
-        },
-        update: {
-          teamName: teamData.teamName,
-          teamDoctor: teamData.teamDoctor,
-          headCoach: teamData.headCoach,
-          teamLeader: teamData.teamLeader,
-          coachPhone: teamData.coachPhone,
-          leaderPhone: teamData.leaderPhone,
-          homeJerseyColor: teamData.homeJerseyColor,
-          awayJerseyColor: teamData.awayJerseyColor,
-          teamLogo: teamData.teamLogo,
-          homeJersey: teamData.homeJersey,
-          awayJersey: teamData.awayJersey,
-          gender: teamData.gender,
-          isRegistered: true,
-        },
-      });
+        // 3. 物化 SeasonTeamProfile 记录
+        await tx.seasonTeamProfile.upsert({
+          where: { seasonId_teamId: { seasonId, teamId } },
+          create: {
+            seasonId,
+            teamId,
+            teamName: teamData.teamName,
+            teamDoctor: teamData.teamDoctor,
+            headCoach: teamData.headCoach,
+            teamLeader: teamData.teamLeader,
+            coachPhone: teamData.coachPhone,
+            leaderPhone: teamData.leaderPhone,
+            homeJerseyColor: teamData.homeJerseyColor,
+            awayJerseyColor: teamData.awayJerseyColor,
+            teamLogo: teamData.teamLogo,
+            homeJersey: teamData.homeJersey,
+            awayJersey: teamData.awayJersey,
+            gender: teamData.gender,
+            isRegistered: true,
+          },
+          update: {
+            teamName: teamData.teamName,
+            teamDoctor: teamData.teamDoctor,
+            headCoach: teamData.headCoach,
+            teamLeader: teamData.teamLeader,
+            coachPhone: teamData.coachPhone,
+            leaderPhone: teamData.leaderPhone,
+            homeJerseyColor: teamData.homeJerseyColor,
+            awayJerseyColor: teamData.awayJerseyColor,
+            teamLogo: teamData.teamLogo,
+            homeJersey: teamData.homeJersey,
+            awayJersey: teamData.awayJersey,
+            gender: teamData.gender,
+            isRegistered: true,
+          },
+        });
 
-      // 4. 解析与匹配 Player，物化 SeasonTeamPlayer
-      const materializedRoster: Array<{
-        id: string;
-        name: string;
-        studentId: string;
-        jerseyNumber: string;
-        photo: string | null;
-      }> = [];
+        // 4. 解析与匹配 Player，物化 SeasonTeamPlayer
+        const materializedRoster: Array<{
+          id: string;
+          name: string;
+          studentId: string;
+          jerseyNumber: string;
+          photo: string | null;
+        }> = [];
 
-      for (const regPlayer of players) {
-        let resolvedPlayerId: string | null = null;
+        for (const regPlayer of players) {
+          let resolvedPlayerId: string | null = null;
 
-        // 步骤 4a: 如果提供了 playerId，验证其合法性（必须属于该球队且未删除）
-        if (regPlayer.playerId) {
-          const existingPlayer = await tx.player.findFirst({
-            where: {
-              id: regPlayer.playerId,
-              teamId,
-              deletedAt: null,
-            },
-          });
-          if (existingPlayer) {
-            resolvedPlayerId = existingPlayer.id;
-            // 更新球员基本资料
-            await tx.player.update({
-              where: { id: resolvedPlayerId },
+          // 步骤 4a: 如果提供了 playerId，验证其合法性（必须属于该球队且未删除）
+          if (regPlayer.playerId) {
+            const existingPlayer = await tx.player.findFirst({
+              where: {
+                id: regPlayer.playerId,
+                teamId,
+                deletedAt: null,
+              },
+            });
+            if (existingPlayer) {
+              resolvedPlayerId = existingPlayer.id;
+              // 更新球员基本资料
+              await tx.player.update({
+                where: { id: resolvedPlayerId },
+                data: {
+                  name: regPlayer.name,
+                  studentId: regPlayer.studentId,
+                  jerseyNumber: regPlayer.jerseyNumber,
+                  photo: regPlayer.photo,
+                },
+              });
+            }
+          }
+
+          // 步骤 4b: 如果未通过 playerId 解析成功，按 (teamId + studentId + deletedAt: null) 精准匹配
+          if (!resolvedPlayerId) {
+            const existingByStudentId = await tx.player.findFirst({
+              where: {
+                teamId,
+                studentId: regPlayer.studentId,
+                deletedAt: null,
+              },
+            });
+
+            if (existingByStudentId) {
+              resolvedPlayerId = existingByStudentId.id;
+              await tx.player.update({
+                where: { id: resolvedPlayerId },
+                data: {
+                  name: regPlayer.name,
+                  jerseyNumber: regPlayer.jerseyNumber,
+                  photo: regPlayer.photo,
+                },
+              });
+            }
+          }
+
+          // 步骤 4c: 仍未找到则新建正式 Player 记录
+          if (!resolvedPlayerId) {
+            const newPlayer = await tx.player.create({
               data: {
+                teamId,
                 name: regPlayer.name,
                 studentId: regPlayer.studentId,
                 jerseyNumber: regPlayer.jerseyNumber,
                 photo: regPlayer.photo,
               },
             });
+            resolvedPlayerId = newPlayer.id;
           }
-        }
 
-        // 步骤 4b: 如果未通过 playerId 解析成功，按 (teamId + studentId + deletedAt: null) 精准匹配
-        if (!resolvedPlayerId) {
-          const existingByStudentId = await tx.player.findFirst({
-            where: {
-              teamId,
-              studentId: regPlayer.studentId,
-              deletedAt: null,
-            },
+          materializedRoster.push({
+            id: resolvedPlayerId,
+            name: regPlayer.name,
+            studentId: regPlayer.studentId,
+            jerseyNumber: regPlayer.jerseyNumber,
+            photo: regPlayer.photo,
           });
-
-          if (existingByStudentId) {
-            resolvedPlayerId = existingByStudentId.id;
-            await tx.player.update({
-              where: { id: resolvedPlayerId },
-              data: {
-                name: regPlayer.name,
-                jerseyNumber: regPlayer.jerseyNumber,
-                photo: regPlayer.photo,
-              },
-            });
-          }
         }
 
-        // 步骤 4c: 仍未找到则新建正式 Player 记录
-        if (!resolvedPlayerId) {
-          const newPlayer = await tx.player.create({
-            data: {
-              teamId,
-              name: regPlayer.name,
-              studentId: regPlayer.studentId,
-              jerseyNumber: regPlayer.jerseyNumber,
-              photo: regPlayer.photo,
-            },
-          });
-          resolvedPlayerId = newPlayer.id;
-        }
-
-        materializedRoster.push({
-          id: resolvedPlayerId,
-          name: regPlayer.name,
-          studentId: regPlayer.studentId,
-          jerseyNumber: regPlayer.jerseyNumber,
-          photo: regPlayer.photo,
+        // 5. 替换 SeasonTeamPlayer 关联
+        await tx.seasonTeamPlayer.deleteMany({
+          where: { seasonId, teamId },
         });
-      }
 
-      // 5. 替换 SeasonTeamPlayer 关联
-      await tx.seasonTeamPlayer.deleteMany({
-        where: { seasonId, teamId },
-      });
+        for (const playerItem of materializedRoster) {
+          await this.teamRosterService.registerPlayer(tx, seasonId, teamId, playerItem);
+        }
 
-      for (const playerItem of materializedRoster) {
-        await this.teamRosterService.registerPlayer(tx, seasonId, teamId, playerItem);
-      }
+        // 6. 审计日志
+        await tx.auditLog.create({
+          data: {
+            username: userCtx.username,
+            action: 'REGISTRATION_APPROVE',
+            details: `通过球队 "${teamData.teamName}" 的赛季报名申请 (包含球员 ${materializedRoster.length} 名)`,
+          },
+        });
 
-      // 6. 审计日志
-      await tx.auditLog.create({
-        data: {
-          username: userCtx.username,
-          action: 'REGISTRATION_APPROVE',
-          details: `通过球队 "${teamData.teamName}" 的赛季报名申请 (包含球员 ${materializedRoster.length} 名)`,
-        },
-      });
-
-      return tx.teamRegistration.findUnique({
-        where: { id },
-        include: {
-          teamData: true,
-          players: { orderBy: { createdAt: 'asc' } },
-          season: { select: { id: true, name: true, status: true } },
-          team: { select: { id: true, teamName: true, gender: true } },
-          reviewedBy: { select: { id: true, username: true, nickname: true } },
-        },
-      });
-    }, {
-      // 审核会原子化物化球队资料、正式球员及赛季名单，跨区数据库
-      // 往返次数较多，不能沿用 Prisma 交互事务默认的 5 秒超时。
-      maxWait: 10_000,
-      timeout: 30_000,
-    });
+        return tx.teamRegistration.findUnique({
+          where: { id },
+          include: {
+            teamData: true,
+            players: { orderBy: { createdAt: 'asc' } },
+            season: { select: { id: true, name: true, status: true } },
+            team: { select: { id: true, teamName: true, gender: true } },
+            reviewedBy: { select: { id: true, username: true, nickname: true } },
+          },
+        });
+      },
+      {
+        // 审核会原子化物化球队资料、正式球员及赛季名单，跨区数据库
+        // 往返次数较多，不能沿用 Prisma 交互事务默认的 5 秒超时。
+        maxWait: 10_000,
+        timeout: 30_000,
+      },
+    );
   }
 }

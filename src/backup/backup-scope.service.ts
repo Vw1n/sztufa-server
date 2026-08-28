@@ -42,11 +42,7 @@ export function getSeasonTableWhereClause(
   };
 
   const userPredicate = {
-    OR: [
-      { predictions: { some: { match: { seasonId } } } },
-      { seasonDeletionApprovals: { some: { seasonId } } },
-      { team: { is: teamPredicate } },
-    ],
+    OR: [{ seasonDeletionApprovals: { some: { seasonId } } }, { team: { is: teamPredicate } }],
   };
 
   switch (tableName) {
@@ -67,6 +63,8 @@ export function getSeasonTableWhereClause(
       return teamPredicate;
     case 'Player':
       return playerPredicate;
+    case 'MemberAccount':
+      return { predictions: { some: { match: { seasonId } } } };
     case 'User':
       return userPredicate;
     case 'HistoryImportBatch':

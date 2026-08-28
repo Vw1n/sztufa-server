@@ -90,6 +90,11 @@ export class BackupRestoreService {
             throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
           }
 
+          // 账本保留；恢复后所有尚存材料进入清理，已删除材料永不复活。
+          await tx.campusCardAsset.updateMany({
+            where: { state: { not: 'DELETED' } },
+            data: { state: 'DELETE_PENDING', deleteAfter: new Date(), nextAttemptAt: new Date() },
+          });
           await tx.match.updateMany({ data: { mvpPlayerId: null } });
           await tx.player.updateMany({ data: { suspendedAtMatchId: null } });
           await tx.user.updateMany({ data: { teamId: null } });
@@ -111,6 +116,12 @@ export class BackupRestoreService {
                 if (tableName === 'Player') cleaned.suspendedAtMatchId = null;
                 if (tableName === 'Match') cleaned.mvpPlayerId = null;
                 if (tableName === 'User') cleaned.teamId = null;
+                if (tableName === 'User' || tableName === 'MemberAccount')
+                  cleaned.sessionVersion = Math.floor(Date.now() / 1000);
+                if (tableName === 'MemberAccount' && cleaned.verificationStatus === 'PENDING') {
+                  cleaned.verificationStatus = 'CHANGES_REQUESTED';
+                  cleaned.reviewComment = '系统恢复后请重新提交校园卡';
+                }
 
                 for (const df of meta.dateFields) {
                   if (cleaned[df] !== undefined && cleaned[df] !== null) {

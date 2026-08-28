@@ -6,6 +6,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "cards:cleanup:worker": "node scripts/card-cleanup-worker.js",
+    "test:integration:members": "jest --runInBand --config jest.integration.config.js src/members/.*integration\\.spec\\.ts",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
@@ -14,7 +16,7 @@
     "test": "jest",
     "winner-ids:audit": "ts-node scripts/fix-match-winner-team-ids.ts --dry-run",
     "winner-ids:apply": "ts-node scripts/fix-match-winner-team-ids.ts --apply",
-    "test:integration:backup": "jest --runInBand --config jest.integration.config.js",
+    "test:integration:backup": "jest --runInBand --config jest.integration.config.js --runTestsByPath src/backup/backup.restore.integration.spec.ts",
     "test:integration:registration": "jest --runInBand --config jest.integration.config.js registration/registration.integration.spec.ts",
     "test:backup-memory": "jest --runInBand --testPathIgnorePatterns=\"^$\" src/backup/backup-memory.spec.ts",
     "test:watch": "jest --watch",

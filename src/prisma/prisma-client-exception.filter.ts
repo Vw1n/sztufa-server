@@ -16,6 +16,12 @@ export class PrismaClientExceptionFilter implements ExceptionFilter {
     );
 
     switch (exception.code) {
+      case 'P2034': {
+        response
+          .status(HttpStatus.CONFLICT)
+          .json({ message: '记录已被其他操作更新，请刷新后重试' });
+        break;
+      }
       case 'P2002': {
         const status = HttpStatus.CONFLICT;
         const targets = (exception.meta?.target as string[]) || [];

@@ -138,8 +138,8 @@ model Prediction {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user  MemberAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match Match         @relation(fields: [matchId], references: [id], onDelete: Cascade)
 
   @@unique([userId, matchId])
   @@index([matchId, choice])
@@ -225,11 +225,11 @@ model User {
   studentId               String?                  @unique
   nickname                String?
   password                String
-  role                    String                   @default("user")
+  role                    String                   @default("match_scorer")
+  sessionVersion          Int                      @default(0)
   teamId                  String?
   team                    Team?                    @relation(fields: [teamId], references: [id])
   seasonDeletionApprovals SeasonDeletionApproval[]
-  predictions             Prediction[]
   submittedRegistrations  TeamRegistration[]       @relation("RegistrationSubmittedBy")
   reviewedRegistrations   TeamRegistration[]       @relation("RegistrationReviewedBy")
   createdAt               DateTime                 @default(now())
@@ -489,4 +489,57 @@ model RegistrationPlayer {
 
   @@index([registrationId])
   @@index([playerId])
+}
+
+// 普通用户独立存储；原 User 表仅保留工作人员及原有后台业务外键。
+model MemberAccount {
+  id                  String       @id @default(cuid())
+  username            String       @unique
+  password            String
+  nickname            String?
+  realName            String?
+  requestedStudentId  String?
+  studentId           String?      @unique
+  verificationStatus  String       @default("PENDING")
+  verificationVersion Int          @default(1)
+  reviewComment       String?
+  reviewedBy          String?
+  reviewedAt          DateTime?
+  disabled            Boolean      @default(false)
+  source              String       @default("web")
+  sessionVersion      Int          @default(0)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  predictions         Prediction[]
+
+  @@index([verificationStatus, createdAt])
+}
+
+// 独立生命周期账本，不随账号级联删除，不纳入普通业务备份。
+model CampusCardAsset {
+  id            String    @id @default(cuid())
+  memberId      String?
+  version       Int       @default(1)
+  objectKey     String    @unique
+  state         String    @default("STAGING")
+  // false 表示写入尚未确认结束；即使 HEAD 404 也不得释放容量。
+  uploadSettled Boolean   @default(true)
+  deleteAfter   DateTime
+  nextAttemptAt DateTime  @default(now())
+  attempts      Int       @default(0)
+  leaseUntil    DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([state, nextAttemptAt])
+  @@index([memberId, version])
+}
+
+// 数据库共享限流，不依赖单实例内存。
+model AuthRateLimit {
+  id        String   @id
+  count     Int      @default(1)
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }

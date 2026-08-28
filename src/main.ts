@@ -9,6 +9,9 @@ import { createSingleFlightInitializer } from './serverless/single-flight-initia
 import express from 'express';
 import { apiCachePolicyMiddleware } from './common/http-cache-policy';
 import { apiResponseMetricsMiddleware } from './common/api-response-metrics';
+import { trustedProxyConfig } from './common/trusted-proxy';
+import { RedactingLogger } from './common/redacting-logger';
+import { validateJwtSecrets } from './common/jwt-secret-config';
 
 function validateStartupConfig() {
   const requiredEnvVars = [
@@ -27,15 +30,7 @@ function validateStartupConfig() {
     throw new Error(`[FATAL CONFIG ERROR] 生产环境缺少必要环境变量: ${missing.join(', ')}`);
   }
 
-  const insecureSecrets = ['super-secret-key', 'dev-secret', 'default-jwt-secret', 'change-me'];
-  if (
-    isProduction &&
-    (!process.env.JWT_SECRET || insecureSecrets.includes(process.env.JWT_SECRET))
-  ) {
-    throw new Error(
-      '[FATAL CONFIG ERROR] 生产环境拒绝使用默认或不安全的 JWT_SECRET，请设置安全的随机密钥',
-    );
-  }
+  validateJwtSecrets();
 }
 
 const server = express();
@@ -48,8 +43,11 @@ async function initializeApp() {
   const swaggerAssetOrigin = 'https://unpkg.com';
 
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server), {
-    logger: ['error', 'warn', 'log'],
+    logger: new RedactingLogger(),
   });
+
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', trustedProxyConfig());
 
   app.use(
     helmet({
@@ -110,6 +108,7 @@ async function initializeApp() {
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://localhost:8080',
+    'http://127.0.0.1:8080',
     ...configuredOrigins,
   ]);
 

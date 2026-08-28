@@ -299,6 +299,7 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
 
   const teamIds = new Set((data.tables.Team || []).map((t: any) => t.id));
   const seasonIds = new Set((data.tables.Season || []).map((s: any) => s.id));
+  const memberIds = new Set((data.tables.MemberAccount || []).map((u: any) => u.id));
   const userIds = new Set((data.tables.User || []).map((u: any) => u.id));
   const matchIds = new Set((data.tables.Match || []).map((m: any) => m.id));
   const playerIds = new Set((data.tables.Player || []).map((p: any) => p.id));
@@ -338,7 +339,7 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
   }
 
   for (const pred of data.tables.Prediction || []) {
-    if (pred.userId && !userIds.has(pred.userId)) {
+    if (pred.userId && !memberIds.has(pred.userId)) {
       throw new BadRequestException(
         `Prediction 行 ${pred.id} 引用了不存在的用户 ID: ${pred.userId}`,
       );

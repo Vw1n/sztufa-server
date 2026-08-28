@@ -1,3 +1,4 @@
+import { MemberModule } from './members/member.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -30,6 +31,7 @@ import { RegistrationModule } from './registration/registration.module';
     ]),
     PrismaModule,
     AuthModule,
+    MemberModule,
     TeamModule,
     PlayerModule,
     MatchModule,

@@ -95,7 +95,7 @@ describe('TeamQueryService', () => {
     );
   });
 
-  it('overlays season-specific team details without leaking the global profile', async () => {
+  it('overlays season details while falling back to uploaded global assets', async () => {
     const { service, prisma } = createService();
     prisma.team.findMany.mockResolvedValue([
       {
@@ -103,6 +103,8 @@ describe('TeamQueryService', () => {
         teamName: '测试队',
         headCoach: '当前教练',
         teamLogo: 'current.png',
+        homeJersey: 'home-current.png',
+        awayJersey: 'away-current.png',
         players: [],
         groupTeams: [],
         seasonProfiles: [
@@ -131,7 +133,9 @@ describe('TeamQueryService', () => {
       expect.objectContaining({
         teamName: '测试队',
         headCoach: null,
-        teamLogo: null,
+        teamLogo: 'current.png',
+        homeJersey: 'home-current.png',
+        awayJersey: 'away-current.png',
         homeJerseyColor: '未记录',
       }),
     );
@@ -158,6 +162,37 @@ describe('TeamQueryService', () => {
       }),
     );
     expect(result.data[0]).not.toHaveProperty('players');
+  });
+
+  it('falls back to the uploaded team logo in public season summaries', async () => {
+    const { service, prisma } = createService();
+    prisma.team.findMany.mockResolvedValue([
+      {
+        id: 'team-1',
+        teamLogo: 'uploaded-logo.webp',
+        homeJersey: 'uploaded-home.webp',
+        awayJersey: 'uploaded-away.webp',
+        seasonProfiles: [
+          {
+            teamName: '测试队',
+            teamLogo: null,
+            homeJersey: null,
+            awayJersey: null,
+          },
+        ],
+      },
+    ]);
+    prisma.team.count.mockResolvedValue(1);
+
+    const result = await service.findPublicAll(1, 10, 'season-1');
+
+    expect(result.data[0]).toEqual(
+      expect.objectContaining({
+        teamLogo: 'uploaded-logo.webp',
+        homeJersey: 'uploaded-home.webp',
+        awayJersey: 'uploaded-away.webp',
+      }),
+    );
   });
 
   it('trims searches and returns no results for an empty name', async () => {

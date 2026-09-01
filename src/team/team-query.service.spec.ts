@@ -145,6 +145,21 @@ describe('TeamQueryService', () => {
     await expect(service.findOne('team-1')).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('returns public team summaries without player joins', async () => {
+    const { service, prisma } = createService();
+    prisma.team.findMany.mockResolvedValue([{ id: 'team-1', seasonProfiles: [] }]);
+    prisma.team.count.mockResolvedValue(1);
+
+    const result = await service.findPublicAll(1, 10, 'season-1');
+
+    expect(prisma.team.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ players: false, seasonPlayers: false }),
+      }),
+    );
+    expect(result.data[0]).not.toHaveProperty('players');
+  });
+
   it('trims searches and returns no results for an empty name', async () => {
     const { service, prisma } = createService();
     await expect(service.searchByName('  ')).resolves.toEqual([]);

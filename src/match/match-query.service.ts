@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { publicPlayerFieldsSelect, publicTeamSelect } from '../common/dto/public-response.dto';
+import { publicPlayerFieldsSelect } from '../common/dto/public-response.dto';
 
-const matchDetails = {
+const matchSummary = {
   id: true,
   homeTeamId: true,
   awayTeamId: true,
@@ -24,8 +24,12 @@ const matchDetails = {
   knockoutMatchIndex: true,
   createdAt: true,
   updatedAt: true,
-  homeTeam: { select: publicTeamSelect },
-  awayTeam: { select: publicTeamSelect },
+  homeTeam: { select: { id: true, teamName: true, teamLogo: true } },
+  awayTeam: { select: { id: true, teamName: true, teamLogo: true } },
+} as const;
+
+const matchDetails = {
+  ...matchSummary,
   goals: true,
   events: true,
   lineups: { include: { player: { select: publicPlayerFieldsSelect } } },
@@ -75,7 +79,7 @@ export class MatchQueryService {
           skip,
           take: limitNum,
           where,
-          select: matchDetails,
+          select: matchSummary,
           orderBy: { matchDate: 'desc' },
         }),
         this.prisma.match.count({ where }),
@@ -90,7 +94,7 @@ export class MatchQueryService {
         statusGroups.map((group) => [group.status, group._count._all]),
       );
       const statsTotal = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
-      const enrichedData = await this.enrichMatchesWithSeasonSnapshot(data);
+      const enrichedData = await this.enrichMatchesWithSeasonSnapshot(data, false);
 
       return {
         data: enrichedData,
@@ -112,13 +116,13 @@ export class MatchQueryService {
             skip,
             take: limitNum,
             where,
-            include: { homeTeam: true, awayTeam: true },
+            select: matchSummary,
             orderBy: { matchDate: 'desc' },
           }),
           this.prisma.match.count({ where }),
         ]);
         return {
-          data: data.map((m) => ({ ...m, goals: [], events: [], lineups: [] })),
+          data,
           total,
           page: pageNum,
           limit: limitNum,
@@ -160,7 +164,7 @@ export class MatchQueryService {
     return enriched[0];
   }
 
-  private async enrichMatchesWithSeasonSnapshot(matches: any[]) {
+  private async enrichMatchesWithSeasonSnapshot(matches: any[], includePlayerSnapshots = true) {
     if (!matches || matches.length === 0) return matches;
 
     const seasonIds = new Set<string>();
@@ -173,22 +177,31 @@ export class MatchQueryService {
 
     if (seasonIds.size === 0) return matches;
 
+    const profileSelect = includePlayerSnapshots
+      ? {
+          seasonId: true,
+          teamId: true,
+          teamName: true,
+          teamLogo: true,
+          homeJerseyColor: true,
+          awayJerseyColor: true,
+          gender: true,
+        }
+      : {
+          seasonId: true,
+          teamId: true,
+          teamName: true,
+          teamLogo: true,
+        };
+
     const [profiles, seasonPlayers] = await Promise.all([
       this.prisma.seasonTeamProfile
         ? this.prisma.seasonTeamProfile.findMany({
             where: { seasonId: { in: Array.from(seasonIds) } },
-            select: {
-              seasonId: true,
-              teamId: true,
-              teamName: true,
-              teamLogo: true,
-              homeJerseyColor: true,
-              awayJerseyColor: true,
-              gender: true,
-            },
+            select: profileSelect,
           })
         : Promise.resolve([]),
-      this.prisma.seasonTeamPlayer
+      includePlayerSnapshots && this.prisma.seasonTeamPlayer
         ? this.prisma.seasonTeamPlayer.findMany({
             where: { seasonId: { in: Array.from(seasonIds) } },
             select: {
@@ -237,23 +250,24 @@ export class MatchQueryService {
             }
           : m.awayTeam;
 
-      const enrichedLineups = Array.isArray(m.lineups)
-        ? m.lineups.map((l: any) => {
-            const sp = seasonPlayerMap.get(`${m.seasonId}_${l.playerId}`);
-            if (sp && l.player) {
-              return {
-                ...l,
-                player: {
-                  ...l.player,
-                  name: sp.playerName || l.player.name,
-                  jerseyNumber: sp.jerseyNumber || l.player.jerseyNumber,
-                  photo: sp.playerPhoto || l.player.photo,
-                },
-              };
-            }
-            return l;
-          })
-        : m.lineups;
+      const enrichedLineups =
+        includePlayerSnapshots && Array.isArray(m.lineups)
+          ? m.lineups.map((l: any) => {
+              const sp = seasonPlayerMap.get(`${m.seasonId}_${l.playerId}`);
+              if (sp && l.player) {
+                return {
+                  ...l,
+                  player: {
+                    ...l.player,
+                    name: sp.playerName || l.player.name,
+                    jerseyNumber: sp.jerseyNumber || l.player.jerseyNumber,
+                    photo: sp.playerPhoto || l.player.photo,
+                  },
+                };
+              }
+              return l;
+            })
+          : m.lineups;
 
       return {
         ...m,

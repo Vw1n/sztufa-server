@@ -36,7 +36,7 @@ describe('public database query projections', () => {
     expect(query.select.coachPhone).toBeUndefined();
     expect(query.select.leaderPhone).toBeUndefined();
     expect(query.select.seasonProfiles.select.coachPhone).toBeUndefined();
-    expect(query.select.seasonPlayers.select.studentId).toBeUndefined();
-    expect(query.select.seasonPlayers.select.player.select.studentId).toBeUndefined();
+    expect(query.select.players).toBe(false);
+    expect(query.select.seasonPlayers).toBe(false);
   });
 });

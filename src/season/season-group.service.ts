@@ -11,7 +11,7 @@ export class SeasonGroupService {
     private readonly seasonStatistics: SeasonStatisticsService,
   ) {}
 
-  async getSeasonStandings(id: string, refresh = false) {
+  async getSeasonStandings(id: string) {
     const season = await this.prisma.season.findUnique({
       where: { id },
       select: { standingsCache: true },
@@ -19,32 +19,16 @@ export class SeasonGroupService {
     if (!season) {
       throw new BadRequestException('赛季不存在');
     }
-    if (!season.standingsCache || refresh) {
-      await this.seasonStatistics.computeAndCache(id);
-      const updated = await this.prisma.season.findUnique({
-        where: { id },
-        select: { standingsCache: true },
-      });
-      return updated?.standingsCache || [];
-    }
     return season.standingsCache || [];
   }
 
-  async getSeasonStats(id: string, refresh = false) {
+  async getSeasonStats(id: string) {
     const season = await this.prisma.season.findUnique({
       where: { id },
       select: { statsCache: true },
     });
     if (!season) {
       throw new BadRequestException('赛季不存在');
-    }
-    if (!season.statsCache || refresh) {
-      await this.seasonStatistics.computeAndCache(id);
-      const updated = await this.prisma.season.findUnique({
-        where: { id },
-        select: { statsCache: true },
-      });
-      return updated?.statsCache || { scorers: [], assists: [], cards: [] };
     }
     return season.statsCache || { scorers: [], assists: [], cards: [] };
   }

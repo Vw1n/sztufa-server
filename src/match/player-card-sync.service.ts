@@ -101,12 +101,20 @@ export class PlayerCardSyncService {
         where: { id: playerId },
       });
       if (player) {
+        const seasonTeamPlayer =
+          activeSeason && tx.seasonTeamPlayer?.findUnique
+            ? await tx.seasonTeamPlayer.findUnique({
+                where: { seasonId_playerId: { seasonId: activeSeason.id, playerId } },
+              })
+            : null;
+        const effectiveTeamId = seasonTeamPlayer?.teamId || player.teamId;
+
         const servedMatch = await tx.match.findFirst({
           where: {
             ...seasonWhere,
             status: 'finished',
             matchDate: { gt: latestTriggerMatch.matchDate },
-            OR: [{ homeTeamId: player.teamId }, { awayTeamId: player.teamId }],
+            OR: [{ homeTeamId: effectiveTeamId }, { awayTeamId: effectiveTeamId }],
             deletedAt: null,
           },
           orderBy: { matchDate: 'asc' },

@@ -50,7 +50,6 @@ delete environment.PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK;
 
 const maxAttempts = 3;
 let finalStatus = 1;
-let lastFailureWasTemporaryConnection = false;
 
 for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
   const result = spawnSync(executable, ['prisma', 'migrate', 'deploy'], {
@@ -74,7 +73,6 @@ for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 
   const migrationOutput = `${result.stdout || ''}\n${result.stderr || ''}`;
   const isTemporaryConnectionFailure = migrationOutput.includes('P1001');
-  lastFailureWasTemporaryConnection = isTemporaryConnectionFailure;
   if (!isTemporaryConnectionFailure || attempt === maxAttempts) {
     break;
   }
@@ -95,17 +93,6 @@ for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     `Vercel 构建：数据库暂时无法连接（P1001），${delayMs / 1000} 秒后进行第 ${attempt + 1} 次迁移尝试。`,
   );
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
-}
-
-if (
-  finalStatus !== 0 &&
-  lastFailureWasTemporaryConnection &&
-  environment.ALLOW_RUNTIME_DATABASE_MIGRATIONS === 'true'
-) {
-  console.warn(
-    'Vercel 构建：构建节点无法连接数据库，将由开发环境函数首次启动时执行迁移。',
-  );
-  process.exit(0);
 }
 
 process.exit(finalStatus);

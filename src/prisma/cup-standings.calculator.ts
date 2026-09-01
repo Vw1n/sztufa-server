@@ -13,18 +13,46 @@ export class CupStandingsCalculator {
     matches: any[],
     databaseTeams: Map<string, any>,
   ): Promise<{ type: string; groups: Record<string, TeamStanding[]> }> {
-    const groupTeams = await this.prisma.seasonGroupTeam.findMany({
-      where: { seasonId },
-      select: {
-        teamId: true,
-        groupName: true,
-        team: { select: { teamName: true, teamLogo: true, gender: true } },
-      },
-    });
+    const [groupTeams, seasonProfiles] = await Promise.all([
+      this.prisma.seasonGroupTeam.findMany({
+        where: { seasonId },
+        select: {
+          teamId: true,
+          groupName: true,
+          team: { select: { teamName: true, teamLogo: true, gender: true } },
+        },
+      }),
+      this.prisma.seasonTeamProfile
+        ? this.prisma.seasonTeamProfile.findMany({
+            where: { seasonId },
+            select: { teamId: true, teamName: true, teamLogo: true, gender: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const seasonProfilesMap = new Map((seasonProfiles || []).map((p: any) => [p.teamId, p]));
     const groups = new Map<string, Map<string, TeamStanding>>();
 
+    const resolveTeamInfo = (teamId: string, fallbackTeam?: any) => {
+      const profile = seasonProfilesMap.get(teamId);
+      if (profile) {
+        return {
+          teamName: profile.teamName,
+          teamLogo: profile.teamLogo || '',
+          gender: profile.gender,
+        };
+      }
+      const dbTeam = fallbackTeam || databaseTeams.get(teamId);
+      return {
+        teamName: dbTeam?.teamName || '未知球队',
+        teamLogo: dbTeam?.teamLogo || '',
+        gender: dbTeam?.gender || 'MALE',
+      };
+    };
+
     groupTeams.forEach((groupTeam) => {
-      if (!groupTeam.team || groupTeam.team.gender !== seasonGender) return;
+      const teamInfo = resolveTeamInfo(groupTeam.teamId, groupTeam.team);
+      if (teamInfo.gender !== seasonGender) return;
       if (!groups.has(groupTeam.groupName)) groups.set(groupTeam.groupName, new Map());
       groups
         .get(groupTeam.groupName)!
@@ -32,8 +60,8 @@ export class CupStandingsCalculator {
           groupTeam.teamId,
           this.createStanding(
             groupTeam.teamId,
-            groupTeam.team.teamName,
-            groupTeam.team.teamLogo || '',
+            teamInfo.teamName,
+            teamInfo.teamLogo,
           ),
         );
     });
@@ -47,11 +75,11 @@ export class CupStandingsCalculator {
 
         const ensureTeam = (teamId: string) => {
           if (groupStandings.has(teamId)) return;
-          const team = databaseTeams.get(teamId);
-          if (!team || team.gender !== seasonGender) return;
+          const teamInfo = resolveTeamInfo(teamId);
+          if (teamInfo.gender !== seasonGender) return;
           groupStandings.set(
             teamId,
-            this.createStanding(teamId, team.teamName || '未知球队', team.teamLogo || ''),
+            this.createStanding(teamId, teamInfo.teamName, teamInfo.teamLogo),
           );
         };
         ensureTeam(match.homeTeamId);

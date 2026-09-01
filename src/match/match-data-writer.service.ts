@@ -20,10 +20,30 @@ export class MatchDataWriterService {
     const uniqueLineups = Array.from(
       new Map(lineups.map((item) => [item.playerId, item])).values(),
     );
-    const players = await tx.player.findMany({
-      where: { id: { in: uniqueLineups.map((lineup) => lineup.playerId) } },
-    });
+    const [players, matchRecord] = await Promise.all([
+      tx.player.findMany({
+        where: { id: { in: uniqueLineups.map((lineup) => lineup.playerId) } },
+      }),
+      tx.match?.findUnique
+        ? tx.match.findUnique({
+            where: { id: matchId },
+            select: { seasonId: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const seasonPlayers =
+      matchRecord?.seasonId && tx.seasonTeamPlayer?.findMany
+        ? await tx.seasonTeamPlayer.findMany({
+            where: {
+              seasonId: matchRecord.seasonId,
+              playerId: { in: uniqueLineups.map((lineup) => lineup.playerId) },
+            },
+          })
+        : [];
+
     const playersMap = new Map(players.map((player: any) => [player.id, player]));
+    const seasonPlayersMap = new Map(seasonPlayers.map((sp: any) => [sp.playerId, sp]));
     const validLineups = [];
 
     for (const item of uniqueLineups) {
@@ -31,7 +51,10 @@ export class MatchDataWriterService {
       if (!player) continue;
 
       const expectedTeamId = item.teamType === 'home' ? homeTeamId : awayTeamId;
-      if (player.teamId !== expectedTeamId) {
+      const seasonPlayer: any = seasonPlayersMap.get(item.playerId);
+      const effectiveTeamId = seasonPlayer?.teamId || player.teamId;
+
+      if (effectiveTeamId !== expectedTeamId) {
         throw new BadRequestException(
           `球员 ${player.name} 队籍不属于所声明的 ${item.teamType === 'home' ? '主队' : '客队'}`,
         );

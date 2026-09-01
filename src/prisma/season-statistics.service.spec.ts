@@ -160,4 +160,174 @@ describe('SeasonStatisticsService', () => {
     expect(prisma.season.update).not.toHaveBeenCalled();
     expect(result).toEqual({ success: false, error: '赛季不存在' });
   });
+
+  it('射手榜与助攻榜准确按比赛主客队归属 郭海(A2联队) 与 李浪(城市交通与物流学院) 及 范嘉俊(新材料与新能源学院)', async () => {
+    const prisma: any = createPrisma();
+    prisma.seasonTeamProfile = { findMany: jest.fn() };
+    prisma.season.findUnique.mockResolvedValue({
+      id: 'cmroeexdz00018js1kmbmyog5',
+      name: '2026校长杯男子组',
+      type: 'CUP',
+    });
+
+    // 真实比赛数据模拟
+    prisma.match.findMany.mockResolvedValue([
+      // 比赛1：工程物理学院 vs A2联队（郭海代表A2联队进球）
+      {
+        id: 'match-guohai',
+        seasonId: 'cmroeexdz00018js1kmbmyog5',
+        homeTeamId: 'team-physics',
+        awayTeamId: 'team-a2',
+        homeScore: 3,
+        awayScore: 9,
+        stage: 'GROUP',
+        groupName: 'B',
+        goals: [
+          {
+            playerId: 'player-guohai',
+            playerName: '郭海',
+            jerseyNumber: '30',
+            teamType: 'away', // 客队是 A2联队
+          },
+        ],
+        events: [],
+      },
+      // 比赛2：商学院 vs 城市交通与物流学院（李浪代表交通进球）
+      {
+        id: 'match-lilang',
+        seasonId: 'cmroeexdz00018js1kmbmyog5',
+        homeTeamId: 'team-business',
+        awayTeamId: 'team-traffic',
+        homeScore: 1,
+        awayScore: 3,
+        stage: 'GROUP',
+        groupName: 'A',
+        goals: [
+          {
+            playerId: 'player-lilang',
+            playerName: '李浪',
+            jerseyNumber: '9',
+            teamType: 'away', // 客队是 城市交通与物流学院
+          },
+        ],
+        events: [],
+      },
+      // 比赛3：新材料与新能源学院 vs 大数据与互联网学院（范嘉俊进球）
+      {
+        id: 'match-fanjiajun',
+        seasonId: 'cmroeexdz00018js1kmbmyog5',
+        homeTeamId: 'team-materials',
+        awayTeamId: 'team-bigdata',
+        homeScore: 2,
+        awayScore: 2,
+        stage: 'KNOCKOUT',
+        goals: [
+          {
+            playerId: 'player-fan',
+            playerName: '范嘉俊',
+            jerseyNumber: '7',
+            teamType: 'home', // 主队是 新材料与新能源学院
+          },
+        ],
+        events: [],
+      },
+    ]);
+
+    // 赛季球队档案快照
+    const profileMaterials = {
+      seasonId: 'cmroeexdz00018js1kmbmyog5',
+      teamId: 'team-materials',
+      teamName: '新材料与新能源学院',
+      teamLogo: 'materials.png',
+      gender: 'MALE',
+    };
+    const profileA2 = {
+      seasonId: 'cmroeexdz00018js1kmbmyog5',
+      teamId: 'team-a2',
+      teamName: 'A2联队',
+      teamLogo: 'a2.png',
+      gender: 'MALE',
+    };
+    const profileTraffic = {
+      seasonId: 'cmroeexdz00018js1kmbmyog5',
+      teamId: 'team-traffic',
+      teamName: '城市交通与物流学院',
+      teamLogo: 'traffic.png',
+      gender: 'MALE',
+    };
+
+    prisma.seasonTeamProfile.findMany.mockResolvedValue([
+      profileMaterials,
+      profileA2,
+      profileTraffic,
+    ]);
+
+    prisma.seasonTeamPlayer.findMany.mockResolvedValue([]);
+    prisma.seasonGroupTeam.findMany.mockResolvedValue([]);
+
+    // 数据库全局 Team 表
+    prisma.team.findMany.mockResolvedValue([
+      { id: 'team-materials', teamName: '新材料与新能源', teamLogo: 'old.png', gender: 'MALE' },
+      { id: 'team-a2', teamName: 'A2联队', teamLogo: 'a2.png', gender: 'MALE' },
+      { id: 'team-traffic', teamName: '城市交通与物流学院', teamLogo: 'traffic.png', gender: 'MALE' },
+      { id: 'team-physics', teamName: '工程物理学院', teamLogo: 'physics.png', gender: 'MALE' },
+      { id: 'team-business', teamName: '商学院', teamLogo: 'business.png', gender: 'MALE' },
+      { id: 'team-health', teamName: '健康与环境工程学院', teamLogo: 'health.png', gender: 'MALE' },
+      { id: 'team-pharmacy', teamName: '深圳技术大学药学院', teamLogo: 'pharmacy.png', gender: 'MALE' },
+    ]);
+
+    // 数据库全局 Player 表（注意：全局 player.team 关联了历史或转会后的球队）
+    prisma.player.findMany.mockResolvedValue([
+      {
+        id: 'player-guohai',
+        name: '郭海',
+        jerseyNumber: '30',
+        teamId: 'team-health',
+        team: { teamName: '健康与环境工程学院', teamLogo: 'health.png' }, // BUG场景：全局是健康学院
+      },
+      {
+        id: 'player-lilang',
+        name: '李浪',
+        jerseyNumber: '9',
+        teamId: 'team-pharmacy',
+        team: { teamName: '深圳技术大学药学院', teamLogo: 'pharmacy.png' }, // BUG场景：全局是药学院
+      },
+      {
+        id: 'player-fan',
+        name: '范嘉俊',
+        jerseyNumber: '7',
+        teamId: 'team-materials',
+        team: { teamName: '新材料与新能源', teamLogo: 'old.png' }, // BUG场景：全局是旧队名
+      },
+    ]);
+    prisma.season.update.mockResolvedValue({});
+
+    await createService(prisma).computeAndCache('cmroeexdz00018js1kmbmyog5');
+
+    // 验证：射手榜中的所属球队必须根据比赛事件主客队及赛季快照精准归属
+    expect(prisma.season.update).toHaveBeenCalledWith({
+      where: { id: 'cmroeexdz00018js1kmbmyog5' },
+      data: expect.objectContaining({
+        statsCache: expect.objectContaining({
+          scorers: expect.arrayContaining([
+            expect.objectContaining({
+              playerName: '郭海',
+              teamName: 'A2联队',
+              teamLogo: 'a2.png',
+            }),
+            expect.objectContaining({
+              playerName: '李浪',
+              teamName: '城市交通与物流学院',
+              teamLogo: 'traffic.png',
+            }),
+            expect.objectContaining({
+              playerName: '范嘉俊',
+              teamName: '新材料与新能源学院',
+              teamLogo: 'materials.png',
+            }),
+          ]),
+        }),
+      }),
+    });
+  });
 });

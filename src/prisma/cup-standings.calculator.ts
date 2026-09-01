@@ -58,11 +58,7 @@ export class CupStandingsCalculator {
         .get(groupTeam.groupName)!
         .set(
           groupTeam.teamId,
-          this.createStanding(
-            groupTeam.teamId,
-            teamInfo.teamName,
-            teamInfo.teamLogo,
-          ),
+          this.createStanding(groupTeam.teamId, teamInfo.teamName, teamInfo.teamLogo),
         );
     });
 

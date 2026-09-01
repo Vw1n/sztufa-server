@@ -202,9 +202,7 @@ export class MatchQueryService {
         : Promise.resolve([]),
     ]);
 
-    const profileMap = new Map(
-      (profiles || []).map((p: any) => [`${p.seasonId}_${p.teamId}`, p]),
-    );
+    const profileMap = new Map((profiles || []).map((p: any) => [`${p.seasonId}_${p.teamId}`, p]));
     const seasonPlayerMap = new Map(
       (seasonPlayers || []).map((sp: any) => [`${sp.seasonId}_${sp.playerId}`, sp]),
     );

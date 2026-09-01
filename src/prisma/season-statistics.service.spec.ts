@@ -269,11 +269,21 @@ describe('SeasonStatisticsService', () => {
     prisma.team.findMany.mockResolvedValue([
       { id: 'team-materials', teamName: '新材料与新能源', teamLogo: 'old.png', gender: 'MALE' },
       { id: 'team-a2', teamName: 'A2联队', teamLogo: 'a2.png', gender: 'MALE' },
-      { id: 'team-traffic', teamName: '城市交通与物流学院', teamLogo: 'traffic.png', gender: 'MALE' },
+      {
+        id: 'team-traffic',
+        teamName: '城市交通与物流学院',
+        teamLogo: 'traffic.png',
+        gender: 'MALE',
+      },
       { id: 'team-physics', teamName: '工程物理学院', teamLogo: 'physics.png', gender: 'MALE' },
       { id: 'team-business', teamName: '商学院', teamLogo: 'business.png', gender: 'MALE' },
       { id: 'team-health', teamName: '健康与环境工程学院', teamLogo: 'health.png', gender: 'MALE' },
-      { id: 'team-pharmacy', teamName: '深圳技术大学药学院', teamLogo: 'pharmacy.png', gender: 'MALE' },
+      {
+        id: 'team-pharmacy',
+        teamName: '深圳技术大学药学院',
+        teamLogo: 'pharmacy.png',
+        gender: 'MALE',
+      },
     ]);
 
     // 数据库全局 Player 表（注意：全局 player.team 关联了历史或转会后的球队）

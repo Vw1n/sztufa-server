@@ -5,7 +5,7 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { PrismaClientExceptionFilter } from './prisma/prisma-client-exception.filter';
-import { createSingleFlightInitializer } from './serverless/single-flight-initializer';
+import { createAtomicAppInitializer } from './serverless/atomic-app-initializer';
 import express from 'express';
 import { apiCachePolicyMiddleware } from './common/http-cache-policy';
 import { apiResponseMetricsMiddleware } from './common/api-response-metrics';
@@ -33,9 +33,7 @@ function validateStartupConfig() {
   validateJwtSecrets();
 }
 
-const server = express();
-
-async function initializeApp() {
+async function initializeApp(server: ReturnType<typeof express>) {
   validateStartupConfig();
 
   const swaggerEnabled =
@@ -150,10 +148,10 @@ async function initializeApp() {
 // Vercel 冷启动时图片请求会并发进入同一个函数实例。所有请求必须等待
 // 同一次 Nest 初始化完成，否则多个应用会同时向 Express 注册路由，
 // ThrottlerGuard 等生命周期组件可能在 onModuleInit 前被调用。
-const createApp = createSingleFlightInitializer(initializeApp);
+const createApp = createAtomicAppInitializer(() => express(), initializeApp);
 
 async function bootstrap() {
-  const app = await createApp();
+  const { app } = await createApp();
   await app.listen(process.env.PORT || 3000);
 }
 
@@ -162,6 +160,6 @@ if (require.main === module) {
 }
 
 export default async function handler(req, res) {
-  await createApp();
+  const { server } = await createApp();
   server(req, res);
 }

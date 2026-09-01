@@ -31,43 +31,75 @@ export class SeasonStatisticsService {
         include: { goals: true, events: true },
       });
 
-      const seasonPlayers = await this.prisma.seasonTeamPlayer.findMany({
-        where: { seasonId },
-        select: {
-          teamId: true,
-          team: { select: { id: true, teamName: true, teamLogo: true, gender: true } },
-        },
-      });
+      const [seasonProfiles, seasonPlayers, allTeams] = await Promise.all([
+        this.prisma.seasonTeamProfile
+          ? this.prisma.seasonTeamProfile.findMany({
+              where: { seasonId },
+              select: {
+                teamId: true,
+                teamName: true,
+                teamLogo: true,
+                gender: true,
+              },
+            })
+          : Promise.resolve([]),
+        this.prisma.seasonTeamPlayer
+          ? this.prisma.seasonTeamPlayer.findMany({
+              where: { seasonId },
+              select: {
+                teamId: true,
+                team: { select: { id: true, teamName: true, teamLogo: true, gender: true } },
+              },
+            })
+          : Promise.resolve([]),
+        this.prisma.team.findMany({
+          select: { id: true, teamName: true, teamLogo: true, gender: true },
+        }),
+      ]);
 
+      const seasonProfilesMap = new Map((seasonProfiles || []).map((p: any) => [p.teamId, p]));
+      const databaseTeams = new Map(allTeams.map((team) => [team.id, team]));
       const teamsMap = new Map<string, { id: string; teamName: string; teamLogo: string }>();
-      seasonPlayers.forEach((seasonPlayer) => {
-        if (
-          seasonPlayer.team &&
-          !teamsMap.has(seasonPlayer.teamId) &&
-          seasonPlayer.team.gender === seasonGender
-        ) {
-          teamsMap.set(seasonPlayer.teamId, {
-            id: seasonPlayer.teamId,
-            teamName: seasonPlayer.team.teamName,
-            teamLogo: seasonPlayer.team.teamLogo || '',
+
+      // 1. 优先从 SeasonTeamProfile 获取符合赛季性别的球队快照
+      (seasonProfiles || []).forEach((profile: any) => {
+        if (profile.gender === seasonGender) {
+          teamsMap.set(profile.teamId, {
+            id: profile.teamId,
+            teamName: profile.teamName,
+            teamLogo: profile.teamLogo || '',
           });
         }
       });
 
-      const allTeams = await this.prisma.team.findMany({
-        select: { id: true, teamName: true, teamLogo: true, gender: true },
+      // 2. 补充 seasonPlayers 中尚未包含的球队
+      (seasonPlayers || []).forEach((seasonPlayer: any) => {
+        if (!teamsMap.has(seasonPlayer.teamId)) {
+          const profile = seasonProfilesMap.get(seasonPlayer.teamId);
+          const team = seasonPlayer.team || databaseTeams.get(seasonPlayer.teamId);
+          const gender = profile?.gender || team?.gender;
+          if (gender === seasonGender) {
+            teamsMap.set(seasonPlayer.teamId, {
+              id: seasonPlayer.teamId,
+              teamName: profile?.teamName || team?.teamName || '',
+              teamLogo: profile?.teamLogo || team?.teamLogo || '',
+            });
+          }
+        }
       });
-      const databaseTeams = new Map(allTeams.map((team) => [team.id, team]));
 
+      // 3. 确保比赛中出现的球队也在 teamsMap 中
       matches.forEach((match) => {
         const addTeamIfValid = (teamId: string) => {
           if (teamsMap.has(teamId)) return;
+          const profile = seasonProfilesMap.get(teamId);
           const team = databaseTeams.get(teamId);
-          if (team && team.gender === seasonGender) {
+          const gender = profile?.gender || team?.gender;
+          if (gender === seasonGender) {
             teamsMap.set(teamId, {
-              id: team.id,
-              teamName: team.teamName,
-              teamLogo: team.teamLogo || '',
+              id: teamId,
+              teamName: profile?.teamName || team?.teamName || '',
+              teamLogo: profile?.teamLogo || team?.teamLogo || '',
             });
           }
         };
@@ -82,7 +114,7 @@ export class SeasonStatisticsService {
           : this.leagueCalculator.calculate(matches, teamsMap);
 
       // 计算球员统计
-      const stats = await this.playerStatsCalculator.calculate(matches, databaseTeams);
+      const stats = await this.playerStatsCalculator.calculate(matches, databaseTeams, seasonId);
 
       // 更新缓存
       await this.prisma.season.update({

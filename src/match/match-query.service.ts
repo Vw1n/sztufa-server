@@ -90,9 +90,10 @@ export class MatchQueryService {
         statusGroups.map((group) => [group.status, group._count._all]),
       );
       const statsTotal = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
+      const enrichedData = await this.enrichMatchesWithSeasonSnapshot(data);
 
       return {
-        data,
+        data: enrichedData,
         total,
         page: pageNum,
         limit: limitNum,
@@ -145,13 +146,121 @@ export class MatchQueryService {
       throw new NotFoundException('比赛不存在');
     }
     const { deletedAt: _deletedAt, ...publicMatch } = match;
-    return publicMatch;
+    const enriched = await this.enrichMatchesWithSeasonSnapshot([publicMatch]);
+    return enriched[0];
   }
 
-  findDetails(id: string) {
-    return this.prisma.match.findUnique({
+  async findDetails(id: string) {
+    const match = await this.prisma.match.findUnique({
       where: { id },
       select: matchDetails,
+    });
+    if (!match) return null;
+    const enriched = await this.enrichMatchesWithSeasonSnapshot([match]);
+    return enriched[0];
+  }
+
+  private async enrichMatchesWithSeasonSnapshot(matches: any[]) {
+    if (!matches || matches.length === 0) return matches;
+
+    const seasonIds = new Set<string>();
+
+    matches.forEach((m) => {
+      if (m?.seasonId) {
+        seasonIds.add(m.seasonId);
+      }
+    });
+
+    if (seasonIds.size === 0) return matches;
+
+    const [profiles, seasonPlayers] = await Promise.all([
+      this.prisma.seasonTeamProfile
+        ? this.prisma.seasonTeamProfile.findMany({
+            where: { seasonId: { in: Array.from(seasonIds) } },
+            select: {
+              seasonId: true,
+              teamId: true,
+              teamName: true,
+              teamLogo: true,
+              homeJerseyColor: true,
+              awayJerseyColor: true,
+              gender: true,
+            },
+          })
+        : Promise.resolve([]),
+      this.prisma.seasonTeamPlayer
+        ? this.prisma.seasonTeamPlayer.findMany({
+            where: { seasonId: { in: Array.from(seasonIds) } },
+            select: {
+              seasonId: true,
+              playerId: true,
+              playerName: true,
+              jerseyNumber: true,
+              playerPhoto: true,
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const profileMap = new Map((profiles || []).map((p: any) => [`${p.seasonId}_${p.teamId}`, p]));
+    const seasonPlayerMap = new Map(
+      (seasonPlayers || []).map((sp: any) => [`${sp.seasonId}_${sp.playerId}`, sp]),
+    );
+
+    return matches.map((m) => {
+      if (!m || !m.seasonId) return m;
+
+      const homeProfile = profileMap.get(`${m.seasonId}_${m.homeTeamId}`);
+      const awayProfile = profileMap.get(`${m.seasonId}_${m.awayTeamId}`);
+
+      const enrichedHomeTeam =
+        homeProfile && m.homeTeam
+          ? {
+              ...m.homeTeam,
+              teamName: homeProfile.teamName || m.homeTeam.teamName,
+              teamLogo: homeProfile.teamLogo || m.homeTeam.teamLogo,
+              homeJerseyColor: homeProfile.homeJerseyColor || m.homeTeam.homeJerseyColor,
+              awayJerseyColor: homeProfile.awayJerseyColor || m.homeTeam.awayJerseyColor,
+              gender: homeProfile.gender || m.homeTeam.gender,
+            }
+          : m.homeTeam;
+
+      const enrichedAwayTeam =
+        awayProfile && m.awayTeam
+          ? {
+              ...m.awayTeam,
+              teamName: awayProfile.teamName || m.awayTeam.teamName,
+              teamLogo: awayProfile.teamLogo || m.awayTeam.teamLogo,
+              homeJerseyColor: awayProfile.homeJerseyColor || m.awayTeam.homeJerseyColor,
+              awayJerseyColor: awayProfile.awayJerseyColor || m.awayTeam.awayJerseyColor,
+              gender: awayProfile.gender || m.awayTeam.gender,
+            }
+          : m.awayTeam;
+
+      const enrichedLineups = Array.isArray(m.lineups)
+        ? m.lineups.map((l: any) => {
+            const sp = seasonPlayerMap.get(`${m.seasonId}_${l.playerId}`);
+            if (sp && l.player) {
+              return {
+                ...l,
+                player: {
+                  ...l.player,
+                  name: sp.playerName || l.player.name,
+                  jerseyNumber: sp.jerseyNumber || l.player.jerseyNumber,
+                  photo: sp.playerPhoto || l.player.photo,
+                },
+              };
+            }
+            return l;
+          })
+        : m.lineups;
+
+      return {
+        ...m,
+        homeTeam: enrichedHomeTeam,
+        awayTeam: enrichedAwayTeam,
+        lineups: enrichedLineups,
+      };
     });
   }
 }

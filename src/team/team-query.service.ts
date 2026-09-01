@@ -2,6 +2,9 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { publicPlayerFieldsSelect, publicTeamSelect } from '../common/dto/public-response.dto';
 
+const resolveSeasonAsset = (seasonValue: string | null | undefined, teamValue: string | null) =>
+  seasonValue || teamValue || null;
+
 @Injectable()
 export class TeamQueryService {
   constructor(private readonly prisma: PrismaService) {}
@@ -72,9 +75,9 @@ export class TeamQueryService {
         leaderPhone: profile.leaderPhone,
         homeJerseyColor: profile.homeJerseyColor,
         awayJerseyColor: profile.awayJerseyColor,
-        teamLogo: profile.teamLogo,
-        homeJersey: profile.homeJersey,
-        awayJersey: profile.awayJersey,
+        teamLogo: resolveSeasonAsset(profile.teamLogo, baseTeam.teamLogo),
+        homeJersey: resolveSeasonAsset(profile.homeJersey, baseTeam.homeJersey),
+        awayJersey: resolveSeasonAsset(profile.awayJersey, baseTeam.awayJersey),
         gender: profile.gender,
       };
     });
@@ -128,9 +131,9 @@ export class TeamQueryService {
         teamLeader: profile.teamLeader,
         homeJerseyColor: profile.homeJerseyColor,
         awayJerseyColor: profile.awayJerseyColor,
-        teamLogo: profile.teamLogo,
-        homeJersey: profile.homeJersey,
-        awayJersey: profile.awayJersey,
+        teamLogo: resolveSeasonAsset(profile.teamLogo, baseTeam.teamLogo),
+        homeJersey: resolveSeasonAsset(profile.homeJersey, baseTeam.homeJersey),
+        awayJersey: resolveSeasonAsset(profile.awayJersey, baseTeam.awayJersey),
         gender: profile.gender,
       };
     });
@@ -164,6 +167,9 @@ export class TeamQueryService {
       ...baseTeam,
       ...(profile || {}),
       id: team.id,
+      teamLogo: resolveSeasonAsset(profile?.teamLogo, baseTeam.teamLogo),
+      homeJersey: resolveSeasonAsset(profile?.homeJersey, baseTeam.homeJersey),
+      awayJersey: resolveSeasonAsset(profile?.awayJersey, baseTeam.awayJersey),
       players: (seasonPlayers || []).map((roster: any) => ({
         ...roster.player,
         name: roster.playerName,

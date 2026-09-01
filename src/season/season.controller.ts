@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Delete,
+  Query,
 } from '@nestjs/common';
 import { SeasonService } from './season.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -29,13 +30,20 @@ export class SeasonController {
   }
 
   @Get(':id/standings')
-  async getSeasonStandings(@Param('id') id: string) {
-    return this.seasonService.getSeasonStandings(id);
+  async getSeasonStandings(@Param('id') id: string, @Query('refresh') refresh?: string) {
+    return this.seasonService.getSeasonStandings(id, refresh === 'true' || refresh === '1');
   }
 
   @Get(':id/stats')
-  async getSeasonStats(@Param('id') id: string) {
-    return this.seasonService.getSeasonStats(id);
+  async getSeasonStats(@Param('id') id: string, @Query('refresh') refresh?: string) {
+    return this.seasonService.getSeasonStats(id, refresh === 'true' || refresh === '1');
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post(':id/recompute')
+  async recomputeSeasonStats(@Param('id') id: string) {
+    return this.seasonService.recomputeSeasonStats(id);
   }
 
   @Get(':id/groups')

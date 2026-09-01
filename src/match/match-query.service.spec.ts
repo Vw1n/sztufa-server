@@ -27,6 +27,36 @@ describe('MatchQueryService', () => {
       }),
     );
     expect(result.stats).toEqual({ total: 2, completed: 1, scheduled: 1, ongoing: 0 });
+    expect(prisma.match.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.not.objectContaining({
+          goals: expect.anything(),
+          events: expect.anything(),
+          lineups: expect.anything(),
+        }),
+      }),
+    );
+  });
+
+  it('does not query season player snapshots for summary lists', async () => {
+    const prisma: any = {
+      match: {
+        findMany: jest
+          .fn<() => Promise<any[]>>()
+          .mockResolvedValue([
+            { id: 'match-1', seasonId: 'season-1', homeTeamId: 'a', awayTeamId: 'b' },
+          ]),
+        count: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+        groupBy: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+      },
+      seasonTeamProfile: { findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([]) },
+      seasonTeamPlayer: { findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([]) },
+    };
+
+    await new MatchQueryService(prisma).findAll(1, 10, undefined, 'season-1');
+
+    expect(prisma.seasonTeamProfile.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.seasonTeamPlayer.findMany).not.toHaveBeenCalled();
   });
 
   it('does not return soft-deleted matches', async () => {

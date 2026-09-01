@@ -107,21 +107,8 @@ export class TeamQueryService {
         where,
         select: {
           ...publicTeamSelect,
-          players: hasSeason
-            ? false
-            : { where: { deletedAt: null }, select: publicPlayerFieldsSelect },
-          seasonPlayers: hasSeason
-            ? {
-                where: { seasonId, player: { deletedAt: null } },
-                select: {
-                  teamId: true,
-                  playerName: true,
-                  jerseyNumber: true,
-                  playerPhoto: true,
-                  player: { select: publicPlayerFieldsSelect },
-                },
-              }
-            : false,
+          players: false,
+          seasonPlayers: false,
           seasonProfiles: hasSeason ? { where: { seasonId }, select: publicTeamSelect } : false,
         },
         orderBy: { createdAt: 'desc' },
@@ -130,16 +117,7 @@ export class TeamQueryService {
     ]);
 
     const data = teams.map((team: any) => {
-      const { seasonProfiles, seasonPlayers, ...baseTeam } = team;
-      if (hasSeason) {
-        baseTeam.players = (seasonPlayers || []).map((roster: any) => ({
-          ...roster.player,
-          name: roster.playerName,
-          jerseyNumber: roster.jerseyNumber,
-          photo: roster.playerPhoto,
-          teamId: roster.teamId,
-        }));
-      }
+      const { seasonProfiles, ...baseTeam } = team;
       const profile = seasonProfiles?.[0];
       if (!profile) return baseTeam;
       return {
@@ -212,7 +190,7 @@ export class TeamQueryService {
       where: { teamName: { contains: name.trim() }, deletedAt: null },
       select: {
         ...publicTeamSelect,
-        players: { where: { deletedAt: null }, select: publicPlayerFieldsSelect },
+        players: false,
       },
       take: 20,
     });

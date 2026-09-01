@@ -37,12 +37,16 @@ export class SeasonService {
     return this.lifecycleService.renameSeason(id, name, username);
   }
 
-  async getSeasonStandings(id: string) {
-    return this.groupService.getSeasonStandings(id);
+  async getSeasonStandings(id: string, refresh = false) {
+    return this.groupService.getSeasonStandings(id, refresh);
   }
 
-  async getSeasonStats(id: string) {
-    return this.groupService.getSeasonStats(id);
+  async getSeasonStats(id: string, refresh = false) {
+    return this.groupService.getSeasonStats(id, refresh);
+  }
+
+  async recomputeSeasonStats(id: string) {
+    return this.groupService.getSeasonStats(id, true);
   }
 
   async getSeasonGroups(seasonId: string) {

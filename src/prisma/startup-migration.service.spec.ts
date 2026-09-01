@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { execFileSync, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import { StartupMigrationService } from './startup-migration.service';
 
 jest.mock('child_process', () => ({
   ...(jest.requireActual('child_process') as any),
-  execFileSync: jest.fn(),
   execSync: jest.fn(),
 }));
 
@@ -94,7 +93,7 @@ describe('StartupMigrationService', () => {
     }
   });
 
-  it('开发环境开关启用时在 Vercel 运行时通过连接池应用迁移', async () => {
+  it('即使遗留开关启用也不在 Vercel 请求冷启动期间应用迁移', async () => {
     const originalVercel = process.env.VERCEL;
     const originalOptIn = process.env.ALLOW_RUNTIME_DATABASE_MIGRATIONS;
     const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -106,15 +105,7 @@ describe('StartupMigrationService', () => {
 
     try {
       await service.onModuleInit();
-      expect(execFileSync).toHaveBeenCalledWith(
-        process.execPath,
-        [expect.stringContaining('prisma'), 'migrate', 'deploy'],
-        expect.objectContaining({
-          env: expect.objectContaining({
-            DIRECT_URL: 'postgresql://runtime-pool/database',
-          }),
-        }),
-      );
+      expect(execSync).not.toHaveBeenCalled();
     } finally {
       if (originalVercel === undefined) delete process.env.VERCEL;
       else process.env.VERCEL = originalVercel;

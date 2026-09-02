@@ -6,6 +6,7 @@ import { normalizeMatchPayload } from '../match/match-write-normalizer';
 import { TeamService } from '../team/team.service';
 import { MatchService } from '../match/match.service';
 import { UploadService } from '../upload/upload.service';
+import { TeamAssetPipelineService } from '../team/team-asset-pipeline.service';
 
 @Injectable()
 export class FormDraftService {
@@ -16,6 +17,7 @@ export class FormDraftService {
     private readonly teamService: TeamService,
     private readonly matchService: MatchService,
     private readonly uploadService: UploadService,
+    private readonly assetPipeline: TeamAssetPipelineService,
   ) {}
 
   async saveDraft(dto: SaveFormDraftDto, username: string, draftId?: string) {
@@ -187,39 +189,53 @@ export class FormDraftService {
           return { success: false, error: '未确定目标赛季，仅保存为草稿' };
         }
 
-        let createdTeamId: string | undefined = undefined;
-        await this.prisma.$transaction(async (tx) => {
-          if (draft.officialRecordId) {
-            const updateDto: any = { seasonId, ...normalized };
-            await this.teamService.updateWithPlayersCore(
-              tx,
-              draft.officialRecordId,
-              updateDto,
-              username,
-              { role: 'super_admin' },
-            );
-            createdTeamId = draft.officialRecordId;
-          } else {
-            const createDto: any = { seasonId, ...normalized };
-            const team = await this.teamService.createTeamCore(tx, createDto, username, {
-              role: 'super_admin',
-            });
-            createdTeamId = team.id;
-          }
+        const prepared = await this.assetPipeline.prepareTeamAssets(
+          normalized,
+          draft.username || username,
+          { role: 'super_admin' },
+          draft.officialRecordId || undefined,
+        );
 
-          await tx.adminFormDraft.update({
-            where: { id: draftId },
-            data: {
-              status: 'MATERIALIZED',
-              officialRecordId: createdTeamId,
-              seasonId,
-              lastError: null,
-            },
+        let createdTeamId: string | undefined = undefined;
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            if (draft.officialRecordId) {
+              const updateDto: any = { seasonId, ...prepared.normalizedDto };
+              await this.teamService.updateWithPlayersCore(
+                tx,
+                draft.officialRecordId,
+                updateDto,
+                username,
+                { role: 'super_admin' },
+              );
+              createdTeamId = draft.officialRecordId;
+            } else {
+              const createDto: any = { seasonId, ...prepared.normalizedDto };
+              const team = await this.teamService.createTeamCore(tx, createDto, username, {
+                role: 'super_admin',
+              });
+              createdTeamId = team.id;
+            }
+
+            await tx.adminFormDraft.update({
+              where: { id: draftId },
+              data: {
+                status: 'MATERIALIZED',
+                officialRecordId: createdTeamId,
+                seasonId,
+                payload: prepared.normalizedDto,
+                lastError: null,
+              },
+            });
           });
-        });
+        } catch (txErr) {
+          await prepared.safeRollback();
+          throw txErr;
+        }
 
         if (createdTeamId) {
           await this.teamService.afterTeamCommitted(createdTeamId, username);
+          await this.assetPipeline.safePostCommit(prepared, draft.username || username, seasonId);
           return { success: true, officialRecordId: createdTeamId };
         }
       } else if (draft.formType === 'MATCH') {

@@ -3,6 +3,7 @@ import {
   Logger,
   ServiceUnavailableException,
   UnprocessableEntityException,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   S3Client,
@@ -19,6 +20,14 @@ import sharp from 'sharp';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
+
+export interface PromotedAsset {
+  originalUrl: string;
+  formalUrl: string;
+  formalKey: string;
+  oldKey: string;
+  isPromoted: boolean;
+}
 
 @Injectable()
 export class UploadService {
@@ -54,6 +63,54 @@ export class UploadService {
     const prefix = this.getUserTempPrefix(username);
     const fileKey = `${prefix}${Date.now()}-${Math.random().toString(36).substring(2, 8)}.webp`;
     return this.uploadBuffer(compressedBuffer, fileKey, 'image/webp');
+  }
+
+  async promoteTempAsset(
+    urlOrKey: string | null | undefined,
+    targetSubpath: string,
+    username: string,
+    userCtx?: { role?: string },
+  ): Promise<PromotedAsset | null> {
+    if (!urlOrKey || typeof urlOrKey !== 'string') return null;
+    const cleanUrlOrKey = urlOrKey.trim();
+    if (!cleanUrlOrKey) return null;
+
+    const key = this.extractKeyFromUrl(cleanUrlOrKey);
+    if (!key.startsWith('temp/')) {
+      return {
+        originalUrl: cleanUrlOrKey,
+        formalUrl: cleanUrlOrKey,
+        formalKey: key,
+        oldKey: key,
+        isPromoted: false,
+      };
+    }
+
+    const userPrefix = this.getUserTempPrefix(username);
+    const isUserTemp = key.startsWith(userPrefix);
+    const isLegacyAdminTemp =
+      key.startsWith('temp/') &&
+      !key.startsWith('temp/user_') &&
+      (username === 'admin' || userCtx?.role === 'super_admin');
+    const isSuperAdmin = userCtx?.role === 'super_admin';
+
+    if (!isUserTemp && !isLegacyAdminTemp && !isSuperAdmin) {
+      this.logger.warn(`拦截越权转存临时图片: username=${username}, key=${key}`);
+      throw new ForbiddenException('您没有权限使用该临时图片资源');
+    }
+
+    const fileName = key.substring(key.lastIndexOf('/') + 1);
+    const cleanSubpath = targetSubpath.replace(/^\/+|\/+$/g, '');
+    const formalKey = `uploads/${cleanSubpath}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}_${fileName}`;
+
+    const formalUrl = await this.copyObject(key, formalKey);
+    return {
+      originalUrl: cleanUrlOrKey,
+      formalUrl,
+      formalKey,
+      oldKey: key,
+      isPromoted: true,
+    };
   }
 
   constructor(private readonly prisma: PrismaService) {
@@ -352,21 +409,43 @@ export class UploadService {
         continue;
       }
 
+      const fullUrl = this.getPublicUrl(key);
+      const urlCandidates = [key, fullUrl].filter(Boolean);
+
       const [teamRef, playerRef, profileRef, seasonPlayerRef] = await Promise.all([
         this.prisma.team.findFirst({
-          where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] },
+          where: {
+            OR: [
+              { teamLogo: { in: urlCandidates } },
+              { homeJersey: { in: urlCandidates } },
+              { awayJersey: { in: urlCandidates } },
+            ],
+          },
         }),
-        this.prisma.player.findFirst({ where: { photo: key } }),
+        this.prisma.player.findFirst({
+          where: { photo: { in: urlCandidates } },
+        }),
         this.prisma.seasonTeamProfile.findFirst({
-          where: { OR: [{ teamLogo: key }, { homeJersey: key }, { awayJersey: key }] },
+          where: {
+            OR: [
+              { teamLogo: { in: urlCandidates } },
+              { homeJersey: { in: urlCandidates } },
+              { awayJersey: { in: urlCandidates } },
+            ],
+          },
         }),
-        this.prisma.seasonTeamPlayer.findFirst({ where: { playerPhoto: key } }),
+        this.prisma.seasonTeamPlayer.findFirst({
+          where: { playerPhoto: { in: urlCandidates } },
+        }),
       ]);
 
       let isReferencedInDrafts = false;
       try {
         const otherDrafts = await this.prisma.adminFormDraft.findMany({
-          where: options?.excludedDraftId ? { id: { not: options.excludedDraftId } } : undefined,
+          where: {
+            status: { not: 'MATERIALIZED' },
+            ...(options?.excludedDraftId ? { id: { not: options.excludedDraftId } } : {}),
+          },
           select: { payload: true },
         });
         for (const draft of otherDrafts) {

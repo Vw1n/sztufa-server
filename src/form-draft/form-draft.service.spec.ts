@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TeamService } from '../team/team.service';
 import { MatchService } from '../match/match.service';
 import { UploadService } from '../upload/upload.service';
+import { TeamAssetPipelineService } from '../team/team-asset-pipeline.service';
 
 describe('FormDraftService', () => {
   let service: FormDraftService;
@@ -49,6 +50,16 @@ describe('FormDraftService', () => {
       deleteObject: jest.fn(),
     };
 
+    const assetPipeline = {
+      prepareTeamAssets: jest.fn(async (d: any, _u: any, _c: any, existingId?: string) => ({
+        teamId: existingId || d.id || 'mock-team-id',
+        normalizedDto: { ...d },
+        promotedAssets: [],
+        safeRollback: jest.fn(),
+      })),
+      safePostCommit: jest.fn(async () => {}),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FormDraftService,
@@ -56,6 +67,7 @@ describe('FormDraftService', () => {
         { provide: TeamService, useValue: teamService },
         { provide: MatchService, useValue: matchService },
         { provide: UploadService, useValue: uploadService },
+        { provide: TeamAssetPipelineService, useValue: assetPipeline },
       ],
     }).compile();
 

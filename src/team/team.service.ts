@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
@@ -14,14 +15,18 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { TeamRosterService } from './team-roster.service';
 import { SeasonStatisticsService } from '../prisma/season-statistics.service';
 import { isTeamGenderCompatibleWithSeason } from '../common/season-gender';
+import { TeamAssetPipelineService } from './team-asset-pipeline.service';
 
 @Injectable()
 export class TeamService {
+  private readonly logger = new Logger(TeamService.name);
+
   constructor(
     private prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
     private readonly teamRosterService: TeamRosterService,
     private readonly seasonStatistics: SeasonStatisticsService,
+    private readonly assetPipeline: TeamAssetPipelineService,
   ) {}
 
   async create(
@@ -38,17 +43,42 @@ export class TeamService {
       }
     }
 
-    const team = await this.prisma.team.create({
-      data: {
-        ...createTeamDto,
-        teamName: createTeamDto.teamName || '',
-        homeJerseyColor: createTeamDto.homeJerseyColor || '',
-        awayJerseyColor: createTeamDto.awayJerseyColor || '',
-      },
-      include: { players: { where: { deletedAt: null } } },
-    });
+    const prepared = await this.assetPipeline.prepareTeamAssets(createTeamDto, username, userCtx);
+    let team: any;
+    try {
+      const {
+        preallocatedTeamId,
+        players: _unusedPlayers,
+        seasonId: _unusedSeasonId,
+        id: _unusedId,
+        ...teamScalarData
+      } = prepared.normalizedDto;
+
+      team = await this.prisma.team.create({
+        data: {
+          id: preallocatedTeamId || undefined,
+          teamName: teamScalarData.teamName || '',
+          homeJerseyColor: teamScalarData.homeJerseyColor || '',
+          awayJerseyColor: teamScalarData.awayJerseyColor || '',
+          gender: teamScalarData.gender || 'MALE',
+          teamDoctor: teamScalarData.teamDoctor || null,
+          headCoach: teamScalarData.headCoach || null,
+          teamLeader: teamScalarData.teamLeader || null,
+          coachPhone: teamScalarData.coachPhone || null,
+          leaderPhone: teamScalarData.leaderPhone || null,
+          teamLogo: teamScalarData.teamLogo || null,
+          homeJersey: teamScalarData.homeJersey || null,
+          awayJersey: teamScalarData.awayJersey || null,
+        },
+        include: { players: { where: { deletedAt: null } } },
+      });
+    } catch (err) {
+      await prepared.safeRollback();
+      throw err;
+    }
 
     await this.afterTeamCommitted(team.id, username);
+    await this.assetPipeline.safePostCommit(prepared, username);
 
     return team;
   }
@@ -140,6 +170,7 @@ export class TeamService {
 
     const team = await tx.team.create({
       data: {
+        id: (dto as any).preallocatedTeamId || undefined,
         teamName: teamData.teamName || '',
         homeJerseyColor: teamData.homeJerseyColor || '',
         awayJerseyColor: teamData.awayJerseyColor || '',
@@ -198,6 +229,7 @@ export class TeamService {
 
       const savedPlayer = await tx.player.create({
         data: {
+          id: (player as any).preallocatedPlayerId || undefined,
           name: player.name || '',
           studentId: player.studentId || '',
           jerseyNumber: player.jerseyNumber || '',
@@ -272,11 +304,21 @@ export class TeamService {
     if (tx) {
       return this.createTeamCore(tx, dto, username, userCtx);
     }
-    const result = await this.prisma.$transaction(
-      async (innerTx) => this.createTeamCore(innerTx, dto, username, userCtx),
-      { timeout: 30000 },
-    );
+    const prepared = await this.assetPipeline.prepareTeamAssets(dto, username, userCtx);
+    let result: any;
+    try {
+      result = await this.prisma.$transaction(
+        async (innerTx) =>
+          this.createTeamCore(innerTx, prepared.normalizedDto, username, userCtx),
+        { timeout: 30000 },
+      );
+    } catch (err) {
+      await prepared.safeRollback();
+      throw err;
+    }
+
     await this.afterTeamCommitted(result.id, username);
+    await this.assetPipeline.safePostCommit(prepared, username, dto.seasonId);
     return result;
   }
 
@@ -369,6 +411,26 @@ export class TeamService {
     });
     const updatedTeam = { ...team, ...updatedProfile };
 
+    if (targetSeason?.status === 'active') {
+      await tx.team.update({
+        where: { id: teamId },
+        data: {
+          teamName: profileData.teamName || team.teamName,
+          teamDoctor: profileData.teamDoctor,
+          headCoach: profileData.headCoach,
+          teamLeader: profileData.teamLeader,
+          coachPhone: profileData.coachPhone,
+          leaderPhone: profileData.leaderPhone,
+          homeJerseyColor: profileData.homeJerseyColor,
+          awayJerseyColor: profileData.awayJerseyColor,
+          teamLogo: profileData.teamLogo,
+          homeJersey: profileData.homeJersey,
+          awayJersey: profileData.awayJersey,
+          gender: profileData.gender || team.gender,
+        },
+      });
+    }
+
     if (targetSeason && !isTeamGenderCompatibleWithSeason(targetSeason.name, updatedTeam.gender)) {
       await tx.seasonTeamPlayer.deleteMany({ where: { seasonId: effectiveSeasonId, teamId } });
     }
@@ -438,6 +500,7 @@ export class TeamService {
       } else {
         const newPlayer = await tx.player.create({
           data: {
+            id: (normalizedDto as any).preallocatedPlayerId || undefined,
             name: normalizedDto.name || '未命名球员',
             studentId:
               normalizedDto.studentId ||
@@ -450,23 +513,32 @@ export class TeamService {
         playerId = newPlayer.id;
       }
 
+      const playerPhotoForCreate =
+        normalizedDto.photo !== undefined
+          ? normalizedDto.photo
+          : existingPlayer?.photo || null;
+
+      const playerPhotoForUpdate =
+        normalizedDto.photo !== undefined ? normalizedDto.photo : undefined;
+
       await tx.seasonTeamPlayer.upsert({
         where: { seasonId_playerId: { seasonId: effectiveSeasonId, playerId } },
         create: {
           seasonId: effectiveSeasonId,
           teamId,
           playerId,
-          playerName: normalizedDto.name || '未命名球员',
-          studentId: normalizedDto.studentId || '',
-          jerseyNumber: normalizedDto.jerseyNumber || '0',
-          playerPhoto: normalizedDto.photo || null,
+          playerName: normalizedDto.name || (existingPlayer ? existingPlayer.name : '未命名球员'),
+          studentId: normalizedDto.studentId || (existingPlayer ? existingPlayer.studentId : ''),
+          jerseyNumber:
+            normalizedDto.jerseyNumber || (existingPlayer ? existingPlayer.jerseyNumber : '0'),
+          playerPhoto: playerPhotoForCreate,
         },
         update: {
           teamId,
-          playerName: normalizedDto.name || '未命名球员',
-          studentId: normalizedDto.studentId || '',
-          jerseyNumber: normalizedDto.jerseyNumber || '0',
-          playerPhoto: normalizedDto.photo || null,
+          playerName: normalizedDto.name || undefined,
+          studentId: normalizedDto.studentId || undefined,
+          jerseyNumber: normalizedDto.jerseyNumber || undefined,
+          ...(playerPhotoForUpdate !== undefined ? { playerPhoto: playerPhotoForUpdate } : {}),
         },
       });
     }
@@ -487,15 +559,30 @@ export class TeamService {
     if (txParam) {
       return this.updateWithPlayersCore(txParam, teamId, dto, username, userCtx);
     }
-    const result = await this.prisma.$transaction(
-      async (tx) => this.updateWithPlayersCore(tx, teamId, dto, username, userCtx),
-      { timeout: 30000 },
-    );
+    const prepared = await this.assetPipeline.prepareTeamAssets(dto, username, userCtx, teamId);
+    let result: any;
+    try {
+      result = await this.prisma.$transaction(
+        async (tx) =>
+          this.updateWithPlayersCore(tx, teamId, prepared.normalizedDto, username, userCtx),
+        { timeout: 30000 },
+      );
+    } catch (err) {
+      await prepared.safeRollback();
+      throw err;
+    }
+
     await this.afterTeamCommitted(result.id, username);
+    await this.assetPipeline.safePostCommit(prepared, username, dto.seasonId);
     return result;
   }
 
-  async update(id: string, updateTeamDto: UpdateTeamDto, username: string = 'admin') {
+  async update(
+    id: string,
+    updateTeamDto: UpdateTeamDto,
+    username: string = 'admin',
+    userCtx?: { role?: string },
+  ) {
     const team = await this.prisma.team.findUnique({ where: { id } });
     if (!team || team.deletedAt !== null) {
       throw new NotFoundException('球队不存在');
@@ -510,70 +597,105 @@ export class TeamService {
       }
     }
 
-    const updatedTeam = await this.prisma.team.update({
-      where: { id },
-      data: updateTeamDto,
-      include: { players: { where: { deletedAt: null } } },
-    });
+    const prepared = await this.assetPipeline.prepareTeamAssets(updateTeamDto, username, userCtx, id);
+    let updatedTeam: any;
+    try {
+      const {
+        preallocatedTeamId: _pId,
+        players: _unusedPlayers,
+        seasonId: _unusedSeasonId,
+        id: _unusedId,
+        deletePlayerIds: _del,
+        ...teamScalarData
+      } = prepared.normalizedDto;
 
-    // 重新计算并缓存该球队所涉及的所有赛季的数据，以更新前台积分榜、射手榜、助攻榜的队徽
-    const cacheErrors: string[] = [];
-    const seasons = await this.prisma.season.findMany();
-    for (const season of seasons) {
-      const result = await this.seasonStatistics.computeAndCache(season.id);
-      if (!result.success) {
-        cacheErrors.push(`赛季 ${season.name}: ${result.error}`);
+      updatedTeam = await this.prisma.team.update({
+        where: { id },
+        data: teamScalarData,
+        include: { players: { where: { deletedAt: null } } },
+      });
+    } catch (err) {
+      await prepared.safeRollback();
+      throw err;
+    }
+
+    // Post-commit 副作用隔离：审计日志、赛季统计缓存重算与临时对象清理失败绝不影响已提交的业务响应
+    try {
+      const diffs: string[] = [];
+      if (updateTeamDto.teamName !== undefined && updateTeamDto.teamName !== team.teamName) {
+        diffs.push(`队名: ${team.teamName}->${updateTeamDto.teamName}`);
       }
-    }
-    if (cacheErrors.length > 0) {
-      console.error('更新球队队徽后重建积分榜统计缓存部分失败:', cacheErrors);
-    }
+      if (updateTeamDto.teamLogo !== undefined && updateTeamDto.teamLogo !== team.teamLogo) {
+        diffs.push(`更新队徽`);
+      }
+      if (updateTeamDto.headCoach !== undefined && updateTeamDto.headCoach !== team.headCoach) {
+        diffs.push(`主教练: ${team.headCoach || '无'}->${updateTeamDto.headCoach || '无'}`);
+      }
+      if (updateTeamDto.coachPhone !== undefined && updateTeamDto.coachPhone !== team.coachPhone) {
+        diffs.push(`教练电话: ${team.coachPhone || '无'}->${updateTeamDto.coachPhone || '无'}`);
+      }
+      if (updateTeamDto.teamLeader !== undefined && updateTeamDto.teamLeader !== team.teamLeader) {
+        diffs.push(`队长: ${team.teamLeader || '无'}->${updateTeamDto.teamLeader || '无'}`);
+      }
+      if (updateTeamDto.leaderPhone !== undefined && updateTeamDto.leaderPhone !== team.leaderPhone) {
+        diffs.push(`队长电话: ${team.leaderPhone || '无'}->${updateTeamDto.leaderPhone || '无'}`);
+      }
+      if (updateTeamDto.teamDoctor !== undefined && updateTeamDto.teamDoctor !== team.teamDoctor) {
+        diffs.push(`队医: ${team.teamDoctor || '无'}->${updateTeamDto.teamDoctor || '无'}`);
+      }
+      if (
+        updateTeamDto.homeJerseyColor !== undefined &&
+        updateTeamDto.homeJerseyColor !== team.homeJerseyColor
+      ) {
+        diffs.push(
+          `主场球衣: ${team.homeJerseyColor || '无'}->${updateTeamDto.homeJerseyColor || '无'}`,
+        );
+      }
+      if (
+        updateTeamDto.awayJerseyColor !== undefined &&
+        updateTeamDto.awayJerseyColor !== team.awayJerseyColor
+      ) {
+        diffs.push(
+          `客场球衣: ${team.awayJerseyColor || '无'}->${updateTeamDto.awayJerseyColor || '无'}`,
+        );
+      }
 
-    const diffs: string[] = [];
-    if (updateTeamDto.teamName !== undefined && updateTeamDto.teamName !== team.teamName) {
-      diffs.push(`队名: ${team.teamName}->${updateTeamDto.teamName}`);
-    }
-    if (updateTeamDto.teamLogo !== undefined && updateTeamDto.teamLogo !== team.teamLogo) {
-      diffs.push(`更新队徽`);
-    }
-    if (updateTeamDto.headCoach !== undefined && updateTeamDto.headCoach !== team.headCoach) {
-      diffs.push(`主教练: ${team.headCoach || '无'}->${updateTeamDto.headCoach || '无'}`);
-    }
-    if (updateTeamDto.coachPhone !== undefined && updateTeamDto.coachPhone !== team.coachPhone) {
-      diffs.push(`教练电话: ${team.coachPhone || '无'}->${updateTeamDto.coachPhone || '无'}`);
-    }
-    if (updateTeamDto.teamLeader !== undefined && updateTeamDto.teamLeader !== team.teamLeader) {
-      diffs.push(`队长: ${team.teamLeader || '无'}->${updateTeamDto.teamLeader || '无'}`);
-    }
-    if (updateTeamDto.leaderPhone !== undefined && updateTeamDto.leaderPhone !== team.leaderPhone) {
-      diffs.push(`队长电话: ${team.leaderPhone || '无'}->${updateTeamDto.leaderPhone || '无'}`);
-    }
-    if (updateTeamDto.teamDoctor !== undefined && updateTeamDto.teamDoctor !== team.teamDoctor) {
-      diffs.push(`队医: ${team.teamDoctor || '无'}->${updateTeamDto.teamDoctor || '无'}`);
-    }
-    if (
-      updateTeamDto.homeJerseyColor !== undefined &&
-      updateTeamDto.homeJerseyColor !== team.homeJerseyColor
-    ) {
-      diffs.push(
-        `主场球衣: ${team.homeJerseyColor || '无'}->${updateTeamDto.homeJerseyColor || '无'}`,
+      const details =
+        diffs.length > 0
+          ? `修改球队 "${team.teamName}" 信息: ${diffs.join(', ')}`
+          : `保存球队 "${team.teamName}" 信息(未改动)`;
+
+      await this.auditLogService.log(username, 'UPDATE_TEAM', details);
+    } catch (auditErr) {
+      this.logger.error(
+        `[update] 记录审计日志失败: ${auditErr}`,
+        auditErr instanceof Error ? auditErr.stack : String(auditErr),
       );
     }
-    if (
-      updateTeamDto.awayJerseyColor !== undefined &&
-      updateTeamDto.awayJerseyColor !== team.awayJerseyColor
-    ) {
-      diffs.push(
-        `客场球衣: ${team.awayJerseyColor || '无'}->${updateTeamDto.awayJerseyColor || '无'}`,
+
+    try {
+      const seasons = await this.prisma.season.findMany();
+      for (const season of seasons) {
+        try {
+          const result = await this.seasonStatistics.computeAndCache(season.id);
+          if (!result.success) {
+            this.logger.warn(`[update] 赛季 ${season.name} 缓存重建未完全成功: ${result.error}`);
+          }
+        } catch (seasonErr) {
+          this.logger.error(
+            `[update] 赛季 ${season.name} 缓存重建异常: ${seasonErr}`,
+            seasonErr instanceof Error ? seasonErr.stack : String(seasonErr),
+          );
+        }
+      }
+    } catch (seasonsErr) {
+      this.logger.error(
+        `[update] 获取赛季列表重建缓存异常: ${seasonsErr}`,
+        seasonsErr instanceof Error ? seasonsErr.stack : String(seasonsErr),
       );
     }
 
-    const details =
-      diffs.length > 0
-        ? `修改球队 "${team.teamName}" 信息: ${diffs.join(', ')}`
-        : `保存球队 "${team.teamName}" 信息(未改动)`;
-
-    await this.auditLogService.log(username, 'UPDATE_TEAM', details);
+    await this.assetPipeline.safePostCommit(prepared, username);
 
     return updatedTeam;
   }

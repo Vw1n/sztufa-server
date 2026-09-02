@@ -14,8 +14,15 @@ describe('PlayerService', () => {
       team: { findUnique: jest.fn() },
       season: { findFirst: jest.fn(), findUnique: jest.fn() },
       seasonTeamProfile: { findUnique: jest.fn() },
-      player: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
-      seasonTeamPlayer: { upsert: jest.fn(), deleteMany: jest.fn() },
+      player: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      seasonTeamPlayer: { findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
+      matchEvent: { findMany: jest.fn() },
+      matchLineup: { findMany: jest.fn() },
       $transaction: jest.fn(async (cb) => cb(prisma)),
     };
 
@@ -72,5 +79,58 @@ describe('PlayerService', () => {
     expect(res.id).toBe('player-1');
     expect(prisma.player.create).toHaveBeenCalled();
     expect(prisma.seasonTeamPlayer.upsert).toHaveBeenCalled();
+  });
+
+  it('limits a player card to the selected season', async () => {
+    const playerId = 'player-1';
+    const seasonId = 'season-2026';
+    prisma.player.findUnique.mockResolvedValue({
+      id: playerId,
+      name: '测试女球员',
+      deletedAt: null,
+      team: { id: 'team-2026', teamName: '女子队' },
+    });
+    prisma.seasonTeamPlayer.findMany.mockResolvedValue([
+      { playerId, season: { id: seasonId, name: '2026校长杯女子组' } },
+    ]);
+    prisma.matchEvent.findMany.mockResolvedValue([
+      {
+        playerId,
+        assistPlayerId: null,
+        eventType: 'goal',
+        match: { season: { id: 'season-2026', name: '2026校长杯女子组' } },
+      },
+    ]);
+    prisma.matchLineup.findMany.mockResolvedValue([
+      {
+        playerId,
+        match: { season: { id: 'season-2026', name: '2026校长杯女子组' } },
+      },
+    ]);
+
+    const result = await service.getCareerStats(playerId, seasonId);
+
+    expect(prisma.seasonTeamPlayer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { playerId, seasonId },
+      }),
+    );
+    expect(prisma.matchEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ match: { status: 'finished', seasonId } }),
+      }),
+    );
+    expect(result.career).toEqual([
+      expect.objectContaining({
+        seasonName: '2026校长杯女子组',
+        appearances: 1,
+        goals: 1,
+      }),
+    ]);
+  });
+
+  it('rejects a player card request without a season', async () => {
+    await expect(service.getCareerStats('player-1', '')).rejects.toThrow(BadRequestException);
+    expect(prisma.player.findUnique).not.toHaveBeenCalled();
   });
 });

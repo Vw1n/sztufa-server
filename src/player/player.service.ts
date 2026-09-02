@@ -381,7 +381,11 @@ export class PlayerService {
     return publicPlayer;
   }
 
-  async getCareerStats(id: string) {
+  async getCareerStats(id: string, seasonId: string) {
+    if (!seasonId) {
+      throw new BadRequestException('请选择要查看的赛季');
+    }
+
     const player = await this.prisma.player.findUnique({
       where: { id },
       include: { team: true },
@@ -392,7 +396,7 @@ export class PlayerService {
 
     // 1. 获取该球员报名参加的所有赛季
     const seasonPlayers = await this.prisma.seasonTeamPlayer.findMany({
-      where: { playerId: id },
+      where: { playerId: id, seasonId },
       include: { season: true },
     });
 
@@ -402,6 +406,7 @@ export class PlayerService {
         OR: [{ playerId: id }, { assistPlayerId: id }],
         match: {
           status: 'finished',
+          seasonId,
         },
       },
       include: {
@@ -419,6 +424,7 @@ export class PlayerService {
         playerId: id,
         match: {
           status: 'finished',
+          seasonId,
         },
       },
       include: {

@@ -87,9 +87,9 @@ export class PlayerController {
   }
 
   @Get(':id/career')
-  @ApiOperation({ summary: '获取脱敏公共球员跨赛季生涯数据' })
-  async getCareer(@Param('id') id: string) {
-    const result = await this.playerService.getCareerStats(id);
+  @ApiOperation({ summary: '获取脱敏公共球员指定赛季球星卡数据' })
+  async getCareer(@Param('id') id: string, @Query('seasonId') seasonId: string) {
+    const result = await this.playerService.getCareerStats(id, seasonId);
     return {
       ...result,
       player: toPublicPlayerDto(result.player),

@@ -95,6 +95,14 @@ describe('PlayerService', () => {
     ]);
     prisma.matchEvent.findMany.mockResolvedValue([
       {
+        id: 'event-1',
+        playerId,
+        assistPlayerId: null,
+        eventType: 'goal',
+        match: { season: { id: 'season-2026', name: '2026校长杯女子组' } },
+      },
+      {
+        id: 'event-1',
         playerId,
         assistPlayerId: null,
         eventType: 'goal',
@@ -103,8 +111,20 @@ describe('PlayerService', () => {
     ]);
     prisma.matchLineup.findMany.mockResolvedValue([
       {
+        matchId: 'match-1',
         playerId,
-        match: { season: { id: 'season-2026', name: '2026校长杯女子组' } },
+        match: {
+          id: 'match-1',
+          season: { id: 'season-2026', name: '2026校长杯女子组' },
+        },
+      },
+      {
+        matchId: 'match-1',
+        playerId,
+        match: {
+          id: 'match-1',
+          season: { id: 'season-2026', name: '2026校长杯女子组' },
+        },
       },
     ]);
 

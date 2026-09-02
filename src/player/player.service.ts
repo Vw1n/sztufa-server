@@ -472,8 +472,9 @@ export class PlayerService {
     // 用事件关联的赛季初始化
     events.forEach((event) => ensureSeasonInit(event.match?.season));
 
-    // 累计比赛事件统计
-    events.forEach((event) => {
+    // 累计比赛事件统计。按事件主键去重，防止关系查询或历史数据重复行造成翻倍。
+    const uniqueEvents = Array.from(new Map(events.map((event) => [event.id, event])).values());
+    uniqueEvents.forEach((event) => {
       const seasonId = event.match?.season?.id;
       if (!seasonId || !seasonStats[seasonId]) return;
 
@@ -497,17 +498,19 @@ export class PlayerService {
     });
 
     // 计算出场数
-    const matchCountsBySeason: Record<string, number> = {};
+    const matchIdsBySeason: Record<string, Set<string>> = {};
     lineups.forEach((lineup) => {
       const sId = lineup.match?.season?.id;
-      if (sId) {
-        matchCountsBySeason[sId] = (matchCountsBySeason[sId] || 0) + 1;
+      const matchId = lineup.matchId || lineup.match?.id;
+      if (sId && matchId) {
+        if (!matchIdsBySeason[sId]) matchIdsBySeason[sId] = new Set();
+        matchIdsBySeason[sId].add(matchId);
       }
     });
 
     // 组装最终结果
     const career = Object.values(seasonStats).map((s) => {
-      const appearances = matchCountsBySeason[s.seasonId] || 0;
+      const appearances = matchIdsBySeason[s.seasonId]?.size || 0;
       return {
         ...s,
         appearances,

@@ -481,10 +481,30 @@ describe('TeamService.updateWithPlayers', () => {
 
   it('preserves existing Player.photo and SeasonTeamPlayer snapshot when photo is omitted (undefined)', async () => {
     const { service, prisma, tx, assetPipeline } = createService();
-    prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team A', gender: 'MALE', deletedAt: null });
-    prisma.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2024 Season', status: 'active' });
-    tx.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team A', gender: 'MALE', deletedAt: null, players: [{ id: 'player-1' }] });
-    tx.seasonTeamProfile.upsert.mockResolvedValue({ id: 'profile-1', seasonId: 'season-1', teamId: 'team-1', teamName: 'Team A' });
+    prisma.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+    });
+    prisma.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2024 Season',
+      status: 'active',
+    });
+    tx.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+      players: [{ id: 'player-1' }],
+    });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({
+      id: 'profile-1',
+      seasonId: 'season-1',
+      teamId: 'team-1',
+      teamName: 'Team A',
+    });
     tx.player.findUnique.mockResolvedValue({
       id: 'player-1',
       teamId: 'team-1',
@@ -494,7 +514,10 @@ describe('TeamService.updateWithPlayers', () => {
       photo: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp',
       deletedAt: null,
     });
-    tx.seasonTeamPlayer.findFirst.mockResolvedValue({ id: 'stp-1', playerPhoto: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp' });
+    tx.seasonTeamPlayer.findFirst.mockResolvedValue({
+      id: 'stp-1',
+      playerPhoto: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp',
+    });
     tx.player.update.mockResolvedValue({ id: 'player-1' });
     tx.seasonTeamPlayer.upsert.mockResolvedValue({});
     tx.auditLog.create.mockResolvedValue({});
@@ -510,10 +533,15 @@ describe('TeamService.updateWithPlayers', () => {
       safeRollback: jest.fn(),
     });
 
-    await service.updateWithPlayers('team-1', {
-      seasonId: 'season-1',
-      players: [{ id: 'player-1', name: '新名' } as any],
-    }, 'admin', { role: 'super_admin' });
+    await service.updateWithPlayers(
+      'team-1',
+      {
+        seasonId: 'season-1',
+        players: [{ id: 'player-1', name: '新名' } as any],
+      },
+      'admin',
+      { role: 'super_admin' },
+    );
 
     // 验证 Player.update 保留了现有 photo
     expect(tx.player.update).toHaveBeenCalledWith(
@@ -532,10 +560,30 @@ describe('TeamService.updateWithPlayers', () => {
 
   it('explicitly clears Player.photo and SeasonTeamPlayer snapshot when photo is null', async () => {
     const { service, prisma, tx, assetPipeline } = createService();
-    prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team A', gender: 'MALE', deletedAt: null });
-    prisma.season.findUnique.mockResolvedValue({ id: 'season-1', name: '2024 Season', status: 'active' });
-    tx.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: 'Team A', gender: 'MALE', deletedAt: null, players: [{ id: 'player-1' }] });
-    tx.seasonTeamProfile.upsert.mockResolvedValue({ id: 'profile-1', seasonId: 'season-1', teamId: 'team-1', teamName: 'Team A' });
+    prisma.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+    });
+    prisma.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2024 Season',
+      status: 'active',
+    });
+    tx.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+      players: [{ id: 'player-1' }],
+    });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({
+      id: 'profile-1',
+      seasonId: 'season-1',
+      teamId: 'team-1',
+      teamName: 'Team A',
+    });
     tx.player.findUnique.mockResolvedValue({
       id: 'player-1',
       teamId: 'team-1',
@@ -554,16 +602,23 @@ describe('TeamService.updateWithPlayers', () => {
       teamId: 'team-1',
       normalizedDto: {
         seasonId: 'season-1',
-        players: [{ id: 'player-1', name: '原名', studentId: '20230001', jerseyNumber: '10', photo: null }], // photo explicitly null
+        players: [
+          { id: 'player-1', name: '原名', studentId: '20230001', jerseyNumber: '10', photo: null },
+        ], // photo explicitly null
       },
       promotedAssets: [],
       safeRollback: jest.fn(),
     });
 
-    await service.updateWithPlayers('team-1', {
-      seasonId: 'season-1',
-      players: [{ id: 'player-1', name: '原名', photo: null } as any],
-    }, 'admin', { role: 'super_admin' });
+    await service.updateWithPlayers(
+      'team-1',
+      {
+        seasonId: 'season-1',
+        players: [{ id: 'player-1', name: '原名', photo: null } as any],
+      },
+      'admin',
+      { role: 'super_admin' },
+    );
 
     // 验证 Player.update 清空 photo
     expect(tx.player.update).toHaveBeenCalledWith(

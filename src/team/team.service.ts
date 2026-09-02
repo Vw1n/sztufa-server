@@ -308,8 +308,7 @@ export class TeamService {
     let result: any;
     try {
       result = await this.prisma.$transaction(
-        async (innerTx) =>
-          this.createTeamCore(innerTx, prepared.normalizedDto, username, userCtx),
+        async (innerTx) => this.createTeamCore(innerTx, prepared.normalizedDto, username, userCtx),
         { timeout: 30000 },
       );
     } catch (err) {
@@ -514,9 +513,7 @@ export class TeamService {
       }
 
       const playerPhotoForCreate =
-        normalizedDto.photo !== undefined
-          ? normalizedDto.photo
-          : existingPlayer?.photo || null;
+        normalizedDto.photo !== undefined ? normalizedDto.photo : existingPlayer?.photo || null;
 
       const playerPhotoForUpdate =
         normalizedDto.photo !== undefined ? normalizedDto.photo : undefined;
@@ -597,7 +594,12 @@ export class TeamService {
       }
     }
 
-    const prepared = await this.assetPipeline.prepareTeamAssets(updateTeamDto, username, userCtx, id);
+    const prepared = await this.assetPipeline.prepareTeamAssets(
+      updateTeamDto,
+      username,
+      userCtx,
+      id,
+    );
     let updatedTeam: any;
     try {
       const {
@@ -637,7 +639,10 @@ export class TeamService {
       if (updateTeamDto.teamLeader !== undefined && updateTeamDto.teamLeader !== team.teamLeader) {
         diffs.push(`队长: ${team.teamLeader || '无'}->${updateTeamDto.teamLeader || '无'}`);
       }
-      if (updateTeamDto.leaderPhone !== undefined && updateTeamDto.leaderPhone !== team.leaderPhone) {
+      if (
+        updateTeamDto.leaderPhone !== undefined &&
+        updateTeamDto.leaderPhone !== team.leaderPhone
+      ) {
         diffs.push(`队长电话: ${team.leaderPhone || '无'}->${updateTeamDto.leaderPhone || '无'}`);
       }
       if (updateTeamDto.teamDoctor !== undefined && updateTeamDto.teamDoctor !== team.teamDoctor) {

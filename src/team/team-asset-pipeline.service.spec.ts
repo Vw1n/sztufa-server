@@ -105,7 +105,9 @@ describe('TeamAssetPipelineService', () => {
       homeJersey: 'https://assets.sztufa.xyz/temp/user_abc/jersey.webp',
     };
 
-    await expect(service.prepareTeamAssets(dto, 'userA')).rejects.toThrow('S3 500 Connection Timeout');
+    await expect(service.prepareTeamAssets(dto, 'userA')).rejects.toThrow(
+      'S3 500 Connection Timeout',
+    );
     expect(uploadService.deleteObjects).toHaveBeenCalled();
     const deletedKeys = uploadService.deleteObjects.mock.calls[0][0] as string[];
     expect(deletedKeys.length).toBe(1);
@@ -129,7 +131,10 @@ describe('TeamAssetPipelineService', () => {
   it('safePostCommit isolates errors from cleanup and cache rebuild', async () => {
     const { service, uploadService, seasonStatistics } = createPipeline();
     uploadService.cleanupTempKeys.mockRejectedValue(new Error('Cleanup network down'));
-    seasonStatistics.computeAndCache.mockResolvedValue({ success: false, error: 'DB lock timeout' });
+    seasonStatistics.computeAndCache.mockResolvedValue({
+      success: false,
+      error: 'DB lock timeout',
+    });
 
     const dto = {
       teamLogo: 'https://assets.sztufa.xyz/temp/user_abc/logo.webp',
@@ -158,11 +163,19 @@ describe('TeamAssetPipelineService', () => {
         ],
       };
 
-      const prepared = await service.prepareTeamAssets(updateDto, 'userA', undefined, 'team-1', 'update');
+      const prepared = await service.prepareTeamAssets(
+        updateDto,
+        'userA',
+        undefined,
+        'team-1',
+        'update',
+      );
 
       expect(prepared.normalizedDto.teamLogo).toBeUndefined();
       expect(prepared.normalizedDto.homeJersey).toBeNull();
-      expect(prepared.normalizedDto.awayJersey).toBe('https://assets.sztufa.xyz/uploads/teams/team-1/away.webp');
+      expect(prepared.normalizedDto.awayJersey).toBe(
+        'https://assets.sztufa.xyz/uploads/teams/team-1/away.webp',
+      );
       expect(prepared.normalizedDto.players[0].photo).toBeUndefined();
       expect(prepared.normalizedDto.players[1].photo).toBeNull();
       expect(prepared.normalizedDto.players[2].photo).toBeNull();
@@ -179,7 +192,13 @@ describe('TeamAssetPipelineService', () => {
         ],
       };
 
-      const prepared = await service.prepareTeamAssets(createDto, 'userA', undefined, undefined, 'create');
+      const prepared = await service.prepareTeamAssets(
+        createDto,
+        'userA',
+        undefined,
+        undefined,
+        'create',
+      );
 
       expect(prepared.normalizedDto.teamLogo).toBeNull();
       expect(prepared.normalizedDto.homeJersey).toBeNull();

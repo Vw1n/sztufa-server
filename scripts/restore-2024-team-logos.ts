@@ -1,5 +1,10 @@
 import { PrismaClient } from '@prisma/client';
-import { S3Client, PutObjectCommand, CopyObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  CopyObjectCommand,
+  DeleteObjectsCommand,
+} from '@aws-sdk/client-s3';
 import * as fs from 'fs';
 import * as path from 'path';
 import sharp from 'sharp';
@@ -53,7 +58,10 @@ async function validateRemoteImageUrl(url: string): Promise<{ valid: boolean; er
     }
     return { valid: true };
   } catch (err) {
-    return { valid: false, error: `远程连接校验失败: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      valid: false,
+      error: `远程连接校验失败: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 
@@ -72,7 +80,9 @@ async function main() {
   console.log(`模式: ${isApply ? '【执行模式 --apply】' : '【只读预览 DRY-RUN】'}`);
 
   if (isApply && !seasonIdArg) {
-    console.error('❌ 【安全拦截】执行写入模式 (--apply) 必须显式提供 --season-id=<seasonId>，禁止依赖模糊匹配！');
+    console.error(
+      '❌ 【安全拦截】执行写入模式 (--apply) 必须显式提供 --season-id=<seasonId>，禁止依赖模糊匹配！',
+    );
     process.exit(1);
   }
 
@@ -82,10 +92,7 @@ async function main() {
   } else {
     season = await prisma.season.findFirst({
       where: {
-        OR: [
-          { id: 'cmsihsd8k0001gja2qkmdh66c' },
-          { name: { contains: '2024' } },
-        ],
+        OR: [{ id: 'cmsihsd8k0001gja2qkmdh66c' }, { name: { contains: '2024' } }],
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -218,7 +225,9 @@ async function main() {
   if (!isApply) {
     console.log('\n[DRY-RUN] 当前为只读预览模式，未执行任何 S3 上传或数据库修改。');
     console.log('如需执行实际恢复，请添加 --apply 参数:');
-    console.log(`npx ts-node scripts/restore-2024-team-logos.ts --season-id=${season.id} --mapping=logos.json --apply`);
+    console.log(
+      `npx ts-node scripts/restore-2024-team-logos.ts --season-id=${season.id} --mapping=logos.json --apply`,
+    );
     return;
   }
 
@@ -269,7 +278,10 @@ async function main() {
         });
         console.log(`✔ [本地转码上传成功] ${item.teamName} -> ${formalUrl}`);
       } else if (item.sourceType === 'temp_url') {
-        const baseUrl = (process.env.R2_PUBLIC_URL || 'https://assets.sztufa.xyz').replace(/\/$/, '');
+        const baseUrl = (process.env.R2_PUBLIC_URL || 'https://assets.sztufa.xyz').replace(
+          /\/$/,
+          '',
+        );
         const sourceKey = item.sourcePathOrUrl.startsWith(`${baseUrl}/`)
           ? item.sourcePathOrUrl.substring(baseUrl.length + 1)
           : item.sourcePathOrUrl;
@@ -338,7 +350,9 @@ async function main() {
     });
   } catch (txErr) {
     if (newlyCreatedFormalKeys.length > 0) {
-      console.error(`❌ 数据库事务失败，启动 R2 补偿清理 ${newlyCreatedFormalKeys.length} 个新创建的正式对象...`);
+      console.error(
+        `❌ 数据库事务失败，启动 R2 补偿清理 ${newlyCreatedFormalKeys.length} 个新创建的正式对象...`,
+      );
       try {
         await s3Client.send(
           new DeleteObjectsCommand({
@@ -376,7 +390,9 @@ async function main() {
   }
 
   if (failedUploads.length > 0) {
-    console.log(`\n⚠️ 恢复流程部分完成：成功恢复 ${executedUpdates.length} 支，失败 ${failedUploads.length} 支：`);
+    console.log(
+      `\n⚠️ 恢复流程部分完成：成功恢复 ${executedUpdates.length} 支，失败 ${failedUploads.length} 支：`,
+    );
     failedUploads.forEach((f) => {
       console.error(`   - 失败球队: ${f.teamName} (原因: ${f.error})`);
     });
@@ -394,5 +410,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-
-

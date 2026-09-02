@@ -70,14 +70,16 @@ describe('UploadService', () => {
 
   it('should reject promoting temp assets owned by another user', async () => {
     const userAKey = `${service.getUserTempPrefix('userA')}logo.webp`;
-    await expect(
-      service.promoteTempAsset(userAKey, 'teams/team-1/logo', 'userB'),
-    ).rejects.toThrow('您没有权限使用该临时图片资源');
+    await expect(service.promoteTempAsset(userAKey, 'teams/team-1/logo', 'userB')).rejects.toThrow(
+      '您没有权限使用该临时图片资源',
+    );
   });
 
   it('should promote temp asset when authorized', async () => {
     const userAKey = `${service.getUserTempPrefix('userA')}logo.webp`;
-    service.copyObject = jest.fn().mockResolvedValue('https://assets.sztufa.xyz/uploads/teams/team-1/logo/new.webp');
+    service.copyObject = jest
+      .fn()
+      .mockResolvedValue('https://assets.sztufa.xyz/uploads/teams/team-1/logo/new.webp');
 
     const result = await service.promoteTempAsset(userAKey, 'teams/team-1/logo', 'userA');
     expect(result).toBeDefined();

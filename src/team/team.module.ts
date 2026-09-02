@@ -14,4 +14,3 @@ import { UploadModule } from '../upload/upload.module';
   exports: [TeamService, TeamQueryService, TeamRosterService, TeamAssetPipelineService],
 })
 export class TeamModule {}
-

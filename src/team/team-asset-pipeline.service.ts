@@ -80,7 +80,9 @@ export class TeamAssetPipelineService {
 
     // 2. 等待所有并发转存任务彻底 settle，防止首个失败后其他后台任务稍后成功产生孤儿对象
     const settledResults = await Promise.allSettled(Array.from(dedupeMap.values()));
-    const rejected = settledResults.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    const rejected = settledResults.find(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
 
     if (rejected) {
       const keysToDelete: string[] = [];

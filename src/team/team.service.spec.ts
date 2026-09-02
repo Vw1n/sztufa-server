@@ -23,10 +23,21 @@ describe('TeamService.createWithPlayers', () => {
       auditLog: { create: jest.fn() },
     };
     const prisma: any = {
+      team: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+      season: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     const auditLogService: any = { log: jest.fn() };
     const seasonStatistics: any = { computeAndCache: jest.fn() };
+    const assetPipeline: any = {
+      prepareTeamAssets: jest.fn(async (d: any, _u: any, _c: any, existingId?: string) => ({
+        teamId: existingId || d.id || 'mock-team-id',
+        normalizedDto: { ...d },
+        promotedAssets: [],
+        safeRollback: jest.fn(),
+      })),
+      safePostCommit: jest.fn(async () => {}),
+    };
 
     return {
       service: new TeamService(
@@ -34,10 +45,12 @@ describe('TeamService.createWithPlayers', () => {
         auditLogService,
         new TeamRosterService(prisma),
         seasonStatistics,
+        assetPipeline,
       ),
       prisma,
       tx,
       auditLogService,
+      assetPipeline,
     };
   };
 
@@ -332,17 +345,27 @@ describe('TeamService.updateWithPlayers', () => {
       auditLog: { create: jest.fn() },
     };
     const prisma: any = {
-      team: { findUnique: jest.fn(), findFirst: jest.fn() },
-      season: { findUnique: jest.fn() },
+      team: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+      season: { findUnique: jest.fn(), findMany: jest.fn() },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const assetPipeline: any = {
+      prepareTeamAssets: jest.fn(async (d: any, _u: any, _c: any, existingId?: string) => ({
+        teamId: existingId || d.id || 'mock-team-id',
+        normalizedDto: { ...d },
+        promotedAssets: [],
+        safeRollback: jest.fn(),
+      })),
+      safePostCommit: jest.fn(async () => {}),
     };
     const service = new TeamService(
       prisma,
       { log: jest.fn() } as any,
       new TeamRosterService(prisma),
       { computeAndCache: jest.fn() } as any,
+      assetPipeline,
     );
-    return { service, prisma, tx };
+    return { service, prisma, tx, assetPipeline };
   };
 
   it('updates only the selected season snapshot when player details change', async () => {
@@ -456,6 +479,162 @@ describe('TeamService.updateWithPlayers', () => {
     );
   });
 
+  it('preserves existing Player.photo and SeasonTeamPlayer snapshot when photo is omitted (undefined)', async () => {
+    const { service, prisma, tx, assetPipeline } = createService();
+    prisma.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+    });
+    prisma.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2024 Season',
+      status: 'active',
+    });
+    tx.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+      players: [{ id: 'player-1' }],
+    });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({
+      id: 'profile-1',
+      seasonId: 'season-1',
+      teamId: 'team-1',
+      teamName: 'Team A',
+    });
+    tx.player.findUnique.mockResolvedValue({
+      id: 'player-1',
+      teamId: 'team-1',
+      name: '原名',
+      studentId: '20230001',
+      jerseyNumber: '10',
+      photo: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp',
+      deletedAt: null,
+    });
+    tx.seasonTeamPlayer.findFirst.mockResolvedValue({
+      id: 'stp-1',
+      playerPhoto: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp',
+    });
+    tx.player.update.mockResolvedValue({ id: 'player-1' });
+    tx.seasonTeamPlayer.upsert.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    tx.team.update.mockResolvedValue({});
+
+    assetPipeline.prepareTeamAssets.mockResolvedValue({
+      teamId: 'team-1',
+      normalizedDto: {
+        seasonId: 'season-1',
+        players: [{ id: 'player-1', name: '新名', studentId: '20230001', jerseyNumber: '10' }], // photo omitted (undefined)
+      },
+      promotedAssets: [],
+      safeRollback: jest.fn(),
+    });
+
+    await service.updateWithPlayers(
+      'team-1',
+      {
+        seasonId: 'season-1',
+        players: [{ id: 'player-1', name: '新名' } as any],
+      },
+      'admin',
+      { role: 'super_admin' },
+    );
+
+    // 验证 Player.update 保留了现有 photo
+    expect(tx.player.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'player-1' },
+        data: expect.objectContaining({
+          photo: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp',
+        }),
+      }),
+    );
+
+    // 验证 SeasonTeamPlayer.upsert 的 update 分支未将 playerPhoto 覆盖为 null
+    const upsertCall = tx.seasonTeamPlayer.upsert.mock.calls[0][0];
+    expect(upsertCall.update.playerPhoto).toBeUndefined();
+  });
+
+  it('explicitly clears Player.photo and SeasonTeamPlayer snapshot when photo is null', async () => {
+    const { service, prisma, tx, assetPipeline } = createService();
+    prisma.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+    });
+    prisma.season.findUnique.mockResolvedValue({
+      id: 'season-1',
+      name: '2024 Season',
+      status: 'active',
+    });
+    tx.team.findUnique.mockResolvedValue({
+      id: 'team-1',
+      teamName: 'Team A',
+      gender: 'MALE',
+      deletedAt: null,
+      players: [{ id: 'player-1' }],
+    });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({
+      id: 'profile-1',
+      seasonId: 'season-1',
+      teamId: 'team-1',
+      teamName: 'Team A',
+    });
+    tx.player.findUnique.mockResolvedValue({
+      id: 'player-1',
+      teamId: 'team-1',
+      name: '原名',
+      studentId: '20230001',
+      jerseyNumber: '10',
+      photo: 'https://assets.sztufa.xyz/uploads/players/player-1/photo/original.webp',
+      deletedAt: null,
+    });
+    tx.player.update.mockResolvedValue({ id: 'player-1' });
+    tx.seasonTeamPlayer.upsert.mockResolvedValue({});
+    tx.auditLog.create.mockResolvedValue({});
+    tx.team.update.mockResolvedValue({});
+
+    assetPipeline.prepareTeamAssets.mockResolvedValue({
+      teamId: 'team-1',
+      normalizedDto: {
+        seasonId: 'season-1',
+        players: [
+          { id: 'player-1', name: '原名', studentId: '20230001', jerseyNumber: '10', photo: null },
+        ], // photo explicitly null
+      },
+      promotedAssets: [],
+      safeRollback: jest.fn(),
+    });
+
+    await service.updateWithPlayers(
+      'team-1',
+      {
+        seasonId: 'season-1',
+        players: [{ id: 'player-1', name: '原名', photo: null } as any],
+      },
+      'admin',
+      { role: 'super_admin' },
+    );
+
+    // 验证 Player.update 清空 photo
+    expect(tx.player.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'player-1' },
+        data: expect.objectContaining({
+          photo: null,
+        }),
+      }),
+    );
+
+    // 验证 SeasonTeamPlayer.upsert 的 update 分支显式将 playerPhoto 设置为 null
+    const upsertCall = tx.seasonTeamPlayer.upsert.mock.calls[0][0];
+    expect(upsertCall.update.playerPhoto).toBeNull();
+  });
+
   it('rejects a coach attempting to update another team', async () => {
     const { service, prisma } = createService();
     prisma.team.findUnique.mockResolvedValue({ id: 'team-2', teamName: 'Other', deletedAt: null });
@@ -467,5 +646,74 @@ describe('TeamService.updateWithPlayers', () => {
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('create() strips pipeline-internal fields and does not pass preallocatedTeamId or players array to prisma.team.create', async () => {
+    const { service, prisma, assetPipeline } = createService();
+    prisma.team.findFirst.mockResolvedValue(null);
+    prisma.team.create.mockResolvedValue({ id: 'team-1', teamName: '测试队' });
+
+    assetPipeline.prepareTeamAssets.mockResolvedValue({
+      teamId: 'preallocated-123',
+      normalizedDto: {
+        teamName: '测试队',
+        preallocatedTeamId: 'preallocated-123',
+        players: [{ name: '新球员' }],
+        seasonId: 'season-1',
+      },
+      promotedAssets: [],
+      safeRollback: jest.fn(),
+    });
+
+    await service.create({ teamName: '测试队' } as any, 'admin', { role: 'super_admin' });
+
+    expect(prisma.team.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: 'preallocated-123',
+        teamName: '测试队',
+      }),
+      include: { players: { where: { deletedAt: null } } },
+    });
+
+    const createCallData = prisma.team.create.mock.calls[0][0].data;
+    expect(createCallData.preallocatedTeamId).toBeUndefined();
+    expect(createCallData.players).toBeUndefined();
+    expect(createCallData.seasonId).toBeUndefined();
+  });
+
+  it('update() strips pipeline-internal fields before calling prisma.team.update', async () => {
+    const { service, prisma, assetPipeline } = createService();
+    prisma.team.findUnique.mockResolvedValue({ id: 'team-1', teamName: '原名', deletedAt: null });
+    prisma.team.update.mockResolvedValue({ id: 'team-1', teamName: '新名' });
+    prisma.season.findMany.mockResolvedValue([]);
+
+    assetPipeline.prepareTeamAssets.mockResolvedValue({
+      teamId: 'team-1',
+      normalizedDto: {
+        teamName: '新名',
+        preallocatedTeamId: 'team-1',
+        players: [],
+        deletePlayerIds: ['p-1'],
+        seasonId: 'season-1',
+      },
+      promotedAssets: [],
+      safeRollback: jest.fn(),
+    });
+
+    await service.update('team-1', { teamName: '新名' } as any, 'admin');
+
+    expect(prisma.team.update).toHaveBeenCalledWith({
+      where: { id: 'team-1' },
+      data: expect.objectContaining({
+        teamName: '新名',
+      }),
+      include: { players: { where: { deletedAt: null } } },
+    });
+
+    const updateCallData = prisma.team.update.mock.calls[0][0].data;
+    expect(updateCallData.preallocatedTeamId).toBeUndefined();
+    expect(updateCallData.players).toBeUndefined();
+    expect(updateCallData.deletePlayerIds).toBeUndefined();
+    expect(updateCallData.seasonId).toBeUndefined();
   });
 });

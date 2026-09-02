@@ -21,8 +21,7 @@ describe('PlayerService', () => {
         update: jest.fn(),
       },
       seasonTeamPlayer: { findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
-      matchEvent: { findMany: jest.fn() },
-      matchLineup: { findMany: jest.fn() },
+      match: { findMany: jest.fn() },
       $transaction: jest.fn(async (cb) => cb(prisma)),
     };
 
@@ -93,38 +92,23 @@ describe('PlayerService', () => {
     prisma.seasonTeamPlayer.findMany.mockResolvedValue([
       { playerId, season: { id: seasonId, name: '2026校长杯女子组' } },
     ]);
-    prisma.matchEvent.findMany.mockResolvedValue([
+    prisma.match.findMany.mockResolvedValue([
       {
-        id: 'event-1',
-        playerId,
-        assistPlayerId: null,
-        eventType: 'goal',
-        match: { season: { id: 'season-2026', name: '2026校长杯女子组' } },
+        id: 'match-1',
+        season: { id: seasonId, name: '2026校长杯女子组' },
+        lineups: [{ id: 'lineup-1' }, { id: 'lineup-duplicate' }],
+        events: [
+          { id: 'event-1', playerId, assistPlayerId: null, eventType: 'goal' },
+          { id: 'event-1', playerId, assistPlayerId: null, eventType: 'goal' },
+        ],
       },
       {
-        id: 'event-1',
-        playerId,
-        assistPlayerId: null,
-        eventType: 'goal',
-        match: { season: { id: 'season-2026', name: '2026校长杯女子组' } },
-      },
-    ]);
-    prisma.matchLineup.findMany.mockResolvedValue([
-      {
-        matchId: 'match-1',
-        playerId,
-        match: {
-          id: 'match-1',
-          season: { id: 'season-2026', name: '2026校长杯女子组' },
-        },
-      },
-      {
-        matchId: 'match-1',
-        playerId,
-        match: {
-          id: 'match-1',
-          season: { id: 'season-2026', name: '2026校长杯女子组' },
-        },
+        id: 'match-2',
+        season: { id: seasonId, name: '2026校长杯女子组' },
+        lineups: [{ id: 'lineup-2' }],
+        events: [
+          { id: 'shootout-1', playerId, assistPlayerId: null, eventType: 'penalty_shootout_goal' },
+        ],
       },
     ]);
 
@@ -135,15 +119,15 @@ describe('PlayerService', () => {
         where: { playerId, seasonId },
       }),
     );
-    expect(prisma.matchEvent.findMany).toHaveBeenCalledWith(
+    expect(prisma.match.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ match: { status: 'finished', seasonId } }),
+        where: expect.objectContaining({ status: 'finished', seasonId, deletedAt: null }),
       }),
     );
     expect(result.career).toEqual([
       expect.objectContaining({
         seasonName: '2026校长杯女子组',
-        appearances: 1,
+        appearances: 2,
         goals: 1,
       }),
     ]);

@@ -400,38 +400,27 @@ export class PlayerService {
       include: { season: true },
     });
 
-    // 2. 获取所有的进球、红黄牌等事件
-    const events = await this.prisma.matchEvent.findMany({
+    // 从所选赛季的比赛根记录聚合，避免跨赛季关系查询和历史重复数据污染统计。
+    const matches = await this.prisma.match.findMany({
       where: {
-        OR: [{ playerId: id }, { assistPlayerId: id }],
-        match: {
-          status: 'finished',
-          seasonId,
-        },
+        seasonId,
+        status: 'finished',
+        deletedAt: null,
+        OR: [
+          { lineups: { some: { playerId: id } } },
+          { events: { some: { OR: [{ playerId: id }, { assistPlayerId: id }] } } },
+        ],
       },
-      include: {
-        match: {
-          include: {
-            season: true,
-          },
+      select: {
+        id: true,
+        season: { select: { id: true, name: true } },
+        events: {
+          where: { OR: [{ playerId: id }, { assistPlayerId: id }] },
+          select: { id: true, playerId: true, assistPlayerId: true, eventType: true },
         },
-      },
-    });
-
-    // 3. 计算出场数 (Player appearances) - 通过 MatchLineup 统计实际出场
-    const lineups = await this.prisma.matchLineup.findMany({
-      where: {
-        playerId: id,
-        match: {
-          status: 'finished',
-          seasonId,
-        },
-      },
-      include: {
-        match: {
-          include: {
-            season: true,
-          },
+        lineups: {
+          where: { playerId: id },
+          select: { id: true },
         },
       },
     });
@@ -466,51 +455,40 @@ export class PlayerService {
     // 用报名赛季初始化
     seasonPlayers.forEach((sp) => ensureSeasonInit(sp.season));
 
-    // 用出场记录关联的赛季初始化
-    lineups.forEach((lineup) => ensureSeasonInit(lineup.match?.season));
+    const appearanceMatchIds = new Set<string>();
+    matches.forEach((match) => {
+      ensureSeasonInit(match.season);
+      const matchSeasonId = match.season?.id;
+      if (!matchSeasonId || !seasonStats[matchSeasonId]) return;
 
-    // 用事件关联的赛季初始化
-    events.forEach((event) => ensureSeasonInit(event.match?.season));
+      if (match.lineups.length > 0) appearanceMatchIds.add(match.id);
 
-    // 累计比赛事件统计。按事件主键去重，防止关系查询或历史数据重复行造成翻倍。
-    const uniqueEvents = Array.from(new Map(events.map((event) => [event.id, event])).values());
-    uniqueEvents.forEach((event) => {
-      const seasonId = event.match?.season?.id;
-      if (!seasonId || !seasonStats[seasonId]) return;
-
-      const stats = seasonStats[seasonId];
-
-      if (event.playerId === id) {
-        if (event.eventType === 'goal' || event.eventType === 'penalty') {
-          stats.goals += 1;
-        } else if (event.eventType === 'yellow_card') {
-          stats.yellowCards += 1;
-        } else if (event.eventType === 'red_card' || event.eventType === 'yellow_to_red') {
-          stats.redCards += 1;
+      const uniqueEvents = Array.from(
+        new Map(match.events.map((event) => [event.id, event])).values(),
+      );
+      uniqueEvents.forEach((event) => {
+        const stats = seasonStats[matchSeasonId];
+        if (event.playerId === id) {
+          if (event.eventType === 'goal' || event.eventType === 'penalty') {
+            stats.goals += 1;
+          } else if (event.eventType === 'yellow_card') {
+            stats.yellowCards += 1;
+          } else if (event.eventType === 'red_card' || event.eventType === 'yellow_to_red') {
+            stats.redCards += 1;
+          }
         }
-      }
-
-      if (event.assistPlayerId === id) {
-        if (event.eventType === 'goal' || event.eventType === 'penalty') {
+        if (
+          event.assistPlayerId === id &&
+          (event.eventType === 'goal' || event.eventType === 'penalty')
+        ) {
           stats.assists += 1;
         }
-      }
-    });
-
-    // 计算出场数
-    const matchIdsBySeason: Record<string, Set<string>> = {};
-    lineups.forEach((lineup) => {
-      const sId = lineup.match?.season?.id;
-      const matchId = lineup.matchId || lineup.match?.id;
-      if (sId && matchId) {
-        if (!matchIdsBySeason[sId]) matchIdsBySeason[sId] = new Set();
-        matchIdsBySeason[sId].add(matchId);
-      }
+      });
     });
 
     // 组装最终结果
     const career = Object.values(seasonStats).map((s) => {
-      const appearances = matchIdsBySeason[s.seasonId]?.size || 0;
+      const appearances = s.seasonId === seasonId ? appearanceMatchIds.size : 0;
       return {
         ...s,
         appearances,

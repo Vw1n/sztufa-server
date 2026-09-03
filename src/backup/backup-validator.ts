@@ -1,9 +1,20 @@
 import { BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { MANDATORY_BACKUP_TABLES, TABLE_METADATA_MAP } from './backup-table-registry';
+import {
+  EXCLUDED_BACKUP_MODELS,
+  LEGACY_V3_REQUIRED_TABLES,
+  MANDATORY_BACKUP_TABLES,
+  V4_PERSISTENT_MODELS,
+  TABLE_METADATA_MAP,
+} from './backup-table-registry';
 import { ParseStreamResult } from './backup-serializer';
 
-export { MANDATORY_BACKUP_TABLES };
+export {
+  MANDATORY_BACKUP_TABLES,
+  LEGACY_V3_REQUIRED_TABLES,
+  EXCLUDED_BACKUP_MODELS,
+  V4_PERSISTENT_MODELS,
+};
 
 export interface BackupValidationResult {
   category: 'active' | 'legacy-archive' | 'quarantine';
@@ -71,7 +82,14 @@ export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): v
   const manifestTableNames = Object.keys(manifest.tables);
   const actualTableNames = Object.keys(parseResult.tableCounts);
 
-  for (const mandatoryTable of MANDATORY_BACKUP_TABLES) {
+  for (const excluded of EXCLUDED_BACKUP_MODELS) {
+    if (manifestTableNames.includes(excluded) || actualTableNames.includes(excluded)) {
+      throw new BadRequestException(`备份文件包含禁止备份的安全敏感或临时表: ${excluded}`);
+    }
+  }
+
+  const requiredTables = LEGACY_V3_REQUIRED_TABLES;
+  for (const mandatoryTable of requiredTables) {
     if (!manifestTableNames.includes(mandatoryTable)) {
       throw new BadRequestException(`备份 Manifest 元数据缺少必要数据表计数: ${mandatoryTable}`);
     }
@@ -80,13 +98,13 @@ export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): v
     }
   }
 
-  if (actualTableNames.length !== MANDATORY_BACKUP_TABLES.length) {
+  if (actualTableNames.length !== requiredTables.length) {
     throw new BadRequestException(
-      `备份数据体包含非预期的未知表，要求精确包含 ${MANDATORY_BACKUP_TABLES.length} 张表，实际获取 ${actualTableNames.length} 张`,
+      `备份数据体包含非预期的未知表，要求精确包含 ${requiredTables.length} 张表，实际获取 ${actualTableNames.length} 张`,
     );
   }
 
-  for (const tableName of MANDATORY_BACKUP_TABLES) {
+  for (const tableName of requiredTables) {
     const manifestCount = manifest.tables[tableName];
     const actualCount = parseResult.tableCounts[tableName];
 
@@ -215,7 +233,14 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
   const manifestTableNames = Object.keys(data.manifest.tables);
   const dataTableNames = Object.keys(data.tables);
 
-  for (const mandatoryTable of MANDATORY_BACKUP_TABLES) {
+  for (const excluded of EXCLUDED_BACKUP_MODELS) {
+    if (manifestTableNames.includes(excluded) || dataTableNames.includes(excluded)) {
+      throw new BadRequestException(`备份文件包含禁止备份的安全敏感或临时表: ${excluded}`);
+    }
+  }
+
+  const requiredTables = LEGACY_V3_REQUIRED_TABLES;
+  for (const mandatoryTable of requiredTables) {
     if (!manifestTableNames.includes(mandatoryTable)) {
       throw new BadRequestException(`备份 Manifest 元数据缺少必要数据表计数: ${mandatoryTable}`);
     }
@@ -224,13 +249,13 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
     }
   }
 
-  if (dataTableNames.length !== MANDATORY_BACKUP_TABLES.length) {
+  if (dataTableNames.length !== requiredTables.length) {
     throw new BadRequestException(
-      `备份数据体包含非预期的未知表，要求精确包含 ${MANDATORY_BACKUP_TABLES.length} 张表，实际获取 ${dataTableNames.length} 张`,
+      `备份数据体包含非预期的未知表，要求精确包含 ${requiredTables.length} 张表，实际获取 ${dataTableNames.length} 张`,
     );
   }
 
-  for (const tableName of MANDATORY_BACKUP_TABLES) {
+  for (const tableName of requiredTables) {
     const manifestCount = data.manifest.tables[tableName];
     const tableData = data.tables[tableName];
 

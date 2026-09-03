@@ -122,10 +122,10 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
   });
 
   /**
-   * 17 表全局规范化快照计算工具
-   * 逐表读取记录，对 ID 排序与 Date 字符串化，计算全库 17 表确定性 SHA-256 摘要与快照结构
+   * 18 表全局规范化快照计算工具
+   * 逐表读取记录，对 ID 排序与 Date 字符串化，计算全库 18 表确定性 SHA-256 摘要与快照结构
    */
-  const compute17TableSnapshot = async (prisma: PrismaClient) => {
+  const compute18TableSnapshot = async (prisma: PrismaClient) => {
     const snapshot: Record<string, any[]> = {};
     const counts: Record<string, number> = {};
 
@@ -161,8 +161,8 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
     return { snapshot, counts, hash };
   };
 
-  /** 清理全库 17 表数据 */
-  const clearAll17Tables = async (prisma: PrismaClient) => {
+  /** 清理全库 18 表数据 */
+  const clearAll18Tables = async (prisma: PrismaClient) => {
     await prisma.match.updateMany({ data: { mvpPlayerId: null } });
     await prisma.player.updateMany({ data: { suspendedAtMatchId: null } });
     await prisma.user.updateMany({ data: { teamId: null } });
@@ -175,9 +175,9 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
     }
   };
 
-  /** 向全库 17 表真实填充至少一条合规记录 */
-  const seedAll17Tables = async (prisma: PrismaClient) => {
-    await clearAll17Tables(prisma);
+  /** 向全库 18 表真实填充至少一条合规记录 */
+  const seedAll18Tables = async (prisma: PrismaClient) => {
+    await clearAll18Tables(prisma);
 
     const user1 = await prisma.user.create({
       data: { id: 'u1', username: 'admin', password: 'hashed_pwd_123', role: 'super_admin' },
@@ -410,15 +410,15 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
     });
   });
 
-  describe('PostgreSQL 真实数据库全量 17 表导出、篡改、恢复与深度数据一致性测试', () => {
-    it('应该能够在真实 PostgreSQL 中向 17 张表写入数据，执行真实 createBackup，篡改库后 restoreBackup 恢复全量 17 表深度相等', async () => {
-      // 1. 真实向全库 17 张表写入至少 1 条数据
-      await seedAll17Tables(testPrisma);
+  describe('PostgreSQL 真实数据库全量 18 表导出、篡改、恢复与深度数据一致性测试', () => {
+    it('应该能够在真实 PostgreSQL 中向 18 张表写入数据，执行真实 createBackup，篡改库后 restoreBackup 恢复全量 18 表深度相等', async () => {
+      // 1. 真实向全库 18 张表写入至少 1 条数据
+      await seedAll18Tables(testPrisma);
 
-      // 2. 测量导出前全库 17 表规范化快照与 SHA-256 摘要
-      const preExportSnapshot = await compute17TableSnapshot(testPrisma);
+      // 2. 测量导出前全库 18 表规范化快照与 SHA-256 摘要
+      const preExportSnapshot = await compute18TableSnapshot(testPrisma);
 
-      // 验证 17 张表每张都有真实记录
+      // 验证 18 张表每张都有真实记录
       for (const tableName of MANDATORY_BACKUP_TABLES) {
         expect(preExportSnapshot.counts[tableName]).toBeGreaterThanOrEqual(1);
       }
@@ -449,7 +449,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       expect(backupInfo.key).toMatch(/^private-backups\/database\/full\/backup_/);
       expect(capturedBackupBuffer.length).toBeGreaterThan(0);
 
-      // 4. 彻底篡改数据库全量 17 表记录与关系
+      // 4. 彻底篡改数据库全量 18 表记录与关系
       await testPrisma.match.updateMany({ data: { mvpPlayerId: null } });
       await testPrisma.goal.deleteMany();
       await testPrisma.matchEvent.deleteMany();
@@ -470,7 +470,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         data: { username: 'corrupted_member' },
       });
 
-      const corruptedSnapshot = await compute17TableSnapshot(testPrisma);
+      const corruptedSnapshot = await compute18TableSnapshot(testPrisma);
       expect(corruptedSnapshot.hash).not.toBe(preExportSnapshot.hash);
 
       // 5. 执行 restoreBackup 恢复
@@ -484,8 +484,8 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       }
       expect(restoreResult).toBe('数据库还原成功');
 
-      // 6. 测量恢复后全库 17 表规范化快照并做 100% 深度相等断言
-      const postRestoreSnapshot = await compute17TableSnapshot(testPrisma);
+      // 6. 测量恢复后全库 18 表规范化快照并做 100% 深度相等断言
+      const postRestoreSnapshot = await compute18TableSnapshot(testPrisma);
 
       expect(postRestoreSnapshot.counts).toEqual(preExportSnapshot.counts);
       // 恢复必须撤销旧会话：仅 sessionVersion 按明确规则变化，其余字段仍深度相等。
@@ -517,10 +517,10 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       expect(restoredApproval?.seasonId).toBe('s1');
     });
 
-    it('当还原在 PostgreSQL 清库/写入事务末端触发写入异常时，整个 17 表事务必须完整回滚，全库 17 表快照摘要保持 100% 不变', async () => {
+    it('当还原在 PostgreSQL 清库/写入事务末端触发写入异常时，整个 18 表事务必须完整回滚，全库 18 表快照摘要保持 100% 不变', async () => {
       // 1. 确保已有合规测试数据
-      await seedAll17Tables(testPrisma);
-      const preFailSnapshot = await compute17TableSnapshot(testPrisma);
+      await seedAll18Tables(testPrisma);
+      const preFailSnapshot = await compute18TableSnapshot(testPrisma);
 
       // 2. 捕获真实 gzip backup buffer，保证 parseAndValidateBackupStream 能正确解析
       let capturedRollbackBuffer: Buffer = Buffer.alloc(0);
@@ -533,18 +533,10 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         if (!capturedRollbackBuffer.length) {
           // 首次调用：捕获主备份 gzip buffer
           const chunks: Buffer[] = [];
-          for await (const chunk of stream) {
-            chunks.push(Buffer.from(chunk));
-          }
+          for await (const chunk of stream) chunks.push(Buffer.from(chunk));
           capturedRollbackBuffer = Buffer.concat(chunks);
-        } else {
-          // 后续调用（pre-restore 快照）：排空流即可
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          for await (const _chunk of stream) {
-            /* drain */
-          }
         }
-        return { Location: 'mock-location' } as any;
+        return { Location: 'mock-location-rollback' } as any;
       });
 
       jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
@@ -554,7 +546,6 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         return {} as any;
       });
 
-      // 执行真实 createBackup，捕获合规 gzip buffer（供后续 GetObjectCommand 返回）
       await service.createBackup('admin');
 
       // 3. 监控 testPrisma.$transaction 确保真实进入数据库事务
@@ -585,10 +576,41 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       // 5. 明确断言确实进入了 $transaction 事务
       expect(transactionEntered).toBe(true);
 
-      // 6. 断言 PostgreSQL 事务成功进行全表回滚：测算恢复失败后的全库 17 表快照摘要，必须与 preFailSnapshot 100% 深度相等！
-      const postFailSnapshot = await compute17TableSnapshot(testPrisma);
+      // 6. 断言 PostgreSQL 事务成功进行全表回滚：测算恢复失败后的全库 18 表快照摘要，必须与 preFailSnapshot 100% 深度相等！
+      const postFailSnapshot = await compute18TableSnapshot(testPrisma);
       expect(postFailSnapshot.hash).toBe(preFailSnapshot.hash);
       expect(postFailSnapshot.snapshot).toEqual(preFailSnapshot.snapshot);
+    });
+
+    it('当数据库中存在报名记录时，执行旧 V3 恢复必须被前置守卫拒绝拦截，且数据库数据保持原样', async () => {
+      // 1. 确保已有合规测试数据
+      await seedAll18Tables(testPrisma);
+      const preSnapshot = await compute18TableSnapshot(testPrisma);
+
+      // 2. 插入一条 TeamRegistration 记录
+      await testPrisma.teamRegistration.create({
+        data: {
+          id: 'reg_test_1',
+          seasonId: 's1',
+          teamId: 't1',
+          submittedById: 'u1',
+          status: 'DRAFT',
+        },
+      });
+
+      // 3. 执行旧版 V3 恢复，断言被前置拦截
+      await expect(
+        service.restoreBackup(
+          'admin',
+          'private-backups/database/full/backup_v3.json.gz',
+          'CONFIRM_RESTORE',
+        ),
+      ).rejects.toThrow(/已存在 1 条报名记录（TeamRegistration）/);
+
+      // 4. 清理创建的测试报名记录后，全库数据应与 preSnapshot 一致
+      await testPrisma.teamRegistration.deleteMany({ where: { id: 'reg_test_1' } });
+      const postSnapshot = await compute18TableSnapshot(testPrisma);
+      expect(postSnapshot.hash).toBe(preSnapshot.hash);
     });
   });
 });

@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { BadRequestException } from '@nestjs/common';
 import { BackupStagingStore } from './backup-staging-store';
 import {
+  EXCLUDED_BACKUP_MODELS,
   MANDATORY_BACKUP_TABLES,
   MandatoryBackupTableName,
   TABLE_METADATA_MAP,
@@ -529,7 +530,9 @@ export async function parseAndValidateBackupStream(
           if (name === 'endKey') {
             const tName = currentKeyBuffer as MandatoryBackupTableName;
             currentKeyBuffer = '';
-
+            if (EXCLUDED_BACKUP_MODELS.includes(tName as any)) {
+              throw new BadRequestException(`备份数据流包含禁止备份的安全敏感或临时表: ${tName}`);
+            }
             if (!MANDATORY_BACKUP_TABLES.includes(tName)) {
               throw new BadRequestException(`备份数据流包含未知表名: ${tName}`);
             }

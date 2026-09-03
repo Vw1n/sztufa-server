@@ -57,154 +57,188 @@ export class BackupRestoreService {
       throw err;
     }
 
-    if (parseResult.scope === 'season') {
-      parseResult.cleanup();
-      throw new BadRequestException('分赛季恢复暂未开放，请使用全站灾备恢复');
-    }
-
-    let preRestoreSnapshotKey = '';
     try {
-      const snapshotMeta = await this.exportService.createBackup(username, {
-        purpose: 'pre-restore',
-      });
-      preRestoreSnapshotKey = snapshotMeta.key;
-    } catch (snapshotErr) {
-      parseResult.cleanup();
-      throw new ServiceUnavailableException(
-        `恢复前自动创建快照失败，已终止恢复操作: ${
-          snapshotErr instanceof Error ? snapshotErr.message : '未知错误'
-        }`,
-      );
-    }
-
-    const txTimeout = parseInt(process.env.BACKUP_RESTORE_TX_TIMEOUT_MS || '300000', 10);
-    const staging = parseResult.stagingStore;
-
-    try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          const [{ locked }] = await tx.$queryRaw<
-            { locked: boolean }[]
-          >`SELECT pg_try_advisory_xact_lock(88998899) AS locked`;
-          if (!locked) {
-            throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
-          }
-
-          // 账本保留；恢复后所有尚存材料进入清理，已删除材料永不复活。
-          await tx.campusCardAsset.updateMany({
-            where: { state: { not: 'DELETED' } },
-            data: { state: 'DELETE_PENDING', deleteAfter: new Date(), nextAttemptAt: new Date() },
-          });
-          await tx.match.updateMany({ data: { mvpPlayerId: null } });
-          await tx.player.updateMany({ data: { suspendedAtMatchId: null } });
-          await tx.user.updateMany({ data: { teamId: null } });
-
-          for (const tableName of RESTORE_DELETE_ORDER) {
-            const meta = TABLE_METADATA_MAP[tableName];
-            await (tx as any)[meta.prismaDelegateName].deleteMany();
-          }
-
-          for (const tableName of RESTORE_INSERT_ORDER) {
-            const meta = TABLE_METADATA_MAP[tableName];
-            const delegate = (tx as any)[meta.prismaDelegateName];
-
-            for await (const batch of staging.iterateTable(tableName, 500)) {
-              if (!batch.length) continue;
-
-              const formattedBatch = batch.map((row: any) => {
-                const cleaned = { ...row };
-                if (tableName === 'Player') cleaned.suspendedAtMatchId = null;
-                if (tableName === 'Match') cleaned.mvpPlayerId = null;
-                if (tableName === 'User') cleaned.teamId = null;
-                if (tableName === 'User' || tableName === 'MemberAccount')
-                  cleaned.sessionVersion = Math.floor(Date.now() / 1000);
-                if (tableName === 'MemberAccount' && cleaned.verificationStatus === 'PENDING') {
-                  cleaned.verificationStatus = 'CHANGES_REQUESTED';
-                  cleaned.reviewComment = '系统恢复后请重新提交校园卡';
-                }
-
-                for (const df of meta.dateFields) {
-                  if (cleaned[df] !== undefined && cleaned[df] !== null) {
-                    cleaned[df] = new Date(cleaned[df]);
-                  }
-                }
-                return cleaned;
-              });
-
-              await delegate.createMany({ data: formattedBatch });
-            }
-          }
-
-          // 修复 Match.mvpPlayerId
-          for await (const batch of staging.iterateTable('Match', 500)) {
-            for (const m of batch) {
-              if (m.mvpPlayerId) {
-                await tx.match.update({
-                  where: { id: m.id },
-                  data: {
-                    mvpPlayerId: m.mvpPlayerId,
-                    updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
-                  },
-                });
-              }
-            }
-          }
-
-          // 修复 Player.suspendedAtMatchId
-          for await (const batch of staging.iterateTable('Player', 500)) {
-            for (const p of batch) {
-              if (p.suspendedAtMatchId) {
-                await tx.player.update({
-                  where: { id: p.id },
-                  data: {
-                    suspendedAtMatchId: p.suspendedAtMatchId,
-                    updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
-                  },
-                });
-              }
-            }
-          }
-
-          // 修复 User.teamId
-          for await (const batch of staging.iterateTable('User', 500)) {
-            for (const u of batch) {
-              if (u.teamId) {
-                await tx.user.update({
-                  where: { id: u.id },
-                  data: {
-                    teamId: u.teamId,
-                    updatedAt: u.updatedAt ? new Date(u.updatedAt) : undefined,
-                  },
-                });
-              }
-            }
-          }
-        },
-        {
-          maxWait: 20000,
-          timeout: txTimeout,
-        },
-      );
-
-      await this.auditLogService.log(
-        username,
-        'RESTORE_BACKUP',
-        `从备份 ${key} 成功覆盖还原数据库，前置自动快照: ${preRestoreSnapshotKey}。`,
-      );
-
-      return '数据库还原成功';
-    } catch (err: any) {
-      console.error('还原备份失败:', err);
-      if (
-        err instanceof BadRequestException ||
-        err instanceof ServiceUnavailableException ||
-        err instanceof ConflictException
-      ) {
-        throw err;
+      if (parseResult.scope === 'season') {
+        throw new BadRequestException('分赛季恢复暂未开放，请使用全站灾备恢复');
       }
-      throw new InternalServerErrorException(
-        `数据库覆盖还原事务失败：${err?.message || '未知数据库错误'}`,
-      );
+
+      const isLegacyFormat =
+        !parseResult.formatVersion || ['2.0', '3.0'].includes(parseResult.formatVersion);
+
+      if (isLegacyFormat) {
+        const earlyRegCount = await this.prisma.teamRegistration.count();
+        if (earlyRegCount > 0) {
+          throw new BadRequestException(
+            `当前数据库中已存在 ${earlyRegCount} 条报名记录（TeamRegistration），旧版 V2/V3 备份未包含报名表，执行全量覆盖恢复将通过外键级联删除所有报名数据。为保障数据安全，系统已拒绝恢复。请使用包含完整业务数据的 V4 格式备份进行恢复。`,
+          );
+        }
+      }
+
+      let preRestoreSnapshotKey = '';
+      try {
+        const snapshotMeta = await this.exportService.createBackup(username, {
+          purpose: 'pre-restore',
+        });
+        preRestoreSnapshotKey = snapshotMeta.key;
+      } catch (snapshotErr) {
+        throw new ServiceUnavailableException(
+          `恢复前自动创建快照失败，已终止恢复操作: ${
+            snapshotErr instanceof Error ? snapshotErr.message : '未知错误'
+          }`,
+        );
+      }
+
+      const txTimeout = parseInt(process.env.BACKUP_RESTORE_TX_TIMEOUT_MS || '300000', 10);
+      const staging = parseResult.stagingStore;
+
+      try {
+        await this.prisma.$transaction(
+          async (tx) => {
+            const [{ locked }] = await tx.$queryRaw<
+              { locked: boolean }[]
+            >`SELECT pg_try_advisory_xact_lock(88998899) AS locked`;
+            if (!locked) {
+              throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
+            }
+
+            if (isLegacyFormat) {
+              try {
+                await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '5s'");
+                await tx.$executeRawUnsafe('LOCK TABLE "TeamRegistration" IN SHARE MODE');
+              } catch (lockErr: any) {
+                const sqlState = lockErr?.meta?.code ?? lockErr?.code;
+                if (sqlState === '55P03') {
+                  throw new ConflictException(
+                    '系统当前正在处理报名业务，无法在安全窗口内锁定报名表，请稍后重试',
+                  );
+                }
+                throw lockErr;
+              }
+
+              const authoritativeRegCount = await tx.teamRegistration.count();
+              if (authoritativeRegCount > 0) {
+                throw new BadRequestException(
+                  `当前数据库中已存在 ${authoritativeRegCount} 条报名记录（TeamRegistration），旧版 V2/V3 备份未包含报名表，执行全量覆盖恢复将通过外键级联删除所有报名数据。为保障数据安全，系统已拒绝恢复。请使用包含完整业务数据的 V4 格式备份进行恢复。`,
+                );
+              }
+            }
+
+            // 账本保留；恢复后所有尚存材料进入清理，已删除材料永不复活。
+            await tx.campusCardAsset.updateMany({
+              where: { state: { not: 'DELETED' } },
+              data: { state: 'DELETE_PENDING', deleteAfter: new Date(), nextAttemptAt: new Date() },
+            });
+            await tx.match.updateMany({ data: { mvpPlayerId: null } });
+            await tx.player.updateMany({ data: { suspendedAtMatchId: null } });
+            await tx.user.updateMany({ data: { teamId: null } });
+
+            for (const tableName of RESTORE_DELETE_ORDER) {
+              const meta = TABLE_METADATA_MAP[tableName];
+              await (tx as any)[meta.prismaDelegateName].deleteMany();
+            }
+
+            for (const tableName of RESTORE_INSERT_ORDER) {
+              const meta = TABLE_METADATA_MAP[tableName];
+              const delegate = (tx as any)[meta.prismaDelegateName];
+
+              for await (const batch of staging.iterateTable(tableName, 500)) {
+                if (!batch.length) continue;
+
+                const formattedBatch = batch.map((row: any) => {
+                  const cleaned = { ...row };
+                  if (tableName === 'Player') cleaned.suspendedAtMatchId = null;
+                  if (tableName === 'Match') cleaned.mvpPlayerId = null;
+                  if (tableName === 'User') cleaned.teamId = null;
+                  if (tableName === 'User' || tableName === 'MemberAccount')
+                    cleaned.sessionVersion = Math.floor(Date.now() / 1000);
+                  if (tableName === 'MemberAccount' && cleaned.verificationStatus === 'PENDING') {
+                    cleaned.verificationStatus = 'CHANGES_REQUESTED';
+                    cleaned.reviewComment = '系统恢复后请重新提交校园卡';
+                  }
+
+                  for (const df of meta.dateFields) {
+                    if (cleaned[df] !== undefined && cleaned[df] !== null) {
+                      cleaned[df] = new Date(cleaned[df]);
+                    }
+                  }
+                  return cleaned;
+                });
+
+                await delegate.createMany({ data: formattedBatch });
+              }
+            }
+
+            // 修复 Match.mvpPlayerId
+            for await (const batch of staging.iterateTable('Match', 500)) {
+              for (const m of batch) {
+                if (m.mvpPlayerId) {
+                  await tx.match.update({
+                    where: { id: m.id },
+                    data: {
+                      mvpPlayerId: m.mvpPlayerId,
+                      updatedAt: m.updatedAt ? new Date(m.updatedAt) : undefined,
+                    },
+                  });
+                }
+              }
+            }
+
+            // 修复 Player.suspendedAtMatchId
+            for await (const batch of staging.iterateTable('Player', 500)) {
+              for (const p of batch) {
+                if (p.suspendedAtMatchId) {
+                  await tx.player.update({
+                    where: { id: p.id },
+                    data: {
+                      suspendedAtMatchId: p.suspendedAtMatchId,
+                      updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
+                    },
+                  });
+                }
+              }
+            }
+
+            // 修复 User.teamId
+            for await (const batch of staging.iterateTable('User', 500)) {
+              for (const u of batch) {
+                if (u.teamId) {
+                  await tx.user.update({
+                    where: { id: u.id },
+                    data: {
+                      teamId: u.teamId,
+                      updatedAt: u.updatedAt ? new Date(u.updatedAt) : undefined,
+                    },
+                  });
+                }
+              }
+            }
+          },
+          {
+            maxWait: 20000,
+            timeout: txTimeout,
+          },
+        );
+
+        await this.auditLogService.log(
+          username,
+          'RESTORE_BACKUP',
+          `从备份 ${key} 成功覆盖还原数据库，前置自动快照: ${preRestoreSnapshotKey}。`,
+        );
+
+        return '数据库还原成功';
+      } catch (err: any) {
+        console.error('还原备份失败:', err);
+        if (
+          err instanceof BadRequestException ||
+          err instanceof ServiceUnavailableException ||
+          err instanceof ConflictException
+        ) {
+          throw err;
+        }
+        throw new InternalServerErrorException(
+          `数据库覆盖还原事务失败：${err?.message || '未知数据库错误'}`,
+        );
+      }
     } finally {
       if (parseResult) parseResult.cleanup();
     }

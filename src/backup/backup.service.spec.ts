@@ -34,31 +34,131 @@ describe('BackupService (V3 & Security Spec)', () => {
   let verificationService: BackupVerificationService;
   let retentionService: BackupRetentionService;
 
-  const mockPrismaService = {
-    $transaction: jest.fn().mockImplementation(async (cb) => {
+  const mockPrismaService: any = {
+    $transaction: jest.fn().mockImplementation(async (cb, _opts) => {
       return cb(mockPrismaService);
     }),
-    memberAccount: { findMany: jest.fn().mockResolvedValue([]) },
-    user: { findMany: jest.fn().mockResolvedValue([{ id: 'u1', username: 'admin' }]) },
-    team: { findMany: jest.fn().mockResolvedValue([]) },
-    player: { findMany: jest.fn().mockResolvedValue([]) },
-    match: { findMany: jest.fn().mockResolvedValue([]) },
-    prediction: { findMany: jest.fn().mockResolvedValue([]) },
-    goal: { findMany: jest.fn().mockResolvedValue([]) },
-    matchEvent: { findMany: jest.fn().mockResolvedValue([]) },
-    news: { findMany: jest.fn().mockResolvedValue([]) },
-    auditLog: { findMany: jest.fn().mockResolvedValue([]) },
+    $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+    $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+    campusCardAsset: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    memberAccount: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    user: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'u1', username: 'admin' }]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    team: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    player: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    match: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    prediction: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    goal: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    matchEvent: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    news: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    auditLog: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     season: {
       findUnique: jest.fn().mockResolvedValue({ id: 'season-1', name: 'Season 1' }),
       findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
-    seasonTeamProfile: { findMany: jest.fn().mockResolvedValue([]) },
-    historyImportBatch: { findMany: jest.fn().mockResolvedValue([]) },
-    seasonDeletionApproval: { findMany: jest.fn().mockResolvedValue([]) },
-    seasonTeamPlayer: { findMany: jest.fn().mockResolvedValue([]) },
-    matchLineup: { findMany: jest.fn().mockResolvedValue([]) },
-    seasonGroupTeam: { findMany: jest.fn().mockResolvedValue([]) },
-    pdfImportBatch: { findMany: jest.fn().mockResolvedValue([]) },
+    seasonTeamProfile: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    historyImportBatch: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    seasonDeletionApproval: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    seasonTeamPlayer: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    matchLineup: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    seasonGroupTeam: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    pdfImportBatch: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    adminFormDraft: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    teamRegistration: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    registrationTeamData: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    registrationPlayer: {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
   };
 
   const mockAuditLogService = {
@@ -469,6 +569,131 @@ describe('BackupService (V3 & Security Spec)', () => {
       expect(res.dryRun).toBe(false);
       expect(res.deletedCount).toBe(1);
       expect(res.keptCount).toBe(2);
+    });
+  });
+
+  describe('BackupRestoreService 级联删除防线与并发锁单元测试', () => {
+    const buildMockParseResult = () => {
+      const mockStagingStore = {
+        iterateTable: jest.fn().mockImplementation(async function* () {
+          yield [];
+        }),
+      };
+      return {
+        formatVersion: '3.0',
+        scope: 'full',
+        fileSha256: 'a'.repeat(64),
+        compressedSize: 100,
+        decompressedSize: 200,
+        computedChecksum: 'b'.repeat(64),
+        tableCounts: {},
+        stagingStore: mockStagingStore,
+        cleanup: jest.fn(),
+      };
+    };
+
+    beforeEach(() => {
+      process.env.BACKUP_RESTORE_ENABLED = 'true';
+      jest.spyOn(objectStore, 'validateBackupKey').mockImplementation(() => {});
+      jest.spyOn(objectStore, 'getObjectBody').mockResolvedValue(Readable.from(['{}']) as any);
+    });
+
+    it('当数据库中已存在报名记录时，旧版 V3 恢复在快照前直接被拦截，不产生快照且释放资源', async () => {
+      const mockParseResult = buildMockParseResult();
+      jest.spyOn(verificationService, 'parseAndValidate').mockResolvedValue(mockParseResult as any);
+      mockPrismaService.teamRegistration.count.mockResolvedValueOnce(3);
+
+      const createSnapshotSpy = jest.spyOn((service as any).exportService, 'createBackup');
+
+      await expect(
+        service.restoreBackup(
+          'admin',
+          'private-backups/database/full/backup.json.gz',
+          'CONFIRM_RESTORE',
+        ),
+      ).rejects.toThrow(/已存在 3 条报名记录（TeamRegistration）/);
+
+      expect(createSnapshotSpy).not.toHaveBeenCalled();
+      expect(mockParseResult.cleanup).toHaveBeenCalled();
+    });
+
+    it('当快照前为 0 但在事务中获取表锁超时（55P03）时，应转换为友好 ConflictException 且释放资源', async () => {
+      const mockParseResult = buildMockParseResult();
+      jest.spyOn(verificationService, 'parseAndValidate').mockResolvedValue(mockParseResult as any);
+      mockPrismaService.teamRegistration.count.mockResolvedValueOnce(0);
+
+      jest.spyOn((service as any).exportService, 'createBackup').mockResolvedValue({
+        key: 'pre-snap.json.gz',
+      } as any);
+
+      mockPrismaService.$executeRawUnsafe.mockRejectedValueOnce({
+        code: 'P2010',
+        meta: { code: '55P03' },
+      });
+
+      await expect(
+        service.restoreBackup(
+          'admin',
+          'private-backups/database/full/backup.json.gz',
+          'CONFIRM_RESTORE',
+        ),
+      ).rejects.toThrow(/无法在安全窗口内锁定报名表，请稍后重试/);
+
+      expect(mockParseResult.cleanup).toHaveBeenCalled();
+    });
+
+    it('当快照前为 0 但在锁内权威复核发现并发新增报名时，必须在修改任何数据前拦截', async () => {
+      const mockParseResult = buildMockParseResult();
+      jest.spyOn(verificationService, 'parseAndValidate').mockResolvedValue(mockParseResult as any);
+      mockPrismaService.teamRegistration.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+      jest.spyOn((service as any).exportService, 'createBackup').mockResolvedValue({
+        key: 'pre-snap.json.gz',
+      } as any);
+
+      mockPrismaService.$executeRawUnsafe.mockResolvedValue(1);
+      mockPrismaService.campusCardAsset.updateMany.mockClear();
+      mockPrismaService.season.deleteMany.mockClear();
+
+      await expect(
+        service.restoreBackup(
+          'admin',
+          'private-backups/database/full/backup.json.gz',
+          'CONFIRM_RESTORE',
+        ),
+      ).rejects.toThrow(/已存在 1 条报名记录（TeamRegistration）/);
+
+      expect(mockPrismaService.campusCardAsset.updateMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.season.deleteMany).not.toHaveBeenCalled();
+      expect(mockParseResult.cleanup).toHaveBeenCalled();
+    });
+
+    it('当无报名数据时，旧版 V3 恢复顺利完成，且绝不向新增 4 表发起 deleteMany()', async () => {
+      const mockParseResult = buildMockParseResult();
+      jest.spyOn(verificationService, 'parseAndValidate').mockResolvedValue(mockParseResult as any);
+      mockPrismaService.teamRegistration.count.mockResolvedValue(0);
+
+      jest.spyOn((service as any).exportService, 'createBackup').mockResolvedValue({
+        key: 'pre-snap.json.gz',
+      } as any);
+
+      mockPrismaService.teamRegistration.deleteMany.mockClear();
+      mockPrismaService.registrationTeamData.deleteMany.mockClear();
+      mockPrismaService.registrationPlayer.deleteMany.mockClear();
+      mockPrismaService.adminFormDraft.deleteMany.mockClear();
+
+      const res = await service.restoreBackup(
+        'admin',
+        'private-backups/database/full/backup.json.gz',
+        'CONFIRM_RESTORE',
+      );
+
+      expect(res).toBe('数据库还原成功');
+      expect(mockPrismaService.teamRegistration.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.registrationTeamData.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.registrationPlayer.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.adminFormDraft.deleteMany).not.toHaveBeenCalled();
+      expect(mockParseResult.cleanup).toHaveBeenCalled();
     });
   });
 });

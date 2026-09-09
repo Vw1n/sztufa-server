@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { BackupScope } from './backup-scope.service';
+import { BackupModule } from './backup-module-registry';
 
 @Controller('api/v1/backups')
 @ApiTags('备份管理')
@@ -31,8 +32,10 @@ export class BackupController {
   async create(
     @Req() req: any,
     @Res({ passthrough: true }) res: any,
-    @Body('scope') scope?: BackupScope,
+    @Body('scope') scope?: BackupScope | 'module',
     @Body('seasonId') seasonId?: string,
+    @Body('module') module?: BackupModule,
+    @Body('selector') selector?: Record<string, string>,
   ) {
     const username = req.user?.username || 'system';
     const abortController = new AbortController();
@@ -51,6 +54,8 @@ export class BackupController {
         purpose: 'manual',
         scope,
         seasonId,
+        module,
+        selector,
         signal: abortController.signal,
       });
       return { success: true, data: backupMetadata };

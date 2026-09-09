@@ -13,6 +13,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
 import { BackupMetadata } from './backup.types';
 import { BackupScope } from './backup-scope.service';
+import { BACKUP_MODULES, BackupModule } from './backup-module-registry';
 
 /**
  * R2 对象存储基础设施服务。
@@ -118,8 +119,9 @@ export class BackupObjectStoreService {
         const isGzip = filename.endsWith('.json.gz');
         const isProtected = filename.includes('_protected');
 
-        let scope: BackupScope = 'full';
+        let scope: BackupScope | 'module' = 'full';
         let seasonId: string | undefined = undefined;
+        let module: BackupModule | undefined = undefined;
 
         if (key.includes('/seasons/')) {
           scope = 'season';
@@ -127,6 +129,15 @@ export class BackupObjectStoreService {
           const sIdx = parts.indexOf('seasons');
           if (sIdx !== -1 && parts.length > sIdx + 1) {
             seasonId = parts[sIdx + 1];
+          }
+        } else if (key.includes('/modules/')) {
+          const parts = key.split('/');
+          const moduleIndex = parts.indexOf('modules');
+          const moduleName = parts[moduleIndex + 1] as BackupModule | undefined;
+          if (moduleName && BACKUP_MODULES.includes(moduleName)) {
+            scope = 'module';
+            module = moduleName;
+            if (module === 'season') seasonId = parts[moduleIndex + 2];
           }
         }
 
@@ -146,13 +157,16 @@ export class BackupObjectStoreService {
           filename,
           size: file.Size || 0,
           lastModified: file.LastModified,
-          formatVersion: isGzip ? '3.0' : '2.0',
+          formatVersion: scope === 'module' ? '4.0' : isGzip ? '3.0' : '2.0',
           compressed: isGzip,
           purpose,
           protected: isProtected,
           validated: false,
           scope,
           seasonId,
+          module,
+          selector: module === 'season' && seasonId ? { seasonId } : undefined,
+          restoreSupported: scope === 'full',
         };
       })
       .sort((a, b) => {

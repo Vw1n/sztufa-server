@@ -11,6 +11,7 @@ import { BackupExportService } from './backup-export.service';
 import { BackupRestoreService } from './backup-restore.service';
 import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
+import { BackupPlanService } from './backup-plan.service';
 import { parseAndValidateBackupStream } from './backup-serializer';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
@@ -184,6 +185,7 @@ describe('BackupService (V3 & Security Spec)', () => {
         BackupMaintenanceService,
         BackupRetentionService,
         BackupScopeService,
+        BackupPlanService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: AuditLogService, useValue: mockAuditLogService },
       ],
@@ -248,6 +250,32 @@ describe('BackupService (V3 & Security Spec)', () => {
         'CREATE_BACKUP',
         expect.any(String),
       );
+    });
+
+    it('内容模块仅导出 News 并写入 V4 模块路径', async () => {
+      mockPrismaService.news.findMany.mockClear();
+      mockPrismaService.user.findMany.mockClear();
+      jest.spyOn(verificationService, 'verifyBackupIntegrity').mockResolvedValue(true);
+
+      const result = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'content',
+        selector: {},
+        purpose: 'manual',
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          scope: 'module',
+          module: 'content',
+          formatVersion: '4.0',
+        }),
+      );
+      expect(result.key).toMatch(
+        /^private-backups\/database\/modules\/content\/backup_\d+_manual\.json\.gz$/,
+      );
+      expect(mockPrismaService.news.findMany).toHaveBeenCalled();
+      expect(mockPrismaService.user.findMany).not.toHaveBeenCalled();
     });
 
     it('分赛季导出 Player 时，目标赛季内的 suspendedAtMatchId 被保留', async () => {

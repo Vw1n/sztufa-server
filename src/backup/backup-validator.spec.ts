@@ -1,14 +1,24 @@
 import {
   classifyBackupContent,
   MANDATORY_BACKUP_TABLES,
+  LEGACY_V3_REQUIRED_TABLES,
+  EXCLUDED_BACKUP_MODELS,
+  V4_PERSISTENT_MODELS,
   validateBackupStreamIntegrity,
 } from './backup-validator';
-import { MandatoryBackupTableName } from './backup-table-registry';
+import {
+  MandatoryBackupTableName,
+  TABLE_METADATA_MAP,
+  LEGACY_V3_RESTORE_DELETE_ORDER,
+  RESTORE_DELETE_ORDER,
+} from './backup-table-registry';
 import { parseAndValidateBackupStream, createV3BackupStream } from './backup-serializer';
 import { Readable } from 'stream';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 
-describe('BackupValidator Classifier & Integrty Test Suite', () => {
+describe('BackupValidator Classifier & Integrity Test Suite', () => {
   const buildValidV2 = () => {
     const tables: Record<string, any[]> = {};
     for (const t of MANDATORY_BACKUP_TABLES) {
@@ -48,7 +58,7 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
     };
   };
 
-  it('应该将标准合规全量 17 表 V2 备份归类为 active', () => {
+  it('应该将标准合规全量 18 表 V2 备份归类为 active', () => {
     const validData = buildValidV2();
     const str = JSON.stringify(validData);
     const res = classifyBackupContent(str, Buffer.byteLength(str));
@@ -212,6 +222,102 @@ describe('BackupValidator Classifier & Integrty Test Suite', () => {
       } finally {
         if (parseResult) parseResult.cleanup();
         process.env.BACKUP_MAX_RECORD_BYTES = origMax;
+      }
+    });
+  });
+
+  describe('24-Model 分类完整性与排他性守卫', () => {
+    it('Prisma Schema 中的所有 Model 必须被精确且无交集地分类为 22 个 V4 持久业务表和 2 个排除表', () => {
+      const schemaPath = path.resolve(__dirname, '../../prisma/schema.prisma');
+      const schemaContent = fs.readFileSync(schemaPath, 'utf8');
+
+      // 提取 prisma 中的所有 model 声明
+      const modelRegex = /^model\s+(\w+)\s+\{/gm;
+      const schemaModels = new Set<string>();
+      let match: RegExpExecArray | null;
+      while ((match = modelRegex.exec(schemaContent)) !== null) {
+        schemaModels.add(match[1]);
+      }
+
+      expect(schemaModels.size).toBe(24);
+
+      const persistentSet = new Set<string>(V4_PERSISTENT_MODELS);
+      const excludedSet = new Set<string>(EXCLUDED_BACKUP_MODELS);
+
+      expect(persistentSet.size).toBe(22);
+      expect(excludedSet.size).toBe(2);
+
+      // 交集必须为空
+      const intersection = [...persistentSet].filter((x) => excludedSet.has(x));
+      expect(intersection).toEqual([]);
+
+      // 并集必须完全覆盖 schema 中的 24 个 model
+      const union = new Set<string>([...persistentSet, ...excludedSet]);
+      expect(union).toEqual(schemaModels);
+
+      // TABLE_METADATA_MAP 必须完整包含全部 22 个持久业务表
+      for (const table of V4_PERSISTENT_MODELS) {
+        expect(TABLE_METADATA_MAP[table]).toBeDefined();
+        expect(TABLE_METADATA_MAP[table].tableName).toBe(table);
+      }
+    });
+
+    it('历史 V3 恢复顺序必须冻结在 18 表，绝不包含新增的 4 张表', () => {
+      expect(LEGACY_V3_RESTORE_DELETE_ORDER).toHaveLength(18);
+      expect(RESTORE_DELETE_ORDER).toEqual(LEGACY_V3_RESTORE_DELETE_ORDER);
+
+      const unbackedTables = [
+        'AdminFormDraft',
+        'TeamRegistration',
+        'RegistrationTeamData',
+        'RegistrationPlayer',
+      ];
+
+      for (const table of unbackedTables) {
+        expect(LEGACY_V3_RESTORE_DELETE_ORDER).not.toContain(table);
+        expect(RESTORE_DELETE_ORDER).not.toContain(table);
+      }
+    });
+  });
+
+  describe('排除表（CampusCardAsset, AuthRateLimit）多层拦截测试', () => {
+    it('当内存 JSON 备份中包含排除表时，必须归类为 quarantine 并明确拒绝', () => {
+      for (const excluded of EXCLUDED_BACKUP_MODELS) {
+        const v2 = buildValidV2();
+        (v2.tables as any)[excluded] = [{ id: 'bad_1' }];
+        (v2.manifest.tables as any)[excluded] = 1;
+        v2.manifest.checksum = crypto
+          .createHash('sha256')
+          .update(JSON.stringify(v2.tables))
+          .digest('hex');
+
+        const str = JSON.stringify(v2);
+        const res = classifyBackupContent(str, Buffer.byteLength(str));
+        expect(res.category).toBe('quarantine');
+        expect(res.reason).toMatch(/包含禁止备份的安全敏感或临时表/);
+      }
+    });
+
+    it('当流式 NDJSON 解析遇到排除表时，流式解析器必须 fail-closed 拦截并抛出具体异常', async () => {
+      for (const excluded of EXCLUDED_BACKUP_MODELS) {
+        const payload: Record<string, any> = {};
+        for (const t of LEGACY_V3_REQUIRED_TABLES) {
+          payload[t] = [];
+        }
+        payload[excluded] = [{ id: 'bad_row' }];
+
+        const jsonStr = JSON.stringify({ formatVersion: '3.0', tables: payload });
+        const stream = Readable.from([jsonStr]);
+
+        let parseResult: any = null;
+        try {
+          parseResult = await parseAndValidateBackupStream(stream, 'excluded.json');
+          fail(`应当拦截排除表: ${excluded}`);
+        } catch (err: any) {
+          expect(err.message).toMatch(/包含禁止备份的安全敏感或临时表/);
+        } finally {
+          if (parseResult) parseResult.cleanup();
+        }
       }
     });
   });

@@ -1,4 +1,5 @@
 import { BackupScope } from './backup-scope.service';
+import { BackupModule } from './backup-module-registry';
 
 /**
  * 备份领域公共类型。
@@ -16,8 +17,11 @@ export interface BackupMetadata {
   purpose?: string;
   protected?: boolean;
   validated?: boolean;
-  scope?: BackupScope;
+  scope?: BackupScope | 'module';
   seasonId?: string;
+  module?: BackupModule;
+  selector?: Record<string, string>;
+  restoreSupported?: boolean;
 }
 
 export interface UploadInitResult {
@@ -31,8 +35,10 @@ export interface UploadInitResult {
 export interface CreateBackupOptions {
   purpose?: 'manual' | 'scheduled' | 'pre-restore' | 'uploaded';
   protected?: boolean;
-  scope?: BackupScope;
+  scope?: BackupScope | 'module';
   seasonId?: string;
+  module?: BackupModule;
+  selector?: Record<string, string>;
   signal?: AbortSignal;
 }
 

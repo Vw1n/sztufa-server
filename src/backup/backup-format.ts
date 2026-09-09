@@ -1,5 +1,7 @@
 import { BackupScope } from './backup-scope.service';
 import { BackupStagingStore } from './backup-staging-store';
+import { BackupModule, BackupTableRole } from './backup-module-registry';
+import { PersistentBackupTableName } from './backup-table-registry';
 
 /**
  * 备份文件格式（V3）的共享类型定义。
@@ -26,11 +28,30 @@ export interface PrepareV3StreamOptions {
   season?: { id: string; name: string };
 }
 
+export interface BackupManifestV4 {
+  formatVersion: '4.0';
+  createdAt: string;
+  environment: string;
+  schemaVersion: '4.0';
+  checksumAlgorithm: 'sha256';
+  checksum: string;
+  compression: 'gzip';
+  scope: 'full' | 'module';
+  module: 'full' | BackupModule;
+  selector: Record<string, string>;
+  tables: Partial<Record<PersistentBackupTableName, number>>;
+  tableRoles: Partial<Record<PersistentBackupTableName, BackupTableRole>>;
+  externalDependencies: PersistentBackupTableName[];
+  planDigest: string;
+}
+
+export type BackupManifest = BackupManifestV3 | BackupManifestV4;
+
 export interface ParseStreamResult {
-  manifest?: BackupManifestV3;
+  manifest?: BackupManifest;
   formatVersion: string;
   timestamp?: number;
-  scope: BackupScope;
+  scope: BackupScope | 'module';
   season?: { id: string; name: string };
   fileSha256: string;
   compressedSize: number;

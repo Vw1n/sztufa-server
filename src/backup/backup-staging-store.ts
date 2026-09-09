@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import * as readline from 'readline';
 import Database from 'better-sqlite3';
-import { MandatoryBackupTableName, TABLE_METADATA_MAP } from './backup-table-registry';
+import { PersistentBackupTableName, TABLE_METADATA_MAP } from './backup-table-registry';
 import { BadRequestException } from '@nestjs/common';
 
 interface PendingPromise {
@@ -72,7 +72,7 @@ export class BackupStagingStore {
     return ws;
   }
 
-  public async writeRow(tableName: MandatoryBackupTableName, row: any): Promise<void> {
+  public async writeRow(tableName: PersistentBackupTableName, row: any): Promise<void> {
     if (this.isCleanedUp) return;
 
     const ws = this.getWriteStream(tableName);
@@ -164,7 +164,7 @@ export class BackupStagingStore {
   }
 
   public async *iterateTable(
-    tableName: MandatoryBackupTableName,
+    tableName: PersistentBackupTableName,
     batchSize = 500,
   ): AsyncGenerator<any[], void, unknown> {
     const filePath = path.join(this.dirPath, `${tableName}.ndjson`);

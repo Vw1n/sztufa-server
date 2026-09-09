@@ -9,6 +9,7 @@ import { BackupExportService } from './backup-export.service';
 import { BackupRestoreService } from './backup-restore.service';
 import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
+import { BackupPlanService } from './backup-plan.service';
 
 @Module({
   providers: [
@@ -21,6 +22,7 @@ import { BackupMaintenanceService } from './backup-maintenance.service';
     BackupMaintenanceService,
     BackupRetentionService,
     BackupScopeService,
+    BackupPlanService,
   ],
   controllers: [BackupController],
   exports: [BackupService],

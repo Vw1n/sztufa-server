@@ -1,4 +1,4 @@
-export const MANDATORY_BACKUP_TABLES = [
+export const LEGACY_V3_REQUIRED_TABLES = [
   'User',
   'MemberAccount',
   'Team',
@@ -19,18 +19,35 @@ export const MANDATORY_BACKUP_TABLES = [
   'PdfImportBatch',
 ] as const;
 
-export type MandatoryBackupTableName = (typeof MANDATORY_BACKUP_TABLES)[number];
+export type LegacyBackupTableName = (typeof LEGACY_V3_REQUIRED_TABLES)[number];
+
+// 兼容现有代码调用的别名
+export const MANDATORY_BACKUP_TABLES = LEGACY_V3_REQUIRED_TABLES;
+export type MandatoryBackupTableName = LegacyBackupTableName;
+
+export const EXCLUDED_BACKUP_MODELS = ['CampusCardAsset', 'AuthRateLimit'] as const;
+export type ExcludedBackupModel = (typeof EXCLUDED_BACKUP_MODELS)[number];
+
+export const V4_PERSISTENT_MODELS = [
+  ...LEGACY_V3_REQUIRED_TABLES,
+  'AdminFormDraft',
+  'TeamRegistration',
+  'RegistrationTeamData',
+  'RegistrationPlayer',
+] as const;
+
+export type PersistentBackupTableName = (typeof V4_PERSISTENT_MODELS)[number];
 
 export interface TableMeta {
-  tableName: MandatoryBackupTableName;
+  tableName: PersistentBackupTableName;
   prismaDelegateName: string;
   cursorField: string;
   dateFields: string[];
   compositeUniqueKeys?: string[][];
-  foreignKeys?: { field: string; targetTable: MandatoryBackupTableName }[];
+  foreignKeys?: { field: string; targetTable: PersistentBackupTableName }[];
 }
 
-export const TABLE_METADATA_MAP: Record<MandatoryBackupTableName, TableMeta> = {
+export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = {
   User: {
     tableName: 'User',
     prismaDelegateName: 'user',
@@ -198,9 +215,46 @@ export const TABLE_METADATA_MAP: Record<MandatoryBackupTableName, TableMeta> = {
       'updatedAt',
     ],
   },
+  AdminFormDraft: {
+    tableName: 'AdminFormDraft',
+    prismaDelegateName: 'adminFormDraft',
+    cursorField: 'id',
+    dateFields: ['createdAt', 'updatedAt'],
+    foreignKeys: [],
+  },
+  TeamRegistration: {
+    tableName: 'TeamRegistration',
+    prismaDelegateName: 'teamRegistration',
+    cursorField: 'id',
+    dateFields: ['submittedAt', 'reviewedAt', 'createdAt', 'updatedAt'],
+    compositeUniqueKeys: [['seasonId', 'teamId']],
+    foreignKeys: [
+      { field: 'seasonId', targetTable: 'Season' },
+      { field: 'teamId', targetTable: 'Team' },
+      { field: 'submittedById', targetTable: 'User' },
+      { field: 'reviewedById', targetTable: 'User' },
+    ],
+  },
+  RegistrationTeamData: {
+    tableName: 'RegistrationTeamData',
+    prismaDelegateName: 'registrationTeamData',
+    cursorField: 'id',
+    dateFields: ['createdAt', 'updatedAt'],
+    foreignKeys: [{ field: 'registrationId', targetTable: 'TeamRegistration' }],
+  },
+  RegistrationPlayer: {
+    tableName: 'RegistrationPlayer',
+    prismaDelegateName: 'registrationPlayer',
+    cursorField: 'id',
+    dateFields: ['createdAt', 'updatedAt'],
+    foreignKeys: [
+      { field: 'registrationId', targetTable: 'TeamRegistration' },
+      { field: 'playerId', targetTable: 'Player' },
+    ],
+  },
 };
 
-export const RESTORE_DELETE_ORDER: MandatoryBackupTableName[] = [
+export const LEGACY_V3_RESTORE_DELETE_ORDER: LegacyBackupTableName[] = [
   'MatchLineup',
   'SeasonTeamPlayer',
   'SeasonTeamProfile',
@@ -221,7 +275,7 @@ export const RESTORE_DELETE_ORDER: MandatoryBackupTableName[] = [
   'PdfImportBatch',
 ];
 
-export const RESTORE_INSERT_ORDER: MandatoryBackupTableName[] = [
+export const LEGACY_V3_RESTORE_INSERT_ORDER: LegacyBackupTableName[] = [
   'User',
   'MemberAccount',
   'Season',
@@ -241,3 +295,7 @@ export const RESTORE_INSERT_ORDER: MandatoryBackupTableName[] = [
   'HistoryImportBatch',
   'PdfImportBatch',
 ];
+
+// 兼容已有代码调用，严格保持 18 表，绝不包含新增 4 表
+export const RESTORE_DELETE_ORDER = LEGACY_V3_RESTORE_DELETE_ORDER;
+export const RESTORE_INSERT_ORDER = LEGACY_V3_RESTORE_INSERT_ORDER;

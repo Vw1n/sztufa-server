@@ -1,9 +1,22 @@
 import { BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { MANDATORY_BACKUP_TABLES, TABLE_METADATA_MAP } from './backup-table-registry';
+import {
+  EXCLUDED_BACKUP_MODELS,
+  LEGACY_V3_REQUIRED_TABLES,
+  MANDATORY_BACKUP_TABLES,
+  PersistentBackupTableName,
+  V4_PERSISTENT_MODELS,
+  TABLE_METADATA_MAP,
+} from './backup-table-registry';
 import { ParseStreamResult } from './backup-serializer';
+import { BACKUP_MODULE_REGISTRY, BACKUP_MODULES } from './backup-module-registry';
 
-export { MANDATORY_BACKUP_TABLES };
+export {
+  MANDATORY_BACKUP_TABLES,
+  LEGACY_V3_REQUIRED_TABLES,
+  EXCLUDED_BACKUP_MODELS,
+  V4_PERSISTENT_MODELS,
+};
 
 export interface BackupValidationResult {
   category: 'active' | 'legacy-archive' | 'quarantine';
@@ -44,10 +57,10 @@ export function classifyBackupContent(
 }
 
 export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): void {
-  const allowedVersions = ['2.0', '3.0'];
+  const allowedVersions = ['2.0', '3.0', '4.0'];
   if (!parseResult.formatVersion || !allowedVersions.includes(parseResult.formatVersion)) {
     throw new BadRequestException(
-      `不支持的备份文件格式版本: ${parseResult.formatVersion || '未定义'}，仅支持 2.0 及 3.0`,
+      `不支持的备份文件格式版本: ${parseResult.formatVersion || '未定义'}，仅支持 2.0、3.0 及 4.0`,
     );
   }
 
@@ -71,7 +84,60 @@ export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): v
   const manifestTableNames = Object.keys(manifest.tables);
   const actualTableNames = Object.keys(parseResult.tableCounts);
 
-  for (const mandatoryTable of MANDATORY_BACKUP_TABLES) {
+  for (const excluded of EXCLUDED_BACKUP_MODELS) {
+    if (manifestTableNames.includes(excluded) || actualTableNames.includes(excluded)) {
+      throw new BadRequestException(`备份文件包含禁止备份的安全敏感或临时表: ${excluded}`);
+    }
+  }
+
+  const isV4 = parseResult.formatVersion === '4.0';
+  const v4Manifest = manifest as any;
+  let requiredTables: readonly string[] = LEGACY_V3_REQUIRED_TABLES;
+
+  if (isV4) {
+    if (manifest.formatVersion !== '4.0' || manifest.schemaVersion !== '4.0') {
+      throw new BadRequestException('V4 备份 Manifest 版本声明不一致');
+    }
+    if (v4Manifest.scope !== parseResult.scope || !['full', 'module'].includes(v4Manifest.scope)) {
+      throw new BadRequestException('V4 备份 scope 与 Manifest 声明不一致');
+    }
+    if (v4Manifest.scope === 'full') {
+      if (v4Manifest.module !== 'full') {
+        throw new BadRequestException('V4 全量备份的 module 必须为 full');
+      }
+      requiredTables = V4_PERSISTENT_MODELS;
+    } else {
+      if (!BACKUP_MODULES.includes(v4Manifest.module)) {
+        throw new BadRequestException(`V4 模块备份包含未知模块: ${String(v4Manifest.module)}`);
+      }
+      const definition = BACKUP_MODULE_REGISTRY[v4Manifest.module];
+      requiredTables = [...definition.ownedTables, ...definition.referenceTables];
+      const expectedRoles = Object.fromEntries([
+        ...definition.ownedTables.map((table) => [table, 'owned']),
+        ...definition.referenceTables.map((table) => [table, 'reference']),
+      ]);
+      if (JSON.stringify(v4Manifest.tableRoles) !== JSON.stringify(expectedRoles)) {
+        throw new BadRequestException('V4 模块备份的表角色与模块注册表不一致');
+      }
+      if (
+        JSON.stringify(v4Manifest.externalDependencies) !==
+        JSON.stringify(definition.externalTables)
+      ) {
+        throw new BadRequestException('V4 模块备份的外部依赖与模块注册表不一致');
+      }
+      if (
+        definition.selector === 'season' &&
+        (typeof v4Manifest.selector?.seasonId !== 'string' || !v4Manifest.selector.seasonId)
+      ) {
+        throw new BadRequestException('V4 赛季模块备份缺少 selector.seasonId');
+      }
+      if (definition.selector === 'none' && Object.keys(v4Manifest.selector || {}).length !== 0) {
+        throw new BadRequestException('V4 全局模块备份不允许携带 selector');
+      }
+    }
+  }
+
+  for (const mandatoryTable of requiredTables) {
     if (!manifestTableNames.includes(mandatoryTable)) {
       throw new BadRequestException(`备份 Manifest 元数据缺少必要数据表计数: ${mandatoryTable}`);
     }
@@ -80,13 +146,16 @@ export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): v
     }
   }
 
-  if (actualTableNames.length !== MANDATORY_BACKUP_TABLES.length) {
+  if (
+    actualTableNames.length !== requiredTables.length ||
+    manifestTableNames.length !== requiredTables.length
+  ) {
     throw new BadRequestException(
-      `备份数据体包含非预期的未知表，要求精确包含 ${MANDATORY_BACKUP_TABLES.length} 张表，实际获取 ${actualTableNames.length} 张`,
+      `备份数据体包含非预期的未知表，要求精确包含 ${requiredTables.length} 张表，实际获取 ${actualTableNames.length} 张`,
     );
   }
 
-  for (const tableName of MANDATORY_BACKUP_TABLES) {
+  for (const tableName of requiredTables) {
     const manifestCount = manifest.tables[tableName];
     const actualCount = parseResult.tableCounts[tableName];
 
@@ -105,6 +174,29 @@ export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): v
     }
   }
 
+  if (isV4) {
+    if (!/^[a-fA-F0-9]{64}$/.test(v4Manifest.planDigest || '')) {
+      throw new BadRequestException('V4 备份缺少合法的执行计划摘要');
+    }
+    const planSummary = {
+      scope: v4Manifest.scope,
+      module: v4Manifest.module,
+      selector: v4Manifest.selector,
+      tables: requiredTables.map((tableName) => ({
+        tableName,
+        role: v4Manifest.tableRoles[tableName],
+      })),
+      externalDependencies: v4Manifest.externalDependencies,
+    };
+    const expectedPlanDigest = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(planSummary))
+      .digest('hex');
+    if (expectedPlanDigest !== v4Manifest.planDigest.toLowerCase()) {
+      throw new BadRequestException('V4 备份执行计划摘要校验失败');
+    }
+  }
+
   // User 表至少 1 条约束仅作用于 full 全站灾备
   if (parseResult.scope === 'full') {
     if (!parseResult.tableCounts.User || parseResult.tableCounts.User === 0) {
@@ -119,7 +211,7 @@ export function validateBackupStreamIntegrity(parseResult: ParseStreamResult): v
   }
 
   // 基于 SQLite 磁盘索引校验外键引用约束
-  for (const tableName of MANDATORY_BACKUP_TABLES) {
+  for (const tableName of actualTableNames) {
     const meta = TABLE_METADATA_MAP[tableName];
     if (!meta?.foreignKeys || meta.foreignKeys.length === 0) continue;
 
@@ -134,16 +226,26 @@ export async function validateForeignKeysFromStaging(
   parseResult: ParseStreamResult,
 ): Promise<void> {
   const staging = parseResult.stagingStore;
+  const presentTables = new Set(Object.keys(parseResult.tableCounts));
+  const externalDependencies = new Set<string>(
+    parseResult.formatVersion === '4.0'
+      ? (parseResult.manifest as any)?.externalDependencies || []
+      : [],
+  );
 
-  for (const tableName of MANDATORY_BACKUP_TABLES) {
-    const meta = TABLE_METADATA_MAP[tableName];
+  for (const tableName of presentTables) {
+    const persistentTable = tableName as PersistentBackupTableName;
+    const meta = TABLE_METADATA_MAP[persistentTable];
     if (!meta?.foreignKeys || meta.foreignKeys.length === 0) continue;
 
-    for await (const batch of staging.iterateTable(tableName, 500)) {
+    for await (const batch of staging.iterateTable(persistentTable, 500)) {
       for (const row of batch) {
         for (const fk of meta.foreignKeys) {
           const val = row[fk.field];
           if (val !== undefined && val !== null) {
+            if (!presentTables.has(fk.targetTable) && externalDependencies.has(fk.targetTable)) {
+              continue;
+            }
             const exists = staging.hasId(fk.targetTable, String(val));
             if (!exists) {
               throw new BadRequestException(
@@ -215,7 +317,14 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
   const manifestTableNames = Object.keys(data.manifest.tables);
   const dataTableNames = Object.keys(data.tables);
 
-  for (const mandatoryTable of MANDATORY_BACKUP_TABLES) {
+  for (const excluded of EXCLUDED_BACKUP_MODELS) {
+    if (manifestTableNames.includes(excluded) || dataTableNames.includes(excluded)) {
+      throw new BadRequestException(`备份文件包含禁止备份的安全敏感或临时表: ${excluded}`);
+    }
+  }
+
+  const requiredTables = LEGACY_V3_REQUIRED_TABLES;
+  for (const mandatoryTable of requiredTables) {
     if (!manifestTableNames.includes(mandatoryTable)) {
       throw new BadRequestException(`备份 Manifest 元数据缺少必要数据表计数: ${mandatoryTable}`);
     }
@@ -224,13 +333,13 @@ export function validateBackupSchemaAndIntegrity(data: any): void {
     }
   }
 
-  if (dataTableNames.length !== MANDATORY_BACKUP_TABLES.length) {
+  if (dataTableNames.length !== requiredTables.length) {
     throw new BadRequestException(
-      `备份数据体包含非预期的未知表，要求精确包含 ${MANDATORY_BACKUP_TABLES.length} 张表，实际获取 ${dataTableNames.length} 张`,
+      `备份数据体包含非预期的未知表，要求精确包含 ${requiredTables.length} 张表，实际获取 ${dataTableNames.length} 张`,
     );
   }
 
-  for (const tableName of MANDATORY_BACKUP_TABLES) {
+  for (const tableName of requiredTables) {
     const manifestCount = data.manifest.tables[tableName];
     const tableData = data.tables[tableName];
 

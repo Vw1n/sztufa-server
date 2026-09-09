@@ -4,12 +4,14 @@ import * as crypto from 'crypto';
 import { BadRequestException } from '@nestjs/common';
 import { BackupStagingStore } from './backup-staging-store';
 import {
+  EXCLUDED_BACKUP_MODELS,
   MANDATORY_BACKUP_TABLES,
-  MandatoryBackupTableName,
+  PersistentBackupTableName,
   TABLE_METADATA_MAP,
+  V4_PERSISTENT_MODELS,
 } from './backup-table-registry';
 import { BackupScope } from './backup-scope.service';
-import { BackupManifestV3, ParseStreamResult } from './backup-format';
+import { BackupManifest, ParseStreamResult } from './backup-format';
 
 // CommonJS require 兼容 stream-json
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -42,6 +44,11 @@ const ALLOWED_MANIFEST_KEYS = new Set([
   'scope',
   'tables',
   'season',
+  'module',
+  'selector',
+  'tableRoles',
+  'externalDependencies',
+  'planDigest',
 ]);
 
 /**
@@ -179,12 +186,12 @@ export async function parseAndValidateBackupStream(
   const seenTopLevelKeys = new Set<string>();
   const seenManifestKeys = new Set<string>();
   const seenManifestTableNames = new Set<string>();
-  const seenTableNames = new Set<MandatoryBackupTableName>();
+  const seenTableNames = new Set<PersistentBackupTableName>();
 
   let formatVersion = '';
   let timestamp: number | undefined = undefined;
-  let manifest: BackupManifestV3 | undefined = undefined;
-  let scope: BackupScope = 'full';
+  let manifest: BackupManifest | undefined = undefined;
+  let scope: BackupScope | 'module' = 'full';
   let seasonInfo: { id: string; name: string } | undefined = undefined;
 
   const tableCounts: Record<string, number> = {};
@@ -194,7 +201,7 @@ export async function parseAndValidateBackupStream(
   let currentKeyBuffer = '';
   let currentStringChunks: string[] = [];
   let currentNumberChunks: string[] = [];
-  let currentTable: MandatoryBackupTableName | null = null;
+  let currentTable: PersistentBackupTableName | null = null;
   let inTablesObject = false;
 
   let rowTokens: any[] = [];
@@ -290,7 +297,7 @@ export async function parseAndValidateBackupStream(
           }
           if (name === 'endString') {
             const scopeVal = currentStringChunks.join('');
-            scope = scopeVal === 'season' ? 'season' : 'full';
+            scope = scopeVal === 'season' || scopeVal === 'module' ? scopeVal : 'full';
             currentStringChunks = [];
             currentKey = '';
             continue;
@@ -314,7 +321,7 @@ export async function parseAndValidateBackupStream(
             checksum: '',
             compression: 'gzip',
             tables: {},
-          };
+          } as BackupManifest;
           continue;
         }
 
@@ -407,7 +414,12 @@ export async function parseAndValidateBackupStream(
             if (currentKey === 'checksumAlgorithm') manifest.checksumAlgorithm = strVal;
             if (currentKey === 'checksum') manifest.checksum = strVal;
             if (currentKey === 'compression') manifest.compression = strVal;
-            if (currentKey === 'scope') manifest.scope = strVal === 'season' ? 'season' : 'full';
+            if (currentKey === 'scope') {
+              (manifest as any).scope =
+                strVal === 'season' || strVal === 'module' ? strVal : 'full';
+            }
+            if (currentKey === 'module') (manifest as any).module = strVal;
+            if (currentKey === 'planDigest') (manifest as any).planDigest = strVal;
             currentStringChunks = [];
             currentKey = '';
             continue;
@@ -418,7 +430,22 @@ export async function parseAndValidateBackupStream(
           }
           if (currentKey === 'season' && name === 'startObject') {
             pathStack.push('manifest_season');
-            manifest.season = { id: '', name: '' };
+            (manifest as any).season = { id: '', name: '' };
+            continue;
+          }
+          if (currentKey === 'selector' && name === 'startObject') {
+            pathStack.push('manifest_selector');
+            (manifest as any).selector = {};
+            continue;
+          }
+          if (currentKey === 'tableRoles' && name === 'startObject') {
+            pathStack.push('manifest_table_roles');
+            (manifest as any).tableRoles = {};
+            continue;
+          }
+          if (currentKey === 'externalDependencies' && name === 'startArray') {
+            pathStack.push('manifest_external_dependencies');
+            (manifest as any).externalDependencies = [];
             continue;
           }
           if (name === 'endObject') {
@@ -474,7 +501,7 @@ export async function parseAndValidateBackupStream(
         } else if (
           pathStack.length === 3 &&
           pathStack[2] === 'manifest_season' &&
-          manifest.season
+          (manifest as any).season
         ) {
           if (name === 'startKey') {
             currentKey = '';
@@ -500,13 +527,73 @@ export async function parseAndValidateBackupStream(
           }
           if (name === 'endString') {
             const strVal = currentStringChunks.join('');
-            if (currentKey === 'id') manifest.season.id = strVal;
-            if (currentKey === 'name') manifest.season.name = strVal;
+            if (currentKey === 'id') (manifest as any).season.id = strVal;
+            if (currentKey === 'name') (manifest as any).season.name = strVal;
             currentStringChunks = [];
             currentKey = '';
             continue;
           }
           if (name === 'endObject') {
+            pathStack.pop();
+            currentKey = '';
+            continue;
+          }
+        } else if (
+          pathStack.length === 3 &&
+          (pathStack[2] === 'manifest_selector' || pathStack[2] === 'manifest_table_roles')
+        ) {
+          if (name === 'startKey') {
+            currentKey = '';
+            currentKeyBuffer = '';
+            continue;
+          }
+          if ((name === 'stringChunk' || name === 'keyChunk') && currentKey === '') {
+            currentKeyBuffer += value;
+            continue;
+          }
+          if (name === 'endKey') {
+            currentKey = currentKeyBuffer;
+            currentKeyBuffer = '';
+            continue;
+          }
+          if (name === 'startString') {
+            currentStringChunks = [];
+            continue;
+          }
+          if (name === 'stringChunk') {
+            currentStringChunks.push(value);
+            continue;
+          }
+          if (name === 'endString') {
+            const target =
+              pathStack[2] === 'manifest_selector'
+                ? (manifest as any).selector
+                : (manifest as any).tableRoles;
+            target[currentKey] = currentStringChunks.join('');
+            currentStringChunks = [];
+            currentKey = '';
+            continue;
+          }
+          if (name === 'endObject') {
+            pathStack.pop();
+            currentKey = '';
+            continue;
+          }
+        } else if (pathStack.length === 3 && pathStack[2] === 'manifest_external_dependencies') {
+          if (name === 'startString') {
+            currentStringChunks = [];
+            continue;
+          }
+          if (name === 'stringChunk') {
+            currentStringChunks.push(value);
+            continue;
+          }
+          if (name === 'endString') {
+            (manifest as any).externalDependencies.push(currentStringChunks.join(''));
+            currentStringChunks = [];
+            continue;
+          }
+          if (name === 'endArray') {
             pathStack.pop();
             currentKey = '';
             continue;
@@ -527,10 +614,14 @@ export async function parseAndValidateBackupStream(
             continue;
           }
           if (name === 'endKey') {
-            const tName = currentKeyBuffer as MandatoryBackupTableName;
+            const tName = currentKeyBuffer as PersistentBackupTableName;
             currentKeyBuffer = '';
-
-            if (!MANDATORY_BACKUP_TABLES.includes(tName)) {
+            if (EXCLUDED_BACKUP_MODELS.includes(tName as any)) {
+              throw new BadRequestException(`备份数据流包含禁止备份的安全敏感或临时表: ${tName}`);
+            }
+            const allowedTables =
+              formatVersion === '4.0' ? V4_PERSISTENT_MODELS : MANDATORY_BACKUP_TABLES;
+            if (!allowedTables.includes(tName as any)) {
               throw new BadRequestException(`备份数据流包含未知表名: ${tName}`);
             }
             if (seenTableNames.has(tName)) {
@@ -664,19 +755,24 @@ export async function parseAndValidateBackupStream(
     }
 
     // 解析完成后的全局完整性断言
-    if (seenTableNames.size !== MANDATORY_BACKUP_TABLES.length) {
-      const missingTables = MANDATORY_BACKUP_TABLES.filter((t) => !seenTableNames.has(t));
-      throw new BadRequestException(`备份数据流缺失必需表: ${missingTables.join(', ')}`);
+    const expectedTables = formatVersion === '4.0' ? V4_PERSISTENT_MODELS : MANDATORY_BACKUP_TABLES;
+    if (formatVersion !== '4.0' || scope === 'full') {
+      if (seenTableNames.size !== expectedTables.length) {
+        const missingTables = expectedTables.filter((t) => !seenTableNames.has(t));
+        throw new BadRequestException(`备份数据流缺失必需表: ${missingTables.join(', ')}`);
+      }
+    } else if (seenTableNames.size === 0) {
+      throw new BadRequestException('V4 模块备份至少必须包含一张表');
     }
 
     if (manifest) {
       const manifestTableKeys = Object.keys(manifest.tables || {});
-      if (manifestTableKeys.length !== MANDATORY_BACKUP_TABLES.length) {
-        throw new BadRequestException(
-          `Manifest.tables 必须精确包含 ${MANDATORY_BACKUP_TABLES.length} 张表`,
-        );
+      const requiredManifestCount =
+        formatVersion === '4.0' && scope === 'module' ? seenTableNames.size : expectedTables.length;
+      if (manifestTableKeys.length !== requiredManifestCount) {
+        throw new BadRequestException(`Manifest.tables 必须精确包含 ${requiredManifestCount} 张表`);
       }
-      for (const t of MANDATORY_BACKUP_TABLES) {
+      for (const t of seenTableNames) {
         if (
           typeof manifest.tables[t] !== 'number' ||
           manifest.tables[t] < 0 ||

@@ -1,12 +1,17 @@
 import { Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
-import { MandatoryBackupTableName, TABLE_METADATA_MAP } from './backup-table-registry';
-import { createV3BackupStream } from './backup-serializer';
+import {
+  MandatoryBackupTableName,
+  PersistentBackupTableName,
+  TABLE_METADATA_MAP,
+} from './backup-table-registry';
+import { createV3BackupStream, createV4BackupStream } from './backup-serializer';
 import { BackupScopeService, getSeasonTableWhereClause } from './backup-scope.service';
 import { BackupObjectStoreService } from './backup-object-store.service';
 import { BackupVerificationService } from './backup-verification.service';
 import { BackupMetadata, CreateBackupOptions } from './backup.types';
+import { BackupPlan, BackupPlanService } from './backup-plan.service';
 
 /**
  * 备份导出服务。
@@ -21,6 +26,7 @@ export class BackupExportService {
     private readonly verificationService: BackupVerificationService,
     private readonly auditLogService: AuditLogService,
     private readonly scopeService: BackupScopeService,
+    private readonly planService: BackupPlanService,
   ) {}
 
   async createBackup(username: string, options?: CreateBackupOptions): Promise<BackupMetadata> {
@@ -28,6 +34,16 @@ export class BackupExportService {
     const isProtected = !!options?.protected;
     const scope = options?.scope || 'full';
     const pageSize = parseInt(process.env.BACKUP_PAGE_SIZE || '500', 10);
+    const isModuleBackup = scope === 'module';
+    let plan: BackupPlan | undefined;
+
+    if (isModuleBackup) {
+      plan = await this.planService.compile({
+        scope: 'module',
+        module: options?.module,
+        selector: options?.selector,
+      });
+    }
 
     let seasonInfo: { id: string; name: string } | undefined = undefined;
 
@@ -39,14 +55,16 @@ export class BackupExportService {
       seasonInfo = { id: seasonObj.id, name: seasonObj.name };
     }
 
-    const pageIteratorProvider = (tableName: MandatoryBackupTableName) => {
+    const pageIteratorProvider = (tableName: PersistentBackupTableName) => {
       const meta = TABLE_METADATA_MAP[tableName];
       const prismaDelegate = (this.prisma as any)[meta.prismaDelegateName];
+      const plannedTable = plan?.tables.find((table) => table.tableName === tableName);
 
       const whereClause =
-        scope === 'season' && options?.seasonId
-          ? getSeasonTableWhereClause(tableName, options.seasonId)
-          : {};
+        plannedTable?.where ||
+        (scope === 'season' && options?.seasonId
+          ? getSeasonTableWhereClause(tableName as MandatoryBackupTableName, options.seasonId)
+          : {});
 
       return (async function* () {
         let lastId: string | null = null;
@@ -106,11 +124,13 @@ export class BackupExportService {
     };
 
     const createdAtIso = new Date().toISOString();
-    const { stream, checksumPromise } = createV3BackupStream(pageIteratorProvider, {
-      createdAt: createdAtIso,
-      scope,
-      season: seasonInfo,
-    });
+    const { stream, checksumPromise } = plan
+      ? createV4BackupStream(plan, pageIteratorProvider, { createdAt: createdAtIso })
+      : createV3BackupStream(pageIteratorProvider, {
+          createdAt: createdAtIso,
+          scope: scope as 'full' | 'season',
+          season: seasonInfo,
+        });
 
     const protectSuffix = isProtected ? '_protected' : '';
     const filename = `backup_${Date.now()}_${purpose}${protectSuffix}.json.gz`;
@@ -118,6 +138,9 @@ export class BackupExportService {
     let fileKey = `private-backups/database/full/${filename}`;
     if (scope === 'season' && options?.seasonId) {
       fileKey = `private-backups/database/seasons/${options.seasonId}/${filename}`;
+    } else if (plan) {
+      const selectorPart = plan.selector.seasonId ? `/${plan.selector.seasonId}` : '';
+      fileKey = `private-backups/database/modules/${plan.module}${selectorPart}/${filename}`;
     } else if (purpose === 'pre-restore') {
       fileKey = `private-backups/database/${filename}`;
     }
@@ -157,7 +180,7 @@ export class BackupExportService {
     await this.auditLogService.log(
       username,
       'CREATE_BACKUP',
-      `触发${scope === 'season' ? '分赛季' : '全站'}数据库备份 (V3.0 GZIP)，备份文件: ${fileKey}。`,
+      `触发${plan ? `${plan.module} 模块` : scope === 'season' ? '分赛季' : '全站'}数据库备份 (${plan ? 'V4.0' : 'V3.0'} GZIP)，备份文件: ${fileKey}。`,
     );
 
     return {
@@ -165,7 +188,7 @@ export class BackupExportService {
       filename,
       size,
       lastModified: new Date(),
-      formatVersion: '3.0',
+      formatVersion: plan ? '4.0' : '3.0',
       compressed: true,
       checksum,
       purpose,
@@ -173,6 +196,8 @@ export class BackupExportService {
       validated: true,
       scope,
       seasonId: options?.seasonId,
+      module: plan?.module === 'full' ? undefined : plan?.module,
+      selector: plan?.selector ? { ...plan.selector } : undefined,
     };
   }
 }

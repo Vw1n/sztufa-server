@@ -223,7 +223,9 @@ describe('BackupService (V3 & Security Spec)', () => {
       jest.spyOn(verificationService, 'verifyBackupIntegrity').mockResolvedValue(true);
 
       const result = await service.createBackup('admin', { purpose: 'manual' });
-      expect(result.key).toMatch(/^private-backups\/database\/full\/backup_\d+_manual\.json\.gz$/);
+      expect(result.key).toMatch(
+        /^private-backups\/database\/full\/full_\d{8}T\d{6}Z_manual\.json\.gz$/,
+      );
       expect(result.formatVersion).toBe('3.0');
       expect(result.compressed).toBe(true);
 
@@ -272,7 +274,7 @@ describe('BackupService (V3 & Security Spec)', () => {
         }),
       );
       expect(result.key).toMatch(
-        /^private-backups\/database\/modules\/content\/backup_\d+_manual\.json\.gz$/,
+        /^private-backups\/database\/modules\/content\/content_\d{8}T\d{6}Z_manual\.json\.gz$/,
       );
       expect(mockPrismaService.news.findMany).toHaveBeenCalled();
       expect(mockPrismaService.user.findMany).not.toHaveBeenCalled();

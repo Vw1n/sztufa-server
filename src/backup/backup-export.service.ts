@@ -12,6 +12,7 @@ import { BackupObjectStoreService } from './backup-object-store.service';
 import { BackupVerificationService } from './backup-verification.service';
 import { BackupMetadata, CreateBackupOptions } from './backup.types';
 import { BackupPlan, BackupPlanService } from './backup-plan.service';
+import { buildBackupFilename } from './backup-filename';
 
 /**
  * 备份导出服务。
@@ -123,7 +124,8 @@ export class BackupExportService {
       })();
     };
 
-    const createdAtIso = new Date().toISOString();
+    const createdAt = new Date();
+    const createdAtIso = createdAt.toISOString();
     const { stream, checksumPromise } = plan
       ? createV4BackupStream(plan, pageIteratorProvider, { createdAt: createdAtIso })
       : createV3BackupStream(pageIteratorProvider, {
@@ -132,8 +134,13 @@ export class BackupExportService {
           season: seasonInfo,
         });
 
-    const protectSuffix = isProtected ? '_protected' : '';
-    const filename = `backup_${Date.now()}_${purpose}${protectSuffix}.json.gz`;
+    const filename = buildBackupFilename({
+      module: plan?.module || (scope === 'season' ? 'season' : 'full'),
+      season: plan?.season || seasonInfo,
+      createdAt,
+      purpose,
+      protected: isProtected,
+    });
 
     let fileKey = `private-backups/database/full/${filename}`;
     if (scope === 'season' && options?.seasonId) {

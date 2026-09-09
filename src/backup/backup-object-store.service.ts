@@ -14,6 +14,7 @@ import { Readable } from 'stream';
 import { BackupMetadata } from './backup.types';
 import { BackupScope } from './backup-scope.service';
 import { BACKUP_MODULES, BackupModule } from './backup-module-registry';
+import { buildAttachmentContentDisposition } from './backup-filename';
 
 /**
  * R2 对象存储基础设施服务。
@@ -272,7 +273,7 @@ export class BackupObjectStoreService {
         Key: key,
         Body: body,
         ContentType: 'application/gzip',
-        ContentDisposition: `attachment; filename="${filename}"`,
+        ContentDisposition: buildAttachmentContentDisposition(filename),
       },
     });
 

@@ -114,16 +114,19 @@ export class BackupMaintenanceService {
     const fullBackups = allBackups.filter(
       (b) => b.key.startsWith('private-backups/database/') && (b.scope || 'full') === 'full',
     );
+    const backupByKey = new Map(allBackups.map((backup) => [backup.key, backup]));
     const newestFullDbKey = fullBackups[0]?.key;
 
-    const hasDatabaseDeletions = plan.plannedDeletions.some((item) =>
-      item.key.startsWith('private-backups/database/'),
+    const hasFullDatabaseDeletions = plan.plannedDeletions.some(
+      (item) =>
+        item.key.startsWith('private-backups/database/') &&
+        (backupByKey.get(item.key)?.scope || 'full') === 'full',
     );
 
     const integrityMap = new Map<string, boolean>();
     let validFullDbCount = 0;
 
-    if (hasDatabaseDeletions) {
+    if (hasFullDatabaseDeletions) {
       for (const dbMeta of fullBackups) {
         const isValid = await this.verificationService.verifyBackupIntegrity(
           dbMeta.key,
@@ -139,7 +142,7 @@ export class BackupMaintenanceService {
       if (item.key === newestFullDbKey) continue;
 
       if (item.key.startsWith('private-backups/database/')) {
-        const isFull = !item.key.includes('/seasons/');
+        const isFull = (backupByKey.get(item.key)?.scope || 'full') === 'full';
         if (isFull) {
           const isItemValid = integrityMap.get(item.key) ?? false;
           const remainingValidCount = validFullDbCount - (isItemValid ? 1 : 0);
@@ -157,7 +160,10 @@ export class BackupMaintenanceService {
         await this.objectStore.deleteObject(item.key);
         deletedCount++;
 
-        if (item.key.startsWith('private-backups/database/') && !item.key.includes('/seasons/')) {
+        if (
+          item.key.startsWith('private-backups/database/') &&
+          (backupByKey.get(item.key)?.scope || 'full') === 'full'
+        ) {
           const isItemValid = integrityMap.get(item.key) ?? false;
           if (isItemValid) {
             validFullDbCount--;

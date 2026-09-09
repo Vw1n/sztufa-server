@@ -25,7 +25,7 @@ export class BackupRetentionService {
    * 2. 最新全站数据库备份 (scope: full) 绝对保护，禁止清理；
    * 3. 带有 protected 标记或 key/filename 包含 _protected 的备份跳过；
    * 4. 带有 _pre-restore 的备份/前置快照超过 7 天清理；
-   * 5. 按 scope (full vs 各 seasonId) 维度独立保留策略；分赛季备份不计入全站有效恢复点，也不能解开全站备份保护；
+   * 5. 按 scope、模块和 selector 维度独立保留策略；模块/分赛季备份不计入全站有效恢复点；
    * 6. 正式数据库备份按周一 ISO 日期保留最近 4 个周备份和 6 个月备份。
    */
   calculateRetentionPlan(
@@ -67,6 +67,8 @@ export class BackupRetentionService {
 
     const seasonWeeklyMaps = new Map<string, Map<string, BackupMetadata>>();
     const seasonMonthlyMaps = new Map<string, Map<string, BackupMetadata>>();
+    const moduleWeeklyMaps = new Map<string, Map<string, BackupMetadata>>();
+    const moduleMonthlyMaps = new Map<string, Map<string, BackupMetadata>>();
 
     for (let index = 0; index < sorted.length; index++) {
       const item = sorted[index];
@@ -156,6 +158,31 @@ export class BackupRetentionService {
 
           if (!sMonthly.has(monthKey) && sMonthly.size < 6) {
             sMonthly.set(monthKey, item);
+            kept.push(item);
+            continue;
+          }
+        } else if (itemScope === 'module' && item.module) {
+          const selectorKey = item.selector?.seasonId || item.seasonId || 'global';
+          const moduleKey = `${item.module}:${selectorKey}`;
+          let mWeekly = moduleWeeklyMaps.get(moduleKey);
+          if (!mWeekly) {
+            mWeekly = new Map();
+            moduleWeeklyMaps.set(moduleKey, mWeekly);
+          }
+          let mMonthly = moduleMonthlyMaps.get(moduleKey);
+          if (!mMonthly) {
+            mMonthly = new Map();
+            moduleMonthlyMaps.set(moduleKey, mMonthly);
+          }
+
+          if (!mWeekly.has(weekKey) && mWeekly.size < 4) {
+            mWeekly.set(weekKey, item);
+            kept.push(item);
+            continue;
+          }
+
+          if (!mMonthly.has(monthKey) && mMonthly.size < 6) {
+            mMonthly.set(monthKey, item);
             kept.push(item);
             continue;
           }

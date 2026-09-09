@@ -598,6 +598,41 @@ describe('BackupService (V3 & Security Spec)', () => {
       expect(res.deletedCount).toBe(1);
       expect(res.keptCount).toBe(2);
     });
+
+    it('模块备份清理不受全站恢复点数量门槛误拦截', async () => {
+      const fullBackup = {
+        key: 'private-backups/database/full/backup_newest.json.gz',
+        scope: 'full',
+        lastModified: new Date(),
+      };
+      const moduleBackup = {
+        key: 'private-backups/database/modules/staff/backup_old.json.gz',
+        scope: 'module',
+        module: 'staff',
+        lastModified: new Date(Date.now() - 30 * 24 * 3600 * 1000),
+      };
+      jest.spyOn(objectStore, 'listBackups').mockResolvedValue([fullBackup, moduleBackup] as any);
+      jest.spyOn(retentionService, 'calculateRetentionPlan').mockReturnValue({
+        plannedDeletions: [
+          {
+            key: moduleBackup.key,
+            filename: 'backup_old.json.gz',
+            reason: '测试模块清理',
+          },
+        ],
+        kept: [fullBackup] as any,
+      });
+      const verifySpy = jest
+        .spyOn(verificationService, 'verifyBackupIntegrity')
+        .mockResolvedValue(true);
+      const deleteSpy = jest.spyOn(objectStore, 'deleteObject').mockResolvedValue();
+
+      const res = await service.cleanRetention('admin', false, 'EXECUTE_RETENTION_DELETE');
+
+      expect(deleteSpy).toHaveBeenCalledWith(moduleBackup.key);
+      expect(verifySpy).not.toHaveBeenCalled();
+      expect(res.deletedCount).toBe(1);
+    });
   });
 
   describe('BackupRestoreService 级联删除防线与并发锁单元测试', () => {

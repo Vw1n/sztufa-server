@@ -48,10 +48,10 @@ export interface BackupManifestV4 {
 export type BackupManifest = BackupManifestV3 | BackupManifestV4;
 
 export interface ParseStreamResult {
-  manifest?: BackupManifestV3;
+  manifest?: BackupManifest;
   formatVersion: string;
   timestamp?: number;
-  scope: BackupScope;
+  scope: BackupScope | 'module';
   season?: { id: string; name: string };
   fileSha256: string;
   compressedSize: number;

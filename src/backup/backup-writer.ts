@@ -191,7 +191,7 @@ export function createV4BackupStream(
 
   const jsonGenerator = async function* () {
     try {
-      const prefix = `{"formatVersion":"4.0","timestamp":${Date.now()},"scope":"${plan.scope}","module":"${plan.module}","selector":${JSON.stringify(plan.selector)},"tables":`;
+      const prefix = `{"formatVersion":"4.0","timestamp":${Date.now()},"scope":"${plan.scope}","tables":`;
       yield Buffer.from(prefix, 'utf8');
 
       const startTables = Buffer.from('{', 'utf8');

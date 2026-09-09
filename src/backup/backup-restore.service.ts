@@ -62,6 +62,10 @@ export class BackupRestoreService {
         throw new BadRequestException('分赛季恢复暂未开放，请使用全站灾备恢复');
       }
 
+      if (parseResult.formatVersion === '4.0') {
+        throw new BadRequestException('V4 备份当前仅支持生成与完整性验证，模块化恢复编排尚未开放');
+      }
+
       const isLegacyFormat =
         !parseResult.formatVersion || ['2.0', '3.0'].includes(parseResult.formatVersion);
 

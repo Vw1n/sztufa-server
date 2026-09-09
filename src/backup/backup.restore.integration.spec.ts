@@ -8,6 +8,7 @@ import { BackupExportService } from './backup-export.service';
 import { BackupRestoreService } from './backup-restore.service';
 import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
+import { BackupPlanService } from './backup-plan.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
 import { Readable } from 'stream';
@@ -68,6 +69,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
 
     const retentionService = new BackupRetentionService();
     const scopeService = new BackupScopeService(testPrisma as unknown as PrismaService);
+    const planService = new BackupPlanService(scopeService);
     objectStore = new BackupObjectStoreService();
     const verificationService = new BackupVerificationService(objectStore);
     const exportService = new BackupExportService(
@@ -76,6 +78,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       verificationService,
       mockAuditLog as any,
       scopeService,
+      planService,
     );
     const restoreService = new BackupRestoreService(
       testPrisma as unknown as PrismaService,

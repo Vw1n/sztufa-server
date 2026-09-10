@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE "BackupBatch" (
     "id" TEXT NOT NULL,
     "trigger" TEXT NOT NULL,

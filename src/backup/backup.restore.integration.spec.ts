@@ -10,6 +10,7 @@ import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
 import { BackupPlanService } from './backup-plan.service';
 import { BackupModuleRestoreService } from './backup-module-restore.service';
+import { BackupFingerprintService } from './backup-fingerprint.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
 import { Readable } from 'stream';
@@ -102,6 +103,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       retentionService,
       mockAuditLog,
     );
+    const fingerprintService = new BackupFingerprintService(testPrisma as unknown as PrismaService);
     service = new BackupService(
       exportService,
       restoreService,
@@ -113,6 +115,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       retentionService,
       testPrisma as unknown as PrismaService,
       moduleRestoreService,
+      fingerprintService,
     );
 
     // 保存原始值并启用恢复功能（所有集成测试均需要）

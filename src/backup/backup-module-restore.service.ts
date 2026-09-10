@@ -3,8 +3,12 @@ import {
   ConflictException,
   Injectable,
   ServiceUnavailableException,
+  Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { BackupObjectStoreService } from './backup-object-store.service';
@@ -14,6 +18,9 @@ import { BackupManifestV4, ParseStreamResult } from './backup-format';
 import { BACKUP_MODULE_REGISTRY, BACKUP_MODULES, BackupModule } from './backup-module-registry';
 import { getSeasonModuleWhereClause } from './backup-plan.service';
 import { PersistentBackupTableName, TABLE_METADATA_MAP } from './backup-table-registry';
+import { BackupService, LEASE_TTL_MS } from './backup.service';
+import { HeldLease } from './backup.types';
+import { getCanonicalLockKey, getCanonicalSelectorKey } from './backup-fingerprint.service';
 
 const SEASON_INSERT_ORDER: PersistentBackupTableName[] = [
   'Team',
@@ -42,13 +49,22 @@ interface RestoreTokenPayload {
 
 @Injectable()
 export class BackupModuleRestoreService {
+  private readonly instanceId = randomUUID();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly objectStore: BackupObjectStoreService,
     private readonly verificationService: BackupVerificationService,
     private readonly exportService: BackupExportService,
     private readonly auditLogService: AuditLogService,
+    @Optional()
+    @Inject(forwardRef(() => BackupService))
+    private backupService?: BackupService,
   ) {}
+
+  setBackupService(service: BackupService) {
+    this.backupService = service;
+  }
 
   async preview(username: string, key: string) {
     const parsed = await this.parse(key);
@@ -79,6 +95,10 @@ export class BackupModuleRestoreService {
   }
 
   async execute(username: string, key: string, restoreToken: string, confirmText?: string) {
+    if (!this.backupService) {
+      throw new ServiceUnavailableException('备份排他锁编排服务未就绪，禁止执行模块恢复');
+    }
+
     if (confirmText !== 'CONFIRM_MODULE_RESTORE') {
       throw new BadRequestException('模块恢复确认文本必须为 "CONFIRM_MODULE_RESTORE"');
     }
@@ -86,6 +106,10 @@ export class BackupModuleRestoreService {
     if (token.key !== key || token.username !== username) {
       throw new BadRequestException('恢复 Preview 令牌与当前请求不匹配');
     }
+
+    let heldLease: HeldLease | null = null;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    const restoreAbort = new AbortController();
 
     const parsed = await this.parse(key);
     try {
@@ -98,13 +122,33 @@ export class BackupModuleRestoreService {
         throw new ServiceUnavailableException(`${module} 模块恢复功能未启用`);
       }
 
-      const snapshot = await this.exportService.createBackup(username, {
-        scope: 'module',
+      const lockKey = getCanonicalLockKey(module, manifest.selector);
+      const lockRes = await this.backupService.acquireBackupLock(
+        'module',
+        lockKey,
+        this.instanceId,
+      );
+      if (!lockRes.acquired) {
+        throw new ConflictException(`目标资源已被占用 (${(lockRes as any).reason})`);
+      }
+      heldLease = { lockKey, leaseToken: lockRes.leaseToken, owner: 'restore' };
+      heartbeatTimer = this.backupService.startHeartbeat(heldLease, restoreAbort);
+
+      const snapRes = await this.backupService.orchestrateModuleBackup({
+        username,
         module,
         selector: manifest.selector,
         purpose: 'pre-restore',
         protected: true,
+        signal: restoreAbort.signal,
+        heldLease,
       });
+      if (snapRes.status !== 'created') {
+        throw new ServiceUnavailableException(
+          `恢复前快照创建失败: ${(snapRes as any).error || (snapRes as any).reason}`,
+        );
+      }
+      const snapshot = snapRes.backup;
 
       await this.prisma.$transaction(
         async (tx) => {
@@ -112,6 +156,9 @@ export class BackupModuleRestoreService {
             { locked: boolean }[]
           >`SELECT pg_try_advisory_xact_lock(88998899) AS locked`;
           if (!locked) throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
+
+          // 当前事务中的恢复写入必须保留备份内的历史 updatedAt。
+          await tx.$executeRawUnsafe("SET LOCAL sztufa.preserve_updated_at = 'on'");
 
           if (module === 'season') {
             await this.restoreSeason(tx, parsed, manifest.selector.seasonId);
@@ -124,6 +171,29 @@ export class BackupModuleRestoreService {
               throw new BadRequestException('管理员模块恢复后必须至少保留一个超级管理员');
             }
           }
+
+          // 恢复提交前终态 Fencing 校验与当前模块 Checkpoint 物理删除
+          if (!heldLease) {
+            throw new Error('恢复期间外部租约丢失，禁止提交事务');
+          }
+          const lockCas = await tx.backupLock.updateMany({
+            where: {
+              lockKey: heldLease.lockKey,
+              leaseToken: heldLease.leaseToken,
+              leaseExpiresAt: { gt: new Date() },
+            },
+            data: {
+              leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS),
+            },
+          });
+          if (lockCas.count === 0) {
+            throw new Error('恢复期间租约已失效或被接管 (fencing failed)，事务回滚');
+          }
+
+          const selectorKey = getCanonicalSelectorKey(module, manifest.selector);
+          await tx.backupModuleCheckpoint.deleteMany({
+            where: { module, selectorKey },
+          });
         },
         {
           maxWait: 20000,
@@ -138,6 +208,12 @@ export class BackupModuleRestoreService {
       );
       return `${module} 模块恢复成功`;
     } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (this.backupService && heldLease) {
+        await this.backupService
+          .releaseLock(heldLease.lockKey, heldLease.leaseToken)
+          .catch(() => {});
+      }
       parsed.cleanup();
     }
   }

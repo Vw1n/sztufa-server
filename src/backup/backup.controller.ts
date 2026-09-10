@@ -19,6 +19,7 @@ import { Roles } from '../auth/roles.decorator';
 import { BackupScope } from './backup-scope.service';
 import { BackupModule } from './backup-module-registry';
 import { BackupBatchListQueryDto } from './dto/backup-batch-list-query.dto';
+import { BackupRunListQueryDto } from './dto/backup-run-list-query.dto';
 import { ArchiveBackfillPreviewDto, ArchiveBackfillExecuteDto } from './dto/archive-backfill.dto';
 
 @Controller('api/v1/backups')
@@ -236,6 +237,29 @@ export class BackupController {
     const username = req.user?.username || 'system';
     const batchResult = await this.backupService.retryScheduledBackupBatch(id, username);
     return { success: true, data: batchResult };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'super_admin')
+  @Get('runs')
+  @ApiOperation({ summary: '分页/条件查询备份运行记录账本' })
+  async listRuns(@Query() query: BackupRunListQueryDto) {
+    const data = await this.backupService.listBackupRuns(query);
+    return { success: true, data };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'super_admin')
+  @Get('checkpoints')
+  @ApiOperation({ summary: '查询各模块最新备份基线 Checkpoint 清单' })
+  async listCheckpoints(
+    @Query('module') module?: string,
+    @Query('selectorKey') selectorKey?: string,
+  ) {
+    const data = await this.backupService.listBackupCheckpoints({ module, selectorKey });
+    return { success: true, data };
   }
 
   @Post('auto-backup')

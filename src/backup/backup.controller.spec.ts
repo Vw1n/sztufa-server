@@ -15,6 +15,7 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
   let jwtService: JwtService;
 
   const superAdminToken = 'Bearer valid_super_admin_token';
+  const adminToken = 'Bearer valid_admin_token';
   const coachToken = 'Bearer valid_coach_token';
 
   beforeEach(async () => {
@@ -52,6 +53,31 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
         failed: 0,
         items: [],
       }),
+      listBackupRuns: jest.fn().mockResolvedValue({
+        total: 1,
+        limit: 20,
+        offset: 0,
+        items: [
+          {
+            id: 'run-1',
+            module: 'staff',
+            status: 'succeeded',
+            objectSize: '1024',
+            databaseBytesEstimated: '5000',
+            uncompressedBytes: '10000',
+            uploadedBytes: '1024',
+            peakRssBytes: '2048000',
+          },
+        ],
+      }),
+      listBackupCheckpoints: jest.fn().mockResolvedValue([
+        {
+          id: 'cp-1',
+          module: 'staff',
+          selectorKey: 'staff',
+          fingerprint: 'abc',
+        },
+      ]),
       listBackups: jest.fn().mockResolvedValue([]),
       getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://r2.example.com/url'),
       restoreBackup: jest.fn().mockResolvedValue('数据库还原成功'),
@@ -87,6 +113,10 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
             req.user = { id: 'u_admin', username: 'admin', role: 'super_admin' };
             return true;
           }
+          if (auth === adminToken) {
+            req.user = { id: 'u_admin2', username: 'admin2', role: 'admin' };
+            return true;
+          }
           if (auth === coachToken) {
             req.user = { id: 'u_coach', username: 'coach_john', role: 'coach' };
             return true;
@@ -97,7 +127,7 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe());
+    app.useGlobalPipes(new ValidationPipe({ transform: true }));
     await app.init();
   });
 
@@ -118,6 +148,8 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
     await request(app.getHttpServer()).delete('/api/v1/backups').expect(403);
     await request(app.getHttpServer()).post('/api/v1/backups/retention/clean').expect(403);
     await request(app.getHttpServer()).post('/api/v1/backups/restore').expect(403);
+    await request(app.getHttpServer()).get('/api/v1/backups/runs').expect(403);
+    await request(app.getHttpServer()).get('/api/v1/backups/checkpoints').expect(403);
   });
 
   it('普通教练身份 (coach) 访问备份受控 API 应当返回 403 Forbidden 拦截', async () => {
@@ -128,6 +160,16 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
 
     await request(app.getHttpServer())
       .get('/api/v1/backups/batches')
+      .set('Authorization', coachToken)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs')
+      .set('Authorization', coachToken)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/checkpoints')
       .set('Authorization', coachToken)
       .expect(403);
 
@@ -222,6 +264,74 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
     await request(app.getHttpServer())
       .get('/api/v1/backups/batches?status=invalid_status')
       .set('Authorization', superAdminToken)
+      .expect(400);
+  });
+
+  it('管理员 (admin) 与超级管理员 (super_admin) 访问 runs 与 checkpoints API 应当成功 (200 OK)', async () => {
+    const runsRes = await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?module=staff&status=succeeded&limit=10&offset=0')
+      .set('Authorization', adminToken)
+      .expect(200);
+
+    expect(mockBackupService.listBackupRuns).toHaveBeenCalledWith(
+      expect.objectContaining({
+        module: 'staff',
+        status: 'succeeded',
+        limit: 10,
+        offset: 0,
+      }),
+    );
+    expect(runsRes.body.success).toBe(true);
+    expect(runsRes.body.data.items[0].databaseBytesEstimated).toBe('5000');
+    expect(runsRes.body.data.items[0].objectSize).toBe('1024');
+
+    const cpRes = await request(app.getHttpServer())
+      .get('/api/v1/backups/checkpoints?module=staff')
+      .set('Authorization', superAdminToken)
+      .expect(200);
+
+    expect(mockBackupService.listBackupCheckpoints).toHaveBeenCalledWith({
+      module: 'staff',
+      selectorKey: undefined,
+    });
+    expect(cpRes.body.success).toBe(true);
+    expect(cpRes.body.data[0].fingerprint).toBe('abc');
+  });
+
+  it('runs 列表查询参数非法时返回 400 校验错误', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?limit=0')
+      .set('Authorization', adminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?limit=101')
+      .set('Authorization', adminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?limit=invalid')
+      .set('Authorization', adminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?offset=-1')
+      .set('Authorization', adminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?module=invalid_module')
+      .set('Authorization', adminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?status=invalid_status')
+      .set('Authorization', adminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/runs?trigger=invalid_trigger')
+      .set('Authorization', adminToken)
       .expect(400);
   });
 });

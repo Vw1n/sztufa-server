@@ -158,6 +158,7 @@ model Goal {
   goalTime     String
   teamType     String
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt @default(now())
 
   @@index([matchId])
   @@index([playerId])
@@ -187,6 +188,7 @@ model MatchEvent {
   description        String
   teamType           String
   createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt @default(now())
 
   @@index([matchId])
   @@index([playerId])
@@ -305,6 +307,7 @@ model HistoryImportBatch {
   summary     Json
   undoPayload Json
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt @default(now())
   undoneAt    DateTime?
 
   @@index([status, createdAt])
@@ -317,6 +320,7 @@ model SeasonDeletionApproval {
   season     Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   approver   User     @relation(fields: [approverId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt @default(now())
 
   @@unique([seasonId, approverId])
   @@index([seasonId])
@@ -336,6 +340,7 @@ model SeasonTeamPlayer {
   team         Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   player       Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt @default(now())
 
   @@unique([seasonId, playerId])
   @@index([seasonId])
@@ -352,6 +357,8 @@ model MatchLineup {
   player     Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
   teamType   String // "home" | "away"
   lineupType String // "starting" | "substitute"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt @default(now())
 
   @@unique([matchId, playerId])
   @@index([matchId])
@@ -366,6 +373,7 @@ model SeasonGroupTeam {
   season    Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
 
   @@unique([seasonId, teamId])
   @@index([seasonId])
@@ -579,6 +587,8 @@ model BackupRun {
   backupKey              String?
   checksum               String?
   objectSize             BigInt?
+  fingerprintBefore      String?
+  fingerprintAfter       String?
   leaseToken             String?   // 本次执行关联的租约令牌，用于 CAS 防覆写
   attempts               Int       @default(0)
   nextAttemptAt          DateTime?
@@ -587,6 +597,7 @@ model BackupRun {
   databaseBytesEstimated BigInt?
   uncompressedBytes      BigInt?
   uploadedBytes          BigInt?
+  peakRssBytes           BigInt?
   durationMs             Int?
   startedAt              DateTime  @default(now())
   finishedAt             DateTime?
@@ -607,4 +618,21 @@ model BackupLock {
   holderInstance String?   // 实例标识
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+// 业务模块增量检查点与指纹基线
+model BackupModuleCheckpoint {
+  id                      String    @id @default(cuid())
+  module                  String    // season | staff | members | content | operations
+  selectorKey             String    // season:<seasonId> | staff | members | content | operations
+  fingerprint             String    // SHA-256 of canonical table summaries
+  fingerprintVersion      Int       @default(1)
+  lastSuccessfulBackupKey String?
+  lastSuccessfulAt        DateTime?
+  lastObservedAt          DateTime  @default(now())
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @default(now()) @updatedAt
+
+  @@unique([module, selectorKey])
+  @@index([selectorKey])
 }

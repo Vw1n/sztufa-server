@@ -31,6 +31,7 @@ export const EXCLUDED_BACKUP_MODELS = [
   'BackupBatch',
   'BackupRun',
   'BackupLock',
+  'BackupModuleCheckpoint',
 ] as const;
 export type ExcludedBackupModel = (typeof EXCLUDED_BACKUP_MODELS)[number];
 
@@ -116,7 +117,7 @@ export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = 
     tableName: 'Goal',
     prismaDelegateName: 'goal',
     cursorField: 'id',
-    dateFields: ['createdAt'],
+    dateFields: ['createdAt', 'updatedAt'],
     foreignKeys: [
       { field: 'matchId', targetTable: 'Match' },
       { field: 'playerId', targetTable: 'Player' },
@@ -126,7 +127,7 @@ export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = 
     tableName: 'MatchEvent',
     prismaDelegateName: 'matchEvent',
     cursorField: 'id',
-    dateFields: ['createdAt'],
+    dateFields: ['createdAt', 'updatedAt'],
     foreignKeys: [
       { field: 'matchId', targetTable: 'Match' },
       { field: 'playerId', targetTable: 'Player' },
@@ -161,13 +162,13 @@ export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = 
     tableName: 'HistoryImportBatch',
     prismaDelegateName: 'historyImportBatch',
     cursorField: 'id',
-    dateFields: ['createdAt', 'undoneAt'],
+    dateFields: ['createdAt', 'updatedAt', 'undoneAt'],
   },
   SeasonDeletionApproval: {
     tableName: 'SeasonDeletionApproval',
     prismaDelegateName: 'seasonDeletionApproval',
     cursorField: 'id',
-    dateFields: ['createdAt'],
+    dateFields: ['createdAt', 'updatedAt'],
     compositeUniqueKeys: [['seasonId', 'approverId']],
     foreignKeys: [
       { field: 'seasonId', targetTable: 'Season' },
@@ -178,7 +179,7 @@ export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = 
     tableName: 'SeasonTeamPlayer',
     prismaDelegateName: 'seasonTeamPlayer',
     cursorField: 'id',
-    dateFields: ['createdAt'],
+    dateFields: ['createdAt', 'updatedAt'],
     compositeUniqueKeys: [['seasonId', 'playerId']],
     foreignKeys: [
       { field: 'seasonId', targetTable: 'Season' },
@@ -190,7 +191,7 @@ export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = 
     tableName: 'MatchLineup',
     prismaDelegateName: 'matchLineup',
     cursorField: 'id',
-    dateFields: [],
+    dateFields: ['createdAt', 'updatedAt'],
     compositeUniqueKeys: [['matchId', 'playerId']],
     foreignKeys: [
       { field: 'matchId', targetTable: 'Match' },
@@ -201,7 +202,7 @@ export const TABLE_METADATA_MAP: Record<PersistentBackupTableName, TableMeta> = 
     tableName: 'SeasonGroupTeam',
     prismaDelegateName: 'seasonGroupTeam',
     cursorField: 'id',
-    dateFields: ['createdAt'],
+    dateFields: ['createdAt', 'updatedAt'],
     compositeUniqueKeys: [['seasonId', 'teamId']],
     foreignKeys: [
       { field: 'seasonId', targetTable: 'Season' },

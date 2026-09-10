@@ -42,7 +42,11 @@ ON CONFLICT ("lockKey") DO NOTHING;
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW."updatedAt" = clock_timestamp();
+  -- 普通 UPDATE 未显式修改 updatedAt 时自动刷新；备份恢复显式写回
+  -- 历史 updatedAt 时保留备份值，保证恢复后的数据深度一致。
+  IF NEW."updatedAt" IS NOT DISTINCT FROM OLD."updatedAt" THEN
+    NEW."updatedAt" = clock_timestamp();
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

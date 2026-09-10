@@ -2727,6 +2727,8 @@ export class BackupService implements OnModuleInit {
       where: {
         scope: 'full',
         status: 'succeeded',
+        purpose: 'manual',
+        trigger: 'manual',
         createdAt: { gte: startOfMonth, lt: endOfMonth },
       },
       orderBy: { createdAt: 'desc' },
@@ -2738,6 +2740,7 @@ export class BackupService implements OnModuleInit {
         where: {
           scope: 'full',
           status: 'succeeded',
+          purpose: { not: 'pre-restore' },
           createdAt: { lt: startOfMonth },
         },
         orderBy: { createdAt: 'desc' },

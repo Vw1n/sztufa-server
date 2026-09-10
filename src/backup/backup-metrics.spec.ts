@@ -421,6 +421,53 @@ describe('PR-D Backup Metrics & Traffic Guard Suite', () => {
       expect(summary.hasIncompleteBatches).toBe(true);
     });
 
+    it('当月基线只选择显式手动全量备份，避免较新的 pre-restore 快照冒充基线', async () => {
+      mockPrisma.backupRun.findMany.mockResolvedValue([]);
+      mockPrisma.backupBatch.count.mockResolvedValue(0);
+      mockPrisma.backupRun.findFirst.mockResolvedValue({
+        scope: 'full',
+        trigger: 'manual',
+        purpose: 'manual',
+        status: 'succeeded',
+        backupKey: 'private-backups/database/full/manual.json.gz',
+        databaseBytesEstimated: BigInt(500000),
+        uploadedBytes: BigInt(150000),
+      });
+
+      const summary = await service.getMetricsSummary('2026-09');
+
+      expect(mockPrisma.backupRun.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            scope: 'full',
+            status: 'succeeded',
+            purpose: 'manual',
+            trigger: 'manual',
+          }),
+        }),
+      );
+      expect(summary.databaseExport.baselineSource).toBe('monthly_manual_full');
+    });
+
+    it('历史全量基线明确排除 pre-restore 快照', async () => {
+      mockPrisma.backupRun.findMany.mockResolvedValue([]);
+      mockPrisma.backupBatch.count.mockResolvedValue(0);
+      mockPrisma.backupRun.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+
+      await service.getMetricsSummary('2026-09');
+
+      expect(mockPrisma.backupRun.findFirst).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: expect.objectContaining({
+            scope: 'full',
+            status: 'succeeded',
+            purpose: { not: 'pre-restore' },
+          }),
+        }),
+      );
+    });
+
     it('当月执行手动全量基线备份时，getMetricsSummary 仅统计 module 范围的当前消耗，不将全量基线计入当前月消耗，正确计算节省率', async () => {
       // 模拟当月包含：1 笔全量基线、1 笔成功模块备份、1 笔 pre-restore 快照、1 笔失败模块备份
       mockPrisma.backupRun.findMany.mockResolvedValue([

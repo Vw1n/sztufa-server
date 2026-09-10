@@ -40,10 +40,14 @@ export class BackupExportService {
     if (purpose === 'archive' || isProtected) {
       if (purpose === 'archive') {
         if (!isProtected) {
-          throw new BadRequestException('归档保护备份必须同时满足 purpose="archive" 且 protected=true，二者必须严格配套');
+          throw new BadRequestException(
+            '归档保护备份必须同时满足 purpose="archive" 且 protected=true，二者必须严格配套',
+          );
         }
         if (scope !== 'module' || options?.module !== 'season') {
-          throw new BadRequestException('归档保护备份仅允许在 scope="module" 且 module="season" 时创建');
+          throw new BadRequestException(
+            '归档保护备份仅允许在 scope="module" 且 module="season" 时创建',
+          );
         }
         const targetSeasonId = options?.selector?.seasonId;
         if (!targetSeasonId) {
@@ -54,13 +58,17 @@ export class BackupExportService {
           throw new BadRequestException('目标赛季不存在');
         }
         if (season.status !== 'archived') {
-          throw new BadRequestException(`仅状态为已归档 (archived) 的赛季允许创建归档保护备份，当前赛季状态为 "${season.status}"`);
+          throw new BadRequestException(
+            `仅状态为已归档 (archived) 的赛季允许创建归档保护备份，当前赛季状态为 "${season.status}"`,
+          );
         }
       } else if (purpose === 'pre-restore') {
         // pre-restore 快照允许受保护 (protected=true)，防止保留策略误清理关键回滚点
       } else {
         // manual, scheduled, uploaded 等普通备份不允许标记为 protected: true
-        throw new BadRequestException(`仅 purpose="archive" 或 purpose="pre-restore" 允许设置受保护标记 (protected=true)，当前 purpose="${purpose}"`);
+        throw new BadRequestException(
+          `仅 purpose="archive" 或 purpose="pre-restore" 允许设置受保护标记 (protected=true)，当前 purpose="${purpose}"`,
+        );
       }
     }
 

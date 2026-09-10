@@ -10,7 +10,6 @@ import {
   Param,
   UseGuards,
   ForbiddenException,
-  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { BackupService } from './backup.service';
@@ -20,10 +19,7 @@ import { Roles } from '../auth/roles.decorator';
 import { BackupScope } from './backup-scope.service';
 import { BackupModule } from './backup-module-registry';
 import { BackupBatchListQueryDto } from './dto/backup-batch-list-query.dto';
-import {
-  ArchiveBackfillPreviewDto,
-  ArchiveBackfillExecuteDto,
-} from './dto/archive-backfill.dto';
+import { ArchiveBackfillPreviewDto, ArchiveBackfillExecuteDto } from './dto/archive-backfill.dto';
 
 @Controller('api/v1/backups')
 @ApiTags('备份管理')
@@ -279,10 +275,7 @@ export class BackupController {
   @Roles('super_admin')
   @Post('archive-backfill/preview')
   @ApiOperation({ summary: '预检归档保护备份补建影响并签发单次防篡改 Token' })
-  async previewArchiveBackfill(
-    @Req() req: any,
-    @Body() dto: ArchiveBackfillPreviewDto,
-  ) {
+  async previewArchiveBackfill(@Req() req: any, @Body() dto: ArchiveBackfillPreviewDto) {
     const operatorId = req.user?.id || req.user?.username || 'admin';
     const preview = await this.backupService.previewArchiveBackfill(operatorId, dto.seasonIds);
     return { success: true, data: preview };
@@ -293,10 +286,7 @@ export class BackupController {
   @Roles('super_admin')
   @Post('archive-backfill/execute')
   @ApiOperation({ summary: '使用 Preview Token 执行归档保护备份批量补建（受预算与并发锁保护）' })
-  async executeArchiveBackfill(
-    @Req() req: any,
-    @Body() dto: ArchiveBackfillExecuteDto,
-  ) {
+  async executeArchiveBackfill(@Req() req: any, @Body() dto: ArchiveBackfillExecuteDto) {
     const operatorId = req.user?.id || req.user?.username || 'admin';
     const username = req.user?.username || 'system';
     const result = await this.backupService.executeArchiveBackfill(
@@ -313,10 +303,7 @@ export class BackupController {
   @Roles('super_admin')
   @Post('archive-backfill/:seasonId/retry')
   @ApiOperation({ summary: '人工重试单个失败的已归档赛季保护备份' })
-  async retryArchiveBackfill(
-    @Req() req: any,
-    @Param('seasonId') seasonId: string,
-  ) {
+  async retryArchiveBackfill(@Req() req: any, @Param('seasonId') seasonId: string) {
     const username = req.user?.username || 'system';
     const result = await this.backupService.retryArchiveSeasonBackfill(seasonId, username);
     return { success: true, data: result };

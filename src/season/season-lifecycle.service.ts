@@ -126,7 +126,10 @@ export class SeasonLifecycleService {
           });
 
           // 防并发重置：若当前已有 running 状态的任务，绝不重置其 attempts 与运行态
-          if (!existingRun || (existingRun.status !== 'running' && existingRun.status !== 'succeeded')) {
+          if (
+            !existingRun ||
+            (existingRun.status !== 'running' && existingRun.status !== 'succeeded')
+          ) {
             await tx.backupRun.upsert({
               where: { taskKey: `archive:season:${season.id}` },
               update: {
@@ -216,7 +219,10 @@ export class SeasonLifecycleService {
           const existingRun = await tx.backupRun.findUnique({
             where: { taskKey: `archive:season:${id}` },
           });
-          if (!existingRun || (existingRun.status !== 'running' && existingRun.status !== 'succeeded')) {
+          if (
+            !existingRun ||
+            (existingRun.status !== 'running' && existingRun.status !== 'succeeded')
+          ) {
             await tx.backupRun.upsert({
               where: { taskKey: `archive:season:${id}` },
               update: {

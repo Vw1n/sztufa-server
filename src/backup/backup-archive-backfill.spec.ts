@@ -466,10 +466,18 @@ describe('BackupService - PR-B Archive Backfill & Protection', () => {
 
     it('rejects execute request if seasonIds exceed maximum 10 seasons', async () => {
       const elevenSeasons = Array.from({ length: 11 }, (_, i) => `s-${i}`);
-      const validTokenForEleven = (service as any).generateBackfillToken('operator-1', elevenSeasons);
+      const validTokenForEleven = (service as any).generateBackfillToken(
+        'operator-1',
+        elevenSeasons,
+      );
 
       await expect(
-        service.executeArchiveBackfill('operator-1', 'operator-1', validTokenForEleven, elevenSeasons),
+        service.executeArchiveBackfill(
+          'operator-1',
+          'operator-1',
+          validTokenForEleven,
+          elevenSeasons,
+        ),
       ).rejects.toThrow('单次补建赛季数量超过最大上限');
     });
   });
@@ -532,7 +540,9 @@ describe('BackupService - PR-B Archive Backfill & Protection', () => {
       expect(coverage.protected).toBe(1);
       expect(coverage.corrupt).toBe(0);
       expect(coverage.seasons[0].hasProtectedBackup).toBe(true);
-      expect(verificationService.inspectAndVerifyBackup).toHaveBeenCalledWith('backups/v4/module/season/legacy.sql.gz');
+      expect(verificationService.inspectAndVerifyBackup).toHaveBeenCalledWith(
+        'backups/v4/module/season/legacy.sql.gz',
+      );
       // Backfills objectSize and checksum into BackupRun
       expect(prisma.backupRun.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -565,7 +575,9 @@ describe('BackupService - PR-B Archive Backfill & Protection', () => {
         nextAttemptAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes in future
       } as any);
 
-      const result = await service.executeArchiveBackfill('op-1', 'op-1', preview.backfillToken, ['s1']);
+      const result = await service.executeArchiveBackfill('op-1', 'op-1', preview.backfillToken, [
+        's1',
+      ]);
 
       expect(result.skipped).toBe(1);
       expect(result.items[0].status).toBe('skipped');
@@ -583,9 +595,9 @@ describe('BackupService - PR-B Archive Backfill & Protection', () => {
         nextAttemptAt: new Date(Date.now() + 300 * 1000), // 300 seconds in future
       } as any);
 
-      await expect(
-        service.retryArchiveSeasonBackfill('s1', 'admin'),
-      ).rejects.toThrow('当前赛季归档备份处于退避重试冷却期');
+      await expect(service.retryArchiveSeasonBackfill('s1', 'admin')).rejects.toThrow(
+        '当前赛季归档备份处于退避重试冷却期',
+      );
     });
 
     it('skips execution in executeArchiveSeasonBackupWithLock when in backoff window', async () => {

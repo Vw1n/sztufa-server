@@ -3,7 +3,8 @@ import { ArrayMaxSize, IsArray, IsNotEmpty, IsOptional, IsString } from 'class-v
 
 export class ArchiveBackfillPreviewDto {
   @ApiProperty({
-    description: '指定补建的归档赛季 ID 列表（可选，默认扫描全部缺失保护的归档赛季，单批最多 10 个）',
+    description:
+      '指定补建的归档赛季 ID 列表（可选，默认扫描全部缺失保护的归档赛季，单批最多 10 个）',
     required: false,
     type: [String],
   })
@@ -24,7 +25,8 @@ export class ArchiveBackfillExecuteDto {
   backfillToken: string;
 
   @ApiProperty({
-    description: '指定执行补建的归档赛季 ID 列表（必须包含在 backfillToken 许可的范围内，单批最多 10 个）',
+    description:
+      '指定执行补建的归档赛季 ID 列表（必须包含在 backfillToken 许可的范围内，单批最多 10 个）',
     required: false,
     type: [String],
   })

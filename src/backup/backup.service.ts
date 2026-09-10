@@ -690,11 +690,7 @@ export class BackupService {
     const updateResult = await this.prisma.backupLock.updateMany({
       where: {
         lockKey,
-        OR: [
-          { leaseExpiresAt: { lt: now } },
-          { leaseToken: null },
-          { leaseExpiresAt: null },
-        ],
+        OR: [{ leaseExpiresAt: { lt: now } }, { leaseToken: null }, { leaseExpiresAt: null }],
       },
       data: {
         leaseToken,
@@ -824,20 +820,24 @@ export class BackupService {
             }
           } else {
             // 缺少 checksum 或 objectSize (旧记录或非标准记录)，执行详细完整性流式校验并提取 checksum
-            const inspectRes = await this.verificationService.inspectAndVerifyBackup(latestRun.backupKey);
+            const inspectRes = await this.verificationService.inspectAndVerifyBackup(
+              latestRun.backupKey,
+            );
             if (inspectRes.valid) {
               isProtected = true;
               validKey = latestRun.backupKey;
               validSize = actualSize;
               verifiedAt = new Date();
-              await this.prisma.backupRun.update({
-                where: { id: latestRun.id },
-                data: {
-                  checksum: inspectRes.checksum || null,
-                  objectSize: BigInt(actualSize),
-                  verifiedAt: new Date(),
-                },
-              }).catch(() => {});
+              await this.prisma.backupRun
+                .update({
+                  where: { id: latestRun.id },
+                  data: {
+                    checksum: inspectRes.checksum || null,
+                    objectSize: BigInt(actualSize),
+                    verifiedAt: new Date(),
+                  },
+                })
+                .catch(() => {});
             } else {
               isCorrupt = true;
               lastError = inspectRes.error || '受保护对象完整性流式校验失败或校验和不匹配';
@@ -899,7 +899,9 @@ export class BackupService {
               });
               break; // 命中首个有效对象即停止后续重试
             } else {
-              failureDetails.push(`${candidate.filename}: ${inspectRes.error || '完整性流式校验失败'}`);
+              failureDetails.push(
+                `${candidate.filename}: ${inspectRes.error || '完整性流式校验失败'}`,
+              );
             }
           } catch (err: any) {
             failureDetails.push(`${candidate.filename}: ${err.message || '对象不可读取'}`);
@@ -1063,7 +1065,11 @@ export class BackupService {
           orderBy: { createdAt: 'desc' },
         });
 
-        if (latestRun?.status === 'failed' && latestRun.nextAttemptAt && latestRun.nextAttemptAt > new Date()) {
+        if (
+          latestRun?.status === 'failed' &&
+          latestRun.nextAttemptAt &&
+          latestRun.nextAttemptAt > new Date()
+        ) {
           items.push({
             seasonId,
             status: 'skipped',
@@ -1393,16 +1399,18 @@ export class BackupService {
       const backoffMinutes = Math.min(Math.pow(2, currentAttempts), 60);
       const nextAttemptAt = new Date(Date.now() + backoffMinutes * 60 * 1000);
 
-      await this.prisma.backupRun.updateMany({
-        where: { taskKey, leaseToken },
-        data: {
-          status: 'failed',
-          failureCode: 'ARCHIVE_BACKUP_FAILED',
-          failureMessage: (err.message || String(err)).slice(0, 1000),
-          nextAttemptAt,
-          finishedAt: new Date(),
-        },
-      }).catch(() => {});
+      await this.prisma.backupRun
+        .updateMany({
+          where: { taskKey, leaseToken },
+          data: {
+            status: 'failed',
+            failureCode: 'ARCHIVE_BACKUP_FAILED',
+            failureMessage: (err.message || String(err)).slice(0, 1000),
+            nextAttemptAt,
+            finishedAt: new Date(),
+          },
+        })
+        .catch(() => {});
 
       return {
         seasonId,

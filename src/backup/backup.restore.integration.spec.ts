@@ -454,7 +454,9 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       const adminBefore = await testPrisma.user.findUnique({ where: { id: 'u1' } });
 
       const originalModuleFlag = process.env.BACKUP_RESTORE_CONTENT_ENABLED;
+      const originalTokenSecret = process.env.BACKUP_RESTORE_TOKEN_SECRET;
       process.env.BACKUP_RESTORE_CONTENT_ENABLED = 'true';
+      process.env.BACKUP_RESTORE_TOKEN_SECRET = 'integration-module-restore-secret';
       try {
         const preview = await service.previewRestore('admin', backup.key);
         expect(preview).toEqual(
@@ -475,6 +477,8 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       } finally {
         if (originalModuleFlag === undefined) delete process.env.BACKUP_RESTORE_CONTENT_ENABLED;
         else process.env.BACKUP_RESTORE_CONTENT_ENABLED = originalModuleFlag;
+        if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
+        else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
       }
 
       expect(await testPrisma.news.findUnique({ where: { id: 'n1' } })).toEqual(
@@ -521,7 +525,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
 
       // 执行真实 createBackup 导出
       const backupInfo = await service.createBackup('admin');
-      expect(backupInfo.key).toMatch(/^private-backups\/database\/full\/backup_/);
+      expect(backupInfo.key).toMatch(/^private-backups\/database\/full\/full_/);
       expect(capturedBackupBuffer.length).toBeGreaterThan(0);
 
       // 4. 彻底篡改数据库全量 18 表记录与关系

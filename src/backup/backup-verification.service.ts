@@ -45,6 +45,47 @@ export class BackupVerificationService {
   }
 
   /**
+   * 详细校验云端备份对象完整性，并在成功时返回解析出的 checksum、大小和清单信息。
+   */
+  async inspectAndVerifyBackup(key: string): Promise<{
+    valid: boolean;
+    checksum?: string;
+    fileSha256?: string;
+    compressedSize?: number;
+    decompressedSize?: number;
+    error?: string;
+  }> {
+    let parseResult: ParseStreamResult | null = null;
+    try {
+      const body = await this.objectStore.getObjectBody(key);
+      parseResult = await parseAndValidateBackupStream(body as any);
+      validateBackupStreamIntegrity(parseResult);
+      await validateForeignKeysFromStaging(parseResult);
+
+      const checksum = parseResult.manifest?.checksum || parseResult.computedChecksum;
+      return {
+        valid: true,
+        checksum,
+        fileSha256: parseResult.fileSha256,
+        compressedSize: parseResult.compressedSize,
+        decompressedSize: parseResult.decompressedSize,
+      };
+    } catch (err: any) {
+      if (err instanceof ServiceUnavailableException) {
+        throw err;
+      }
+      return {
+        valid: false,
+        error: err.message || '备份流式校验失败',
+      };
+    } finally {
+      if (parseResult) {
+        parseResult.cleanup();
+      }
+    }
+  }
+
+  /**
    * 解析并完整校验备份流。
    * - 解析流（含 staging 落盘）
    * - 若提供 expectedFileSha256，校验文件 SHA-256 一致性（防篡改）

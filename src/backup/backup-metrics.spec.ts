@@ -3,7 +3,7 @@ import * as zlib from 'zlib';
 import { ConflictException } from '@nestjs/common';
 import { createV4BackupStream, createV3BackupStream } from './backup-writer';
 import { BackupPlan } from './backup-plan.service';
-import { BackupExportException } from './backup-export.service';
+import { BackupExportService, BackupExportException } from './backup-export.service';
 import { BackupService } from './backup.service';
 
 async function consumeStream(stream: Readable): Promise<Buffer> {
@@ -211,6 +211,91 @@ describe('PR-D Backup Metrics & Traffic Guard Suite', () => {
       );
     });
 
+    it('上传成功但 R2 HEAD 失败时，返回的 uploadedBytes 严格为 null，绝不以 0 伪装，且持久化记录为 null', async () => {
+      mockExportService.createBackup.mockResolvedValue({
+        key: 'private-backups/database/module/season/head-fail.json.gz',
+        filename: 'head-fail.json.gz',
+        size: 0, // 兼容旧字段
+        databaseBytesEstimated: 12000,
+        uncompressedBytes: 15000,
+        uploadedBytes: null, // HEAD 失败，严格为 null
+        databaseRowsRead: 30,
+        peakRssBytes: 50000000,
+      });
+
+      const result = await service.orchestrateModuleBackup({
+        username: 'admin',
+        module: 'season',
+        selector: { seasonId: 'season-head-test' },
+        purpose: 'manual',
+      });
+
+      expect(result.status).toBe('created');
+      if (result.status === 'created') {
+        expect(result.backup.uploadedBytes).toBeNull();
+        expect(result.backup.size).toBe(0);
+      }
+
+      expect(mockPrisma.backupRun.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'succeeded',
+            uploadedBytes: null, // 严格持久化为 null
+          }),
+        }),
+      );
+    });
+
+    it('BackupExportService 在上传成功但 headObject 抛异常时，uploadedBytes 设为 null，size 兼容保持 0', async () => {
+      const mockPrismaLocal = {
+        season: {
+          findMany: jest.fn().mockResolvedValue([{ id: 's1', name: '赛季' }]),
+        },
+      };
+      const mockObjectStoreLocal = {
+        createUpload: jest.fn().mockReturnValue({
+          done: jest.fn().mockResolvedValue(undefined),
+          abort: jest.fn().mockResolvedValue(undefined),
+        }),
+        headObject: jest.fn().mockRejectedValue(new Error('R2 HEAD 500 Network Error')),
+        deleteObject: jest.fn().mockResolvedValue({}),
+      };
+      const mockVerificationService = {
+        verifyBackupIntegrity: jest.fn().mockResolvedValue(true),
+      };
+      const mockAuditLogService = {
+        log: jest.fn().mockResolvedValue(true),
+      };
+      const mockScopeService = {
+        getTablesForScope: jest.fn().mockReturnValue(['Season']),
+      };
+      const mockPlanService = {
+        compile: jest.fn().mockResolvedValue({
+          scope: 'module',
+          module: 'season',
+          selector: { seasonId: 's1' },
+          tables: [{ tableName: 'Season', role: 'owned', where: {}, orderBy: { id: 'asc' } }],
+          externalDependencies: [],
+        }),
+      };
+
+      const exportService = new BackupExportService(
+        mockPrismaLocal as any,
+        mockObjectStoreLocal as any,
+        mockVerificationService as any,
+        mockAuditLogService as any,
+        mockScopeService as any,
+        mockPlanService as any,
+      );
+
+      const metadata = await exportService.createBackup('admin', {
+        scope: 'module',
+      });
+
+      expect(metadata.size).toBe(0);
+      expect(metadata.uploadedBytes).toBeNull();
+    });
+
     it('失败任务消耗的真实出口流量必须计入当月应用出口预算', async () => {
       mockPrisma.backupRun.findMany.mockResolvedValue([
         {
@@ -297,6 +382,8 @@ describe('PR-D Backup Metrics & Traffic Guard Suite', () => {
     it('历史全量基线缺失 databaseBytesEstimated 时，判定出口基线不可用，拒绝拿 objectSize 冒充', async () => {
       mockPrisma.backupRun.findMany.mockResolvedValue([
         {
+          scope: 'module',
+          purpose: 'scheduled',
           databaseBytesEstimated: BigInt(50000),
           uncompressedBytes: BigInt(100000),
           uploadedBytes: BigInt(30000),
@@ -332,6 +419,80 @@ describe('PR-D Backup Metrics & Traffic Guard Suite', () => {
 
       const summary = await service.getMetricsSummary('2026-09');
       expect(summary.hasIncompleteBatches).toBe(true);
+    });
+
+    it('当月执行手动全量基线备份时，getMetricsSummary 仅统计 module 范围的当前消耗，不将全量基线计入当前月消耗，正确计算节省率', async () => {
+      // 模拟当月包含：1 笔全量基线、1 笔成功模块备份、1 笔 pre-restore 快照、1 笔失败模块备份
+      mockPrisma.backupRun.findMany.mockResolvedValue([
+        {
+          id: 'full-baseline-1',
+          scope: 'full',
+          purpose: 'manual',
+          status: 'succeeded',
+          databaseBytesEstimated: BigInt(500000),
+          uncompressedBytes: BigInt(600000),
+          uploadedBytes: BigInt(150000),
+        },
+        {
+          id: 'module-season-1',
+          scope: 'module',
+          module: 'season',
+          purpose: 'scheduled',
+          status: 'succeeded',
+          databaseBytesEstimated: BigInt(40000),
+          uncompressedBytes: BigInt(50000),
+          uploadedBytes: BigInt(10000),
+        },
+        {
+          id: 'pre-restore-1',
+          scope: 'module',
+          module: 'season',
+          purpose: 'pre-restore',
+          status: 'succeeded',
+          databaseBytesEstimated: BigInt(30000),
+          uncompressedBytes: BigInt(35000),
+          uploadedBytes: BigInt(8000),
+        },
+        {
+          id: 'module-staff-fail',
+          scope: 'module',
+          module: 'staff',
+          purpose: 'scheduled',
+          status: 'failed',
+          databaseBytesEstimated: BigInt(10000),
+          uncompressedBytes: BigInt(12000),
+          uploadedBytes: null,
+        },
+      ]);
+      mockPrisma.backupBatch.count.mockResolvedValue(0);
+
+      // 当月全量基线记录
+      mockPrisma.backupRun.findFirst.mockResolvedValueOnce({
+        scope: 'full',
+        status: 'succeeded',
+        backupKey: 'private-backups/database/full/manual-full.json.gz',
+        databaseBytesEstimated: BigInt(500000),
+        uploadedBytes: BigInt(150000),
+      });
+
+      const summary = await service.getMetricsSummary('2026-09');
+
+      // 出口流量：基线 500000，当前仅累计模块（成功 40000 + 失败 10000 = 50000，排除全量 500000 与 pre-restore 30000）
+      expect(summary.databaseExport.baselineAvailable).toBe(true);
+      expect(summary.databaseExport.baselineBytes).toBe('500000');
+      expect(summary.databaseExport.currentBytes).toBe('50000');
+      expect(summary.databaseExport.savedBytes).toBe('450000');
+      expect(summary.databaseExport.percentSaved).toBe(90);
+
+      // 存储上传：基线 150000，当前仅累计成功模块（10000，排除全量 150000 与 pre-restore 8000 与失败 null）
+      expect(summary.storageUpload.baselineAvailable).toBe(true);
+      expect(summary.storageUpload.baselineBytes).toBe('150000');
+      expect(summary.storageUpload.currentBytes).toBe('10000');
+      expect(summary.storageUpload.savedBytes).toBe('140000');
+      expect(summary.storageUpload.percentSaved).toBe(93.3);
+
+      // 模块运行总数：仅 2 笔有效目标模块（season成功 + staff失败），排除全量和 pre-restore
+      expect(summary.totals.runsCount).toBe(2);
     });
   });
 

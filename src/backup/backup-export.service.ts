@@ -251,13 +251,17 @@ export class BackupExportService {
     }
 
     let size = 0;
+    let uploadedBytes: number | null = null;
     try {
       const actualSize = await this.objectStore.headObject(fileKey);
       if (typeof actualSize === 'number' && actualSize > 0) {
         size = actualSize;
+        uploadedBytes = actualSize;
       }
-    } catch {
-      // 降级保持 0
+    } catch (headErr) {
+      // 保持兼容字段 size 兜底为 0，指标字段 uploadedBytes 严格置为 null，绝不以 0 伪装
+      console.warn(`[WARN] 备份上传成功但获取 R2 HEAD 大小失败: ${fileKey}`, headErr);
+      uploadedBytes = null;
     }
 
     const streamMetrics = await metricsPromise;
@@ -271,7 +275,7 @@ export class BackupExportService {
       module: plan?.module || (scope === 'season' ? 'season' : 'full'),
       seasonId: plan?.selector?.seasonId || options?.seasonId,
       purpose,
-      uploadedBytes: size,
+      uploadedBytes,
       databaseBytesEstimated: streamMetrics.databaseBytesEstimated,
       uncompressedBytes: streamMetrics.uncompressedBytes,
       durationMs,
@@ -301,7 +305,7 @@ export class BackupExportService {
       selector: plan?.selector ? { ...plan.selector } : undefined,
       databaseBytesEstimated: streamMetrics.databaseBytesEstimated,
       uncompressedBytes: streamMetrics.uncompressedBytes,
-      uploadedBytes: size,
+      uploadedBytes,
       databaseRowsRead: streamMetrics.databaseRowsRead,
       tablesProcessed,
       peakRssBytes,

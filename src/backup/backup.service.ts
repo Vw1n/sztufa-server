@@ -2700,14 +2700,23 @@ export class BackupService implements OnModuleInit {
     let curDatabaseBytes = 0n;
     let curUncompressedBytes = 0n;
     let curUploadedBytes = 0n;
+    let targetModularRunsCount = 0;
 
     for (const r of monthRuns) {
+      // 节省率当前值限定为目标模块运行，排除全量备份（基线本身）和 pre-restore 恢复前快照
+      if (r.scope !== 'module' || r.purpose === 'pre-restore') {
+        continue;
+      }
+      targetModularRunsCount++;
+
+      // 出口维度：累计成功和失败模块运行的真实读取估算
       if (r.databaseBytesEstimated !== null && r.databaseBytesEstimated !== undefined) {
         curDatabaseBytes += BigInt(r.databaseBytesEstimated);
       }
       if (r.uncompressedBytes !== null && r.uncompressedBytes !== undefined) {
         curUncompressedBytes += BigInt(r.uncompressedBytes);
       }
+      // 存储维度：只累计成功的模块上传
       if (r.status === 'succeeded' && r.uploadedBytes !== null && r.uploadedBytes !== undefined) {
         curUploadedBytes += BigInt(r.uploadedBytes);
       }
@@ -2839,7 +2848,7 @@ export class BackupService implements OnModuleInit {
         databaseBytesEstimated: String(curDatabaseBytes),
         uncompressedBytes: String(curUncompressedBytes),
         uploadedBytes: String(curUploadedBytes),
-        runsCount: monthRuns.length,
+        runsCount: targetModularRunsCount,
       },
       hasIncompleteBatches: incompleteBatchCount > 0,
     };

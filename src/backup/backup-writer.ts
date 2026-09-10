@@ -7,6 +7,12 @@ import { BackupManifestV4 } from './backup-format';
 import { BackupPlan } from './backup-plan.service';
 import { PersistentBackupTableName } from './backup-table-registry';
 
+export interface BackupStreamMetrics {
+  databaseBytesEstimated: number;
+  uncompressedBytes: number;
+  databaseRowsRead: number;
+}
+
 /**
  * 有界内存流式备份生成器
  */
@@ -18,9 +24,18 @@ export function createV3BackupStream(
   checksumPromise: Promise<string>;
   tableCountsPromise: Promise<Record<string, number>>;
   manifestPromise: Promise<BackupManifestV3>;
+  metricsPromise: Promise<BackupStreamMetrics>;
+  getMetricsSnapshot: () => BackupStreamMetrics;
 } {
   const tableCounts: Record<string, number> = {};
   const tablesHasher = crypto.createHash('sha256');
+
+  const metricsSnapshot: BackupStreamMetrics = {
+    databaseBytesEstimated: 0,
+    uncompressedBytes: 0,
+    databaseRowsRead: 0,
+  };
+  const getMetricsSnapshot = () => ({ ...metricsSnapshot });
 
   let resolveChecksum: (val: string) => void;
   let rejectChecksum: (err: any) => void;
@@ -43,6 +58,14 @@ export function createV3BackupStream(
     rejectManifest = rej;
   });
 
+  let resolveMetrics: (val: BackupStreamMetrics) => void;
+  let rejectMetrics: (err: any) => void;
+  const metricsPromise = new Promise<BackupStreamMetrics>((res, rej) => {
+    resolveMetrics = res;
+    rejectMetrics = rej;
+  });
+  metricsPromise.catch(() => {});
+
   const scope = options?.scope || 'full';
   const createdAtIso = options?.createdAt || new Date().toISOString();
 
@@ -54,9 +77,12 @@ export function createV3BackupStream(
           : `"scope":"full",`;
 
       const prefix = `{"formatVersion":"3.0","timestamp":${Date.now()},${scopePart}"tables":`;
-      yield Buffer.from(prefix, 'utf8');
+      const prefixChunk = Buffer.from(prefix, 'utf8');
+      metricsSnapshot.uncompressedBytes += prefixChunk.length;
+      yield prefixChunk;
 
       const startTablesChunk = Buffer.from('{', 'utf8');
+      metricsSnapshot.uncompressedBytes += startTablesChunk.length;
       yield startTablesChunk;
       tablesHasher.update(startTablesChunk);
 
@@ -67,6 +93,7 @@ export function createV3BackupStream(
 
         const tableKeyPrefix = `${isFirstTable ? '' : ','}"${tableName}":[`;
         const tableKeyChunk = Buffer.from(tableKeyPrefix, 'utf8');
+        metricsSnapshot.uncompressedBytes += tableKeyChunk.length;
         yield tableKeyChunk;
         tablesHasher.update(tableKeyChunk);
 
@@ -80,7 +107,12 @@ export function createV3BackupStream(
 
           for (const row of page) {
             const rowJson = JSON.stringify(row);
+            const rowBytes = Buffer.byteLength(rowJson, 'utf8');
+            metricsSnapshot.databaseBytesEstimated += rowBytes;
+            metricsSnapshot.databaseRowsRead++;
+
             const rowChunk = Buffer.from(`${isFirstRow ? '' : ','}${rowJson}`, 'utf8');
+            metricsSnapshot.uncompressedBytes += rowChunk.length;
             yield rowChunk;
             tablesHasher.update(rowChunk);
 
@@ -90,11 +122,13 @@ export function createV3BackupStream(
         }
 
         const tableEndChunk = Buffer.from(']', 'utf8');
+        metricsSnapshot.uncompressedBytes += tableEndChunk.length;
         yield tableEndChunk;
         tablesHasher.update(tableEndChunk);
       }
 
       const endTablesChunk = Buffer.from('}', 'utf8');
+      metricsSnapshot.uncompressedBytes += endTablesChunk.length;
       yield endTablesChunk;
       tablesHasher.update(endTablesChunk);
 
@@ -117,11 +151,16 @@ export function createV3BackupStream(
       resolveManifest(manifest);
 
       const suffix = `,"manifest":${JSON.stringify(manifest)}}`;
-      yield Buffer.from(suffix, 'utf8');
+      const suffixChunk = Buffer.from(suffix, 'utf8');
+      metricsSnapshot.uncompressedBytes += suffixChunk.length;
+      yield suffixChunk;
+
+      resolveMetrics({ ...metricsSnapshot });
     } catch (err) {
       rejectChecksum(err);
       rejectCounts(err);
       rejectManifest(err);
+      rejectMetrics(err);
       throw err;
     }
   };
@@ -134,6 +173,7 @@ export function createV3BackupStream(
       rejectChecksum(err);
       rejectCounts(err);
       rejectManifest(err);
+      rejectMetrics(err);
     }
   });
 
@@ -142,6 +182,8 @@ export function createV3BackupStream(
     checksumPromise,
     tableCountsPromise,
     manifestPromise,
+    metricsPromise,
+    getMetricsSnapshot,
   };
 }
 
@@ -154,10 +196,19 @@ export function createV4BackupStream(
   checksumPromise: Promise<string>;
   tableCountsPromise: Promise<Record<string, number>>;
   manifestPromise: Promise<BackupManifestV4>;
+  metricsPromise: Promise<BackupStreamMetrics>;
+  getMetricsSnapshot: () => BackupStreamMetrics;
 } {
   const tableCounts: Record<string, number> = {};
   const tablesHasher = crypto.createHash('sha256');
   const createdAt = options?.createdAt || new Date().toISOString();
+
+  const metricsSnapshot: BackupStreamMetrics = {
+    databaseBytesEstimated: 0,
+    uncompressedBytes: 0,
+    databaseRowsRead: 0,
+  };
+  const getMetricsSnapshot = () => ({ ...metricsSnapshot });
 
   let resolveChecksum!: (value: string) => void;
   let rejectChecksum!: (reason: unknown) => void;
@@ -180,6 +231,14 @@ export function createV4BackupStream(
     rejectManifest = reject;
   });
 
+  let resolveMetrics!: (value: BackupStreamMetrics) => void;
+  let rejectMetrics!: (reason: unknown) => void;
+  const metricsPromise = new Promise<BackupStreamMetrics>((resolve, reject) => {
+    resolveMetrics = resolve;
+    rejectMetrics = reject;
+  });
+  metricsPromise.catch(() => {});
+
   const planSummary = {
     scope: plan.scope,
     module: plan.module,
@@ -192,9 +251,12 @@ export function createV4BackupStream(
   const jsonGenerator = async function* () {
     try {
       const prefix = `{"formatVersion":"4.0","timestamp":${Date.now()},"scope":"${plan.scope}","tables":`;
-      yield Buffer.from(prefix, 'utf8');
+      const prefixChunk = Buffer.from(prefix, 'utf8');
+      metricsSnapshot.uncompressedBytes += prefixChunk.length;
+      yield prefixChunk;
 
       const startTables = Buffer.from('{', 'utf8');
+      metricsSnapshot.uncompressedBytes += startTables.length;
       yield startTables;
       tablesHasher.update(startTables);
 
@@ -202,6 +264,7 @@ export function createV4BackupStream(
         const { tableName } = plan.tables[tableIndex];
         tableCounts[tableName] = 0;
         const tableStart = Buffer.from(`${tableIndex === 0 ? '' : ','}"${tableName}":[`, 'utf8');
+        metricsSnapshot.uncompressedBytes += tableStart.length;
         yield tableStart;
         tablesHasher.update(tableStart);
 
@@ -209,7 +272,13 @@ export function createV4BackupStream(
         for await (const page of pageIteratorProvider(tableName)) {
           if (!Array.isArray(page)) throw new TypeError(`表 ${tableName} 的分页结果必须为数组`);
           for (const row of page) {
-            const rowChunk = Buffer.from(`${firstRow ? '' : ','}${JSON.stringify(row)}`, 'utf8');
+            const rowJson = JSON.stringify(row);
+            const rowBytes = Buffer.byteLength(rowJson, 'utf8');
+            metricsSnapshot.databaseBytesEstimated += rowBytes;
+            metricsSnapshot.databaseRowsRead++;
+
+            const rowChunk = Buffer.from(`${firstRow ? '' : ','}${rowJson}`, 'utf8');
+            metricsSnapshot.uncompressedBytes += rowChunk.length;
             yield rowChunk;
             tablesHasher.update(rowChunk);
             firstRow = false;
@@ -218,11 +287,13 @@ export function createV4BackupStream(
         }
 
         const tableEnd = Buffer.from(']', 'utf8');
+        metricsSnapshot.uncompressedBytes += tableEnd.length;
         yield tableEnd;
         tablesHasher.update(tableEnd);
       }
 
       const endTables = Buffer.from('}', 'utf8');
+      metricsSnapshot.uncompressedBytes += endTables.length;
       yield endTables;
       tablesHasher.update(endTables);
 
@@ -250,11 +321,18 @@ export function createV4BackupStream(
       resolveChecksum(checksum);
       resolveCounts({ ...tableCounts });
       resolveManifest(manifest);
-      yield Buffer.from(`,"manifest":${JSON.stringify(manifest)}}`, 'utf8');
+
+      const suffix = `,"manifest":${JSON.stringify(manifest)}}`;
+      const suffixChunk = Buffer.from(suffix, 'utf8');
+      metricsSnapshot.uncompressedBytes += suffixChunk.length;
+      yield suffixChunk;
+
+      resolveMetrics({ ...metricsSnapshot });
     } catch (error) {
       rejectChecksum(error);
       rejectCounts(error);
       rejectManifest(error);
+      rejectMetrics(error);
       throw error;
     }
   };
@@ -266,8 +344,16 @@ export function createV4BackupStream(
       rejectChecksum(error);
       rejectCounts(error);
       rejectManifest(error);
+      rejectMetrics(error);
     }
   });
 
-  return { stream: gzipStream, checksumPromise, tableCountsPromise, manifestPromise };
+  return {
+    stream: gzipStream,
+    checksumPromise,
+    tableCountsPromise,
+    manifestPromise,
+    metricsPromise,
+    getMetricsSnapshot,
+  };
 }

@@ -9,7 +9,7 @@
  * 本文件保留全部原有导出，保证既有调用方（服务、校验器、测试、memory 压测子进程）
  * 无需修改导入路径。
  */
-export { createV3BackupStream, createV4BackupStream } from './backup-writer';
+export { createV3BackupStream, createV4BackupStream, BackupStreamMetrics } from './backup-writer';
 export { parseAndValidateBackupStream } from './backup-parser';
 export type {
   BackupManifest,

@@ -12,11 +12,13 @@ import { BackupMaintenanceService } from './backup-maintenance.service';
 import { BackupPlanService } from './backup-plan.service';
 import { BackupModuleRestoreService } from './backup-module-restore.service';
 import { BackupFingerprintService } from './backup-fingerprint.service';
+import { NeonTrafficService } from './neon-traffic.service';
 
 @Module({
   providers: [
     BackupService,
     BackupFingerprintService,
+    NeonTrafficService,
     BackupObjectStoreService,
     BackupVerificationService,
     BackupExportService,
@@ -29,6 +31,6 @@ import { BackupFingerprintService } from './backup-fingerprint.service';
     BackupModuleRestoreService,
   ],
   controllers: [BackupController],
-  exports: [BackupService, BackupFingerprintService],
+  exports: [BackupService, BackupFingerprintService, NeonTrafficService],
 })
 export class BackupModule {}

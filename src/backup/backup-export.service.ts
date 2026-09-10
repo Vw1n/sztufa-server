@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import {
@@ -13,6 +13,22 @@ import { BackupVerificationService } from './backup-verification.service';
 import { BackupMetadata, CreateBackupOptions } from './backup.types';
 import { BackupPlan, BackupPlanService } from './backup-plan.service';
 import { buildBackupFilename } from './backup-filename';
+
+export class BackupExportException extends Error {
+  constructor(
+    message: string,
+    public readonly partialMetrics: {
+      databaseBytesEstimated: number;
+      uncompressedBytes: number;
+      databaseRowsRead: number;
+      peakRssBytes?: number;
+    },
+    public readonly cause?: any,
+  ) {
+    super(message);
+    this.name = 'BackupExportException';
+  }
+}
 
 /**
  * 备份导出服务。
@@ -137,6 +153,7 @@ export class BackupExportService {
           }
 
           const page: any[] = await prismaDelegate.findMany(findOptions);
+          peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
 
           if (!page || page.length === 0) {
             hasMore = false;
@@ -167,15 +184,18 @@ export class BackupExportService {
       })();
     };
 
+    let peakRssBytes = process.memoryUsage().rss;
     const createdAt = new Date();
     const createdAtIso = createdAt.toISOString();
-    const { stream, checksumPromise } = plan
+    const writerResult = plan
       ? createV4BackupStream(plan, pageIteratorProvider, { createdAt: createdAtIso })
       : createV3BackupStream(pageIteratorProvider, {
           createdAt: createdAtIso,
           scope: scope as 'full' | 'season',
           season: seasonInfo,
         });
+    const { stream, checksumPromise, manifestPromise, metricsPromise, getMetricsSnapshot } =
+      writerResult;
 
     const filename = buildBackupFilename({
       module: plan?.module || (scope === 'season' ? 'season' : 'full'),
@@ -213,8 +233,21 @@ export class BackupExportService {
         console.error(`[CRITICAL] 备份校验失败且物理删除失败，遗留废弃文件: ${fileKey}`, deleteErr);
       }
       console.error('上传或校验备份文件至 R2 失败:', err);
-      if (err instanceof BadRequestException) throw err;
-      throw new ServiceUnavailableException('无法将备份文件保存至对象存储');
+
+      const snapshot = getMetricsSnapshot();
+      peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+      const wrappedErr = new BackupExportException(
+        `无法将备份文件保存至对象存储: ${err.message || '备份导出或保存失败'}`,
+        {
+          databaseBytesEstimated: snapshot.databaseBytesEstimated,
+          uncompressedBytes: snapshot.uncompressedBytes,
+          databaseRowsRead: snapshot.databaseRowsRead,
+          peakRssBytes,
+        },
+        err,
+      );
+
+      throw wrappedErr;
     }
 
     let size = 0;
@@ -227,13 +260,20 @@ export class BackupExportService {
       // 降级保持 0
     }
 
+    const streamMetrics = await metricsPromise;
+    const manifest = await manifestPromise;
+    const tablesProcessed = manifest?.tables ? Object.keys(manifest.tables).length : 0;
+    peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+
     const durationMs = Date.now() - startedAt;
     const metric = {
       scope,
       module: plan?.module || (scope === 'season' ? 'season' : 'full'),
-      seasonId: plan?.selector.seasonId || options?.seasonId,
+      seasonId: plan?.selector?.seasonId || options?.seasonId,
       purpose,
       uploadedBytes: size,
+      databaseBytesEstimated: streamMetrics.databaseBytesEstimated,
+      uncompressedBytes: streamMetrics.uncompressedBytes,
       durationMs,
     };
     console.info(`[BackupMetrics] ${JSON.stringify(metric)}`);
@@ -259,6 +299,12 @@ export class BackupExportService {
       seasonId: options?.seasonId,
       module: plan?.module === 'full' ? undefined : plan?.module,
       selector: plan?.selector ? { ...plan.selector } : undefined,
+      databaseBytesEstimated: streamMetrics.databaseBytesEstimated,
+      uncompressedBytes: streamMetrics.uncompressedBytes,
+      uploadedBytes: size,
+      databaseRowsRead: streamMetrics.databaseRowsRead,
+      tablesProcessed,
+      peakRssBytes,
     };
   }
 }

@@ -91,6 +91,13 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
         .mockResolvedValue({ key: 'private-backups/database/backup_uploaded.json.gz' }),
       deleteBackup: jest.fn().mockResolvedValue('备份删除成功'),
       cleanRetention: jest.fn().mockResolvedValue({ dryRun: true, plannedDeletions: [] }),
+      getDashboard: jest.fn().mockResolvedValue({
+        applicationBudget: { usedBytes: '1000' },
+        neonOfficial: { status: 'not_configured' },
+      }),
+      getMetricsSummary: jest.fn().mockResolvedValue({ periodKey: '2026-09' }),
+      getMetricsTimeseries: jest.fn().mockResolvedValue([]),
+      retryBackupRun: jest.fn().mockResolvedValue({ status: 'created' }),
     };
 
     jwtService = new JwtService({ secret: 'test-secret' });
@@ -333,6 +340,55 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
       .get('/api/v1/backups/runs?trigger=invalid_trigger')
       .set('Authorization', adminToken)
       .expect(400);
+  });
+
+  it('GET /api/v1/backups/dashboard 权限测试: admin 及 super_admin 可访问，coach 返回 403', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/dashboard')
+      .set('Authorization', adminToken)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/dashboard')
+      .set('Authorization', superAdminToken)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/dashboard')
+      .set('Authorization', coachToken)
+      .expect(403);
+  });
+
+  it('GET /api/v1/backups/metrics/summary 权限与参数透传测试', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/metrics/summary?periodKey=2026-09')
+      .set('Authorization', adminToken)
+      .expect(200);
+
+    expect(mockBackupService.getMetricsSummary).toHaveBeenCalledWith('2026-09');
+  });
+
+  it('GET /api/v1/backups/metrics/timeseries 权限与参数透传测试', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/metrics/timeseries?months=12')
+      .set('Authorization', adminToken)
+      .expect(200);
+
+    expect(mockBackupService.getMetricsTimeseries).toHaveBeenCalledWith(12);
+  });
+
+  it('POST /api/v1/backups/runs/:runId/retry: super_admin 可执行，admin 返回 403', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/backups/runs/run-failed-1/retry')
+      .set('Authorization', superAdminToken)
+      .expect(201);
+
+    expect(mockBackupService.retryBackupRun).toHaveBeenCalledWith('run-failed-1', 'admin');
+
+    await request(app.getHttpServer())
+      .post('/api/v1/backups/runs/run-failed-1/retry')
+      .set('Authorization', adminToken)
+      .expect(403);
   });
 });
 

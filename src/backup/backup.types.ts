@@ -32,6 +32,12 @@ export interface UploadInitResult {
   requiredHeaders: Record<string, string>;
 }
 
+export interface HeldLease {
+  readonly lockKey: string;
+  readonly leaseToken: string;
+  readonly owner: 'restore';
+}
+
 export interface CreateBackupOptions {
   purpose?: 'manual' | 'scheduled' | 'archive' | 'pre-restore' | 'uploaded';
   protected?: boolean;
@@ -40,6 +46,7 @@ export interface CreateBackupOptions {
   module?: BackupModule;
   selector?: Record<string, string>;
   signal?: AbortSignal;
+  heldLease?: HeldLease;
 }
 
 /** 无状态 HMAC 上传 Token 的载荷结构 */

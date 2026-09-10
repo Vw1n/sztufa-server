@@ -399,4 +399,215 @@ describe('BackupService 月度模块化备份与批次状态机测试', () => {
       );
     });
   });
+
+  describe('7. PR-C 指纹变化检测、快照一致性与 Fencing 闭环', () => {
+    const createPrCService = () => {
+      const exportService = {
+        createBackup: jest.fn().mockResolvedValue({
+          key: 'private-backups/database/modules/staff/backup.json.gz',
+          filename: 'backup.json.gz',
+          size: 1024,
+          checksum: 'mock-sha256',
+        }),
+      };
+      const objectStore = {
+        listBackups: jest.fn().mockResolvedValue([]),
+        deleteObject: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const prisma: any = {
+        $transaction: jest.fn().mockImplementation(async (cb: any) => cb(prisma)),
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 'gate-id' }]),
+        backupLock: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          findFirst: jest.fn().mockResolvedValue(null),
+          count: jest.fn().mockResolvedValue(0),
+          upsert: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        backupRun: {
+          create: jest
+            .fn()
+            .mockImplementation((args: any) => Promise.resolve({ id: 'run-1', ...args.data })),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+        backupModuleCheckpoint: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          update: jest.fn().mockResolvedValue({}),
+          upsert: jest.fn().mockResolvedValue({}),
+        },
+        season: {
+          findFirst: jest.fn().mockResolvedValue({ id: 's1' }),
+        },
+      };
+
+      const fingerprintService = {
+        calculateModuleFingerprint: jest.fn(),
+      };
+
+      const service = new BackupService(
+        exportService as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        objectStore as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        prisma as any,
+        {} as any,
+        fingerprintService as any,
+      );
+
+      return { service, exportService, objectStore, prisma, fingerprintService };
+    };
+
+    it('指纹未变时，在持锁事务中 CAS 校验租约、更新 Checkpoint 与 BackupRun 为 skipped，不触发导出', async () => {
+      const { service, exportService, prisma, fingerprintService } = createPrCService();
+      const mockFp = {
+        module: 'staff',
+        selectorKey: 'staff',
+        version: 1,
+        fingerprint: 'hash-unchanged-123',
+        tableFingerprints: [],
+        durationMs: 10,
+      };
+      fingerprintService.calculateModuleFingerprint.mockResolvedValue(mockFp);
+
+      prisma.backupModuleCheckpoint.findUnique.mockResolvedValue({
+        id: 'cp-1',
+        module: 'staff',
+        selectorKey: 'staff',
+        fingerprint: 'hash-unchanged-123',
+        lastSuccessfulBackupKey: 'backups/staff.json.gz',
+      });
+
+      const res = await service.createScheduledBackup('cron', {
+        scope: 'module',
+        module: 'staff',
+      });
+
+      expect(res.status).toBe('skipped');
+      if (res.status === 'skipped') {
+        expect(res.reason).toBe('unchanged');
+      }
+
+      // 验证未调用导出
+      expect(exportService.createBackup).not.toHaveBeenCalled();
+
+      // 验证在事务内原子更新 Checkpoint.lastObservedAt 与 BackupRun
+      expect(prisma.backupModuleCheckpoint.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cp-1' },
+          data: expect.objectContaining({ lastObservedAt: expect.any(Date) }),
+        }),
+      );
+      expect(prisma.backupRun.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'skipped',
+            skipReason: 'unchanged',
+            fingerprintBefore: 'hash-unchanged-123',
+          }),
+        }),
+      );
+
+      // 验证持锁完成并已释放锁
+      expect(prisma.backupLock.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ lockKey: 'lock:backup:staff' }),
+          data: expect.objectContaining({ leaseToken: null }),
+        }),
+      );
+    });
+
+    it('导出期间发生并发修改 (fingerprintBefore !== fingerprintAfter) 时，Checkpoint 保守不推进', async () => {
+      const { service, exportService, prisma, fingerprintService } = createPrCService();
+
+      const fpBefore = {
+        module: 'staff',
+        selectorKey: 'staff',
+        version: 1,
+        fingerprint: 'hash-initial-111',
+        tableFingerprints: [],
+        durationMs: 10,
+      };
+      const fpAfter = {
+        module: 'staff',
+        selectorKey: 'staff',
+        version: 1,
+        fingerprint: 'hash-mutated-222', // 导出期间发生变动！
+        tableFingerprints: [],
+        durationMs: 10,
+      };
+
+      fingerprintService.calculateModuleFingerprint
+        .mockResolvedValueOnce(fpBefore)
+        .mockResolvedValueOnce(fpAfter);
+
+      const res = await service.createScheduledBackup('cron', {
+        scope: 'module',
+        module: 'staff',
+      });
+
+      expect(res.status).toBe('created');
+      expect(exportService.createBackup).toHaveBeenCalled();
+
+      // 核心断言：由于指纹不一致，绝对不得 upsert Checkpoint 推进基线
+      expect(prisma.backupModuleCheckpoint.upsert).not.toHaveBeenCalled();
+
+      // 但 BackupRun 记录了实际导出的前后指纹
+      expect(prisma.backupRun.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'succeeded',
+            fingerprintBefore: 'hash-initial-111',
+            fingerprintAfter: 'hash-mutated-222',
+          }),
+        }),
+      );
+    });
+
+    it('导出期间租约丢失 (lockCas.count === 0) 时，必须触发补偿物理删除并回滚', async () => {
+      const { service, exportService, objectStore, prisma, fingerprintService } =
+        createPrCService();
+
+      const mockFp = {
+        module: 'staff',
+        selectorKey: 'staff',
+        version: 1,
+        fingerprint: 'hash-clean',
+        tableFingerprints: [],
+        durationMs: 10,
+      };
+      fingerprintService.calculateModuleFingerprint.mockResolvedValue(mockFp);
+
+      // 模拟导出成功上传了 R2 对象
+      exportService.createBackup.mockResolvedValue({
+        key: 'private-backups/database/modules/staff/created-obj.json.gz',
+        filename: 'created-obj.json.gz',
+        size: 1024,
+        checksum: 'mock-sha256',
+      });
+
+      // 模拟事务内 CAS 续锁核验失败（count === 0，表示租约已被其他实例抢占）
+      prisma.backupLock.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      const res = await service.createScheduledBackup('cron', {
+        scope: 'module',
+        module: 'staff',
+      });
+
+      expect(res.status).toBe('failed');
+
+      // 核心断言：Fencing 拦截后，必须对已上传对象执行补偿物理删除！
+      expect(objectStore.deleteObject).toHaveBeenCalledWith(
+        'private-backups/database/modules/staff/created-obj.json.gz',
+      );
+
+      // Checkpoint 绝不能推进
+      expect(prisma.backupModuleCheckpoint.upsert).not.toHaveBeenCalled();
+    });
+  });
 });

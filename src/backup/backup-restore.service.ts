@@ -4,7 +4,11 @@ import {
   ServiceUnavailableException,
   ConflictException,
   InternalServerErrorException,
+  Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import {
@@ -16,6 +20,8 @@ import { ParseStreamResult } from './backup-serializer';
 import { BackupObjectStoreService } from './backup-object-store.service';
 import { BackupVerificationService } from './backup-verification.service';
 import { BackupExportService } from './backup-export.service';
+import { BackupService, LEASE_TTL_MS } from './backup.service';
+import { HeldLease } from './backup.types';
 
 /**
  * 备份恢复服务。
@@ -26,13 +32,22 @@ import { BackupExportService } from './backup-export.service';
  */
 @Injectable()
 export class BackupRestoreService {
+  private readonly instanceId = randomUUID();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly objectStore: BackupObjectStoreService,
     private readonly verificationService: BackupVerificationService,
     private readonly exportService: BackupExportService,
     private readonly auditLogService: AuditLogService,
+    @Optional()
+    @Inject(forwardRef(() => BackupService))
+    private backupService?: BackupService,
   ) {}
+
+  setBackupService(service: BackupService) {
+    this.backupService = service;
+  }
 
   async restoreBackup(username: string, key: string, confirmText?: string): Promise<string> {
     if (process.env.BACKUP_RESTORE_ENABLED !== 'true') {
@@ -57,7 +72,28 @@ export class BackupRestoreService {
       throw err;
     }
 
+    let heldLease: HeldLease | null = null;
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    const restoreAbort = new AbortController();
+
     try {
+      if (this.backupService) {
+        const lockRes = await this.backupService.acquireBackupLock(
+          'full',
+          'lock:backup:global:full',
+          this.instanceId,
+        );
+        if (!lockRes.acquired) {
+          throw new ConflictException(`已有备份或恢复任务正在运行 (${(lockRes as any).reason})`);
+        }
+        heldLease = {
+          lockKey: 'lock:backup:global:full',
+          leaseToken: lockRes.leaseToken,
+          owner: 'restore',
+        };
+        heartbeatTimer = this.backupService.startHeartbeat(heldLease, restoreAbort);
+      }
+
       if (parseResult.scope === 'season') {
         throw new BadRequestException('分赛季恢复暂未开放，请使用全站灾备恢复');
       }
@@ -80,10 +116,21 @@ export class BackupRestoreService {
 
       let preRestoreSnapshotKey = '';
       try {
-        const snapshotMeta = await this.exportService.createBackup(username, {
-          purpose: 'pre-restore',
-        });
-        preRestoreSnapshotKey = snapshotMeta.key;
+        if (this.backupService && heldLease) {
+          const snapshotMeta = await this.backupService.orchestrateFullBackup({
+            username,
+            purpose: 'pre-restore',
+            protected: true,
+            signal: restoreAbort.signal,
+            heldLease,
+          });
+          preRestoreSnapshotKey = snapshotMeta.key;
+        } else {
+          const snapshotMeta = await this.exportService.createBackup(username, {
+            purpose: 'pre-restore',
+          });
+          preRestoreSnapshotKey = snapshotMeta.key;
+        }
       } catch (snapshotErr) {
         throw new ServiceUnavailableException(
           `恢复前自动创建快照失败，已终止恢复操作: ${
@@ -216,6 +263,26 @@ export class BackupRestoreService {
                 }
               }
             }
+
+            // 恢复提交前终态 Fencing 校验与 Checkpoint 物理清空
+            if (this.backupService && heldLease) {
+              const lockCas = await tx.backupLock.updateMany({
+                where: {
+                  lockKey: heldLease.lockKey,
+                  leaseToken: heldLease.leaseToken,
+                  leaseExpiresAt: { gt: new Date() },
+                },
+                data: {
+                  leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS),
+                },
+              });
+              if (lockCas.count === 0) {
+                throw new Error('恢复期间租约已失效或被接管 (fencing failed)，事务回滚');
+              }
+
+              // 事务性物理清空所有模块 Checkpoint
+              await tx.backupModuleCheckpoint.deleteMany({});
+            }
           },
           {
             maxWait: 20000,
@@ -244,6 +311,12 @@ export class BackupRestoreService {
         );
       }
     } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (this.backupService && heldLease) {
+        await this.backupService
+          .releaseLock(heldLease.lockKey, heldLease.leaseToken)
+          .catch(() => {});
+      }
       if (parseResult) parseResult.cleanup();
     }
   }

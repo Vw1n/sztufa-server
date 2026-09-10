@@ -226,8 +226,8 @@ describe('BackupValidator Classifier & Integrity Test Suite', () => {
     });
   });
 
-  describe('27-Model 分类完整性与排他性守卫', () => {
-    it('Prisma Schema 中的所有 Model 必须被精确且无交集地分类为 22 个 V4 持久业务表和 5 个排除表', () => {
+  describe('28-Model 分类完整性与排他性守卫', () => {
+    it('Prisma Schema 中的所有 Model 必须被精确且无交集地分类为 22 个 V4 持久业务表和 6 个排除表', () => {
       const schemaPath = path.resolve(__dirname, '../../prisma/schema.prisma');
       const schemaContent = fs.readFileSync(schemaPath, 'utf8');
 
@@ -239,13 +239,13 @@ describe('BackupValidator Classifier & Integrity Test Suite', () => {
         schemaModels.add(match[1]);
       }
 
-      expect(schemaModels.size).toBe(27);
+      expect(schemaModels.size).toBe(28);
 
       const persistentSet = new Set<string>(V4_PERSISTENT_MODELS);
       const excludedSet = new Set<string>(EXCLUDED_BACKUP_MODELS);
 
       expect(persistentSet.size).toBe(22);
-      expect(excludedSet.size).toBe(5);
+      expect(excludedSet.size).toBe(6);
 
       // 交集必须为空
       const intersection = [...persistentSet].filter((x) => excludedSet.has(x));

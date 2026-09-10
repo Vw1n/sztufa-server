@@ -3,6 +3,12 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  ServiceUnavailableException,
+  Logger,
+  Optional,
+  Inject,
+  forwardRef,
+  OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID, createHmac, createHash } from 'crypto';
 import { BackupExportService } from './backup-export.service';
@@ -14,14 +20,26 @@ import { BackupVerificationService } from './backup-verification.service';
 import { BackupScopeService } from './backup-scope.service';
 import { BackupRetentionService } from './backup-retention.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BackupMetadata, CreateBackupOptions } from './backup.types';
+import { BackupMetadata, CreateBackupOptions, HeldLease } from './backup.types';
 import { BackupModuleRestoreService } from './backup-module-restore.service';
-import { BackupModule, BACKUP_MODULE_REGISTRY } from './backup-module-registry';
+import { BackupModule, BACKUP_MODULE_REGISTRY, BACKUP_MODULES } from './backup-module-registry';
+import {
+  BackupFingerprintService,
+  getCanonicalSelectorKey,
+  getCanonicalLockKey,
+} from './backup-fingerprint.service';
+import { BackupRunListQueryDto } from './dto/backup-run-list-query.dto';
 
 // 保持既有外部导入兼容性的符号 re-export
 export { MANDATORY_BACKUP_TABLES } from './backup-table-registry';
 export { validateBackupSchemaAndIntegrity } from './backup-validator';
-export type { BackupMetadata, UploadInitResult, CreateBackupOptions } from './backup.types';
+export type {
+  BackupMetadata,
+  UploadInitResult,
+  CreateBackupOptions,
+  HeldLease,
+} from './backup.types';
+export { getCanonicalSelectorKey, getCanonicalLockKey } from './backup-fingerprint.service';
 
 export const LEASE_TTL_MS = 300_000; // 5 分钟
 export const BATCH_TIME_BUDGET_MS = 240_000; // 240 秒
@@ -42,7 +60,14 @@ export type ScheduledModuleTaskResult =
       status: 'skipped';
       module: BackupModule;
       selector?: Record<string, string>;
-      reason: 'no_eligible_season' | 'minimum_interval' | 'unchanged';
+      reason:
+        | 'no_eligible_season'
+        | 'minimum_interval'
+        | 'unchanged'
+        | 'duplicate_in_flight'
+        | 'global_full_in_flight'
+        | 'active_module_in_flight'
+        | 'already_protected';
       existingBackup?: BackupMetadata;
       finishedAt: string;
     }
@@ -54,6 +79,26 @@ export type ScheduledModuleTaskResult =
       error: string;
       finishedAt: string;
     };
+
+export interface OrchestrateModuleBackupOptions {
+  readonly username: string;
+  readonly module: BackupModule;
+  readonly selector?: Record<string, string>;
+  readonly purpose?: 'manual' | 'scheduled' | 'archive' | 'pre-restore' | 'uploaded';
+  readonly protected?: boolean;
+  readonly trigger?: 'manual' | 'cron' | 'archive' | 'backfill' | 'retry';
+  readonly signal?: AbortSignal;
+  readonly heldLease?: HeldLease;
+}
+
+export interface OrchestrateFullBackupOptions {
+  readonly username: string;
+  readonly purpose?: 'manual' | 'scheduled' | 'archive' | 'pre-restore' | 'uploaded';
+  readonly protected?: boolean;
+  readonly trigger?: 'manual' | 'cron';
+  readonly signal?: AbortSignal;
+  readonly heldLease?: HeldLease;
+}
 
 export interface BackupBatchResult {
   batchId: string;
@@ -80,9 +125,12 @@ export function getShanghaiPeriodKey(date = new Date()): string {
  * 不再包含任何业务实现，便于各链路独立测试与审查。
  */
 @Injectable()
-export class BackupService {
+export class BackupService implements OnModuleInit {
+  private readonly logger = new Logger(BackupService.name);
+
   constructor(
     private readonly exportService: BackupExportService,
+    @Inject(forwardRef(() => BackupRestoreService))
     private readonly restoreService: BackupRestoreService,
     private readonly uploadService: BackupUploadService,
     private readonly maintenanceService: BackupMaintenanceService,
@@ -91,8 +139,42 @@ export class BackupService {
     private readonly scopeService: BackupScopeService,
     private readonly retentionService: BackupRetentionService,
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => BackupModuleRestoreService))
     private readonly moduleRestoreService: BackupModuleRestoreService,
-  ) {}
+    @Optional()
+    private readonly fingerprintService?: BackupFingerprintService,
+  ) {
+    if (
+      this.restoreService &&
+      typeof (this.restoreService as any).setBackupService === 'function'
+    ) {
+      (this.restoreService as any).setBackupService(this);
+    }
+    if (
+      this.moduleRestoreService &&
+      typeof (this.moduleRestoreService as any).setBackupService === 'function'
+    ) {
+      (this.moduleRestoreService as any).setBackupService(this);
+    }
+  }
+
+  async onModuleInit() {
+    await this.ensureGateRecord().catch((err) => {
+      this.logger.warn(`Gate 锁记录自检失败: ${err.message}`);
+    });
+  }
+
+  async ensureGateRecord(): Promise<void> {
+    try {
+      await this.prisma.backupLock.upsert({
+        where: { lockKey: 'lock:backup:gate' },
+        create: { lockKey: 'lock:backup:gate' },
+        update: {},
+      });
+    } catch {
+      // 允许在数据库迁移未执行前静默失败
+    }
+  }
 
   private async getLatestBusinessChange(options: CreateBackupOptions): Promise<Date | null> {
     const scope = options.scope || 'full';
@@ -149,8 +231,41 @@ export class BackupService {
     return new Date(Math.max(...timestamps.map((value) => new Date(value as Date).getTime())));
   }
 
-  createBackup(username: string, options?: Parameters<BackupExportService['createBackup']>[1]) {
-    return this.exportService.createBackup(username, options);
+  async createBackup(username: string, options?: CreateBackupOptions): Promise<BackupMetadata> {
+    const scope = options?.scope || 'full';
+    if (scope === 'module') {
+      const targetModule = options?.module;
+      if (!targetModule) throw new BadRequestException('模块备份必须指定 module');
+      const res = await this.orchestrateModuleBackup({
+        username,
+        module: targetModule,
+        selector: options?.selector,
+        purpose: options?.purpose,
+        protected: options?.protected,
+        signal: options?.signal,
+        heldLease: options?.heldLease,
+      });
+      if (res.status === 'created') {
+        return res.backup;
+      }
+      if (res.status === 'skipped') {
+        if (res.existingBackup) return res.existingBackup;
+        throw new ConflictException(`模块备份已跳过: ${res.reason}`);
+      }
+      throw new Error(res.error || '模块备份导出失败');
+    }
+
+    if (scope === 'season') {
+      return this.exportService.createBackup(username, options);
+    }
+
+    return this.orchestrateFullBackup({
+      username,
+      purpose: options?.purpose,
+      protected: options?.protected,
+      signal: options?.signal,
+      heldLease: options?.heldLease,
+    });
   }
 
   async createScheduledBackup(
@@ -208,7 +323,11 @@ export class BackupService {
           };
         }
 
-        if (process.env.SCHEDULED_BACKUP_CHANGE_DETECTION_ENABLED !== 'false') {
+        // 若没有注入指纹服务，保留基于时间戳的降级变化检测
+        if (
+          !this.fingerprintService &&
+          process.env.SCHEDULED_BACKUP_CHANGE_DETECTION_ENABLED !== 'false'
+        ) {
           const latestChange = await this.getLatestBusinessChange(scheduledOptions);
           if (!latestChange || latestChange.getTime() <= latestBackupTime) {
             return {
@@ -222,6 +341,18 @@ export class BackupService {
           }
         }
       }
+    }
+
+    // 若启用了指纹服务，通过 orchestrateModuleBackup 统一执行
+    if (this.fingerprintService) {
+      return this.orchestrateModuleBackup({
+        username,
+        module: targetModule,
+        selector,
+        purpose: 'scheduled',
+        trigger: 'cron',
+        signal: scheduledOptions.signal,
+      });
     }
 
     const start = Date.now();
@@ -729,6 +860,602 @@ export class BackupService {
       },
     });
     return !!lock;
+  }
+
+  async acquireBackupLock(
+    type: 'module' | 'full',
+    lockKey: string,
+    instanceId: string,
+    ttlMs: number = LEASE_TTL_MS,
+  ): Promise<
+    | { acquired: true; leaseToken: string }
+    | {
+        acquired: false;
+        reason: 'duplicate_in_flight' | 'global_full_in_flight' | 'active_module_in_flight';
+      }
+  > {
+    return this.prisma.$transaction(async (tx) => {
+      const gate = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "BackupLock" WHERE "lockKey" = 'lock:backup:gate' FOR UPDATE
+      `;
+      if (!gate || gate.length === 0) {
+        throw new ServiceUnavailableException('备份仲裁系统异常: Gate 锁记录缺失 (fail-closed)');
+      }
+
+      const now = new Date();
+      const leaseExpiresAt = new Date(now.getTime() + ttlMs);
+      const leaseToken = randomUUID();
+
+      if (type === 'full') {
+        const curFull = await tx.backupLock.findUnique({
+          where: { lockKey: 'lock:backup:global:full' },
+        });
+        if (
+          curFull &&
+          curFull.leaseExpiresAt &&
+          curFull.leaseExpiresAt > now &&
+          curFull.leaseToken
+        ) {
+          return { acquired: false, reason: 'duplicate_in_flight' };
+        }
+        const activeModules = await tx.backupLock.count({
+          where: {
+            lockKey: {
+              startsWith: 'lock:backup:',
+              notIn: ['lock:backup:gate', 'lock:backup:global:full'],
+            },
+            leaseExpiresAt: { gt: now },
+            leaseToken: { not: null },
+          },
+        });
+        if (activeModules > 0) {
+          return { acquired: false, reason: 'active_module_in_flight' };
+        }
+
+        await tx.backupLock.upsert({
+          where: { lockKey: 'lock:backup:global:full' },
+          create: {
+            lockKey: 'lock:backup:global:full',
+            leaseToken,
+            leaseExpiresAt,
+            holderInstance: instanceId,
+          },
+          update: {
+            leaseToken,
+            leaseExpiresAt,
+            holderInstance: instanceId,
+          },
+        });
+        return { acquired: true, leaseToken };
+      } else {
+        const activeFull = await tx.backupLock.findFirst({
+          where: {
+            lockKey: 'lock:backup:global:full',
+            leaseExpiresAt: { gt: now },
+            leaseToken: { not: null },
+          },
+        });
+        if (activeFull) {
+          return { acquired: false, reason: 'global_full_in_flight' };
+        }
+
+        const cur = await tx.backupLock.findUnique({ where: { lockKey } });
+        if (cur && cur.leaseExpiresAt && cur.leaseExpiresAt > now && cur.leaseToken) {
+          return { acquired: false, reason: 'duplicate_in_flight' };
+        }
+
+        await tx.backupLock.upsert({
+          where: { lockKey },
+          create: {
+            lockKey,
+            leaseToken,
+            leaseExpiresAt,
+            holderInstance: instanceId,
+          },
+          update: {
+            leaseToken,
+            leaseExpiresAt,
+            holderInstance: instanceId,
+          },
+        });
+        return { acquired: true, leaseToken };
+      }
+    });
+  }
+
+  startHeartbeat(
+    heldLease: { lockKey: string; leaseToken: string },
+    abortController: AbortController,
+    intervalMs = 20000,
+  ): NodeJS.Timeout {
+    let isHeartbeatInFlight = false;
+    return setInterval(async () => {
+      if (isHeartbeatInFlight) return;
+      isHeartbeatInFlight = true;
+      try {
+        const now = new Date();
+        const renew = await this.prisma.backupLock.updateMany({
+          where: {
+            lockKey: heldLease.lockKey,
+            leaseToken: heldLease.leaseToken,
+            leaseExpiresAt: { gt: now },
+          },
+          data: { leaseExpiresAt: new Date(now.getTime() + LEASE_TTL_MS) },
+        });
+        if (renew.count === 0) {
+          abortController.abort();
+        }
+      } catch {
+        // 忽略单次网络闪断
+      } finally {
+        isHeartbeatInFlight = false;
+      }
+    }, intervalMs);
+  }
+
+  async orchestrateModuleBackup(
+    options: OrchestrateModuleBackupOptions,
+  ): Promise<ScheduledModuleTaskResult> {
+    const module = options.module;
+    if (!BACKUP_MODULES.includes(module)) {
+      throw new BadRequestException(`非法的模块名称: ${module}`);
+    }
+    const selector = options.selector || {};
+    const canonicalSelectorKey = getCanonicalSelectorKey(module, selector);
+    const canonicalLockKey = getCanonicalLockKey(module, selector);
+    const purpose = options.purpose || 'manual';
+    const trigger =
+      options.trigger ||
+      (purpose === 'scheduled' ? 'cron' : purpose === 'archive' ? 'archive' : 'manual');
+
+    let leaseToken: string;
+    let isExternalLock = false;
+
+    if (options.heldLease) {
+      if (options.heldLease.lockKey !== canonicalLockKey) {
+        throw new BadRequestException(
+          `模块 HeldLease lockKey 不匹配: 期望 ${canonicalLockKey}, 实际 ${options.heldLease.lockKey}`,
+        );
+      }
+      const lockRecord = await this.prisma.backupLock.findFirst({
+        where: {
+          lockKey: canonicalLockKey,
+          leaseToken: options.heldLease.leaseToken,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      });
+      if (!lockRecord) {
+        throw new ConflictException('模块 HeldLease 租约已失效或不存在');
+      }
+      leaseToken = options.heldLease.leaseToken;
+      isExternalLock = true;
+    } else {
+      const instanceId = randomUUID();
+      const lockRes = await this.acquireBackupLock('module', canonicalLockKey, instanceId);
+      if (!lockRes.acquired) {
+        const skipReason: any = (lockRes as any).reason;
+        return {
+          status: 'skipped',
+          module,
+          selector,
+          reason: skipReason,
+          finishedAt: new Date().toISOString(),
+        };
+      }
+      leaseToken = lockRes.leaseToken;
+    }
+
+    const internalAbort = new AbortController();
+    const onExternalAbort = () => internalAbort.abort();
+    if (options.signal) {
+      if (options.signal.aborted) internalAbort.abort();
+      else options.signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    if (!isExternalLock) {
+      heartbeatTimer = this.startHeartbeat(
+        { lockKey: canonicalLockKey, leaseToken },
+        internalAbort,
+      );
+    }
+
+    const taskKey =
+      purpose === 'archive' && selector?.seasonId
+        ? `archive:season:${selector.seasonId}`
+        : undefined;
+
+    let backupRun: any;
+    let currentAttempts = 1;
+    if (taskKey) {
+      const existing = await this.prisma.backupRun.findUnique({ where: { taskKey } });
+      currentAttempts = (existing?.attempts || 0) + 1;
+      backupRun = await this.prisma.backupRun.upsert({
+        where: { taskKey },
+        create: {
+          taskKey,
+          trigger,
+          scope: 'module',
+          module,
+          selectorKey: canonicalSelectorKey,
+          purpose,
+          status: 'running',
+          leaseToken,
+          attempts: currentAttempts,
+          startedAt: new Date(),
+        },
+        update: {
+          trigger,
+          status: 'running',
+          leaseToken,
+          attempts: currentAttempts,
+          startedAt: new Date(),
+          failureCode: null,
+          failureMessage: null,
+        },
+      });
+    } else {
+      backupRun = await this.prisma.backupRun.create({
+        data: {
+          trigger,
+          scope: 'module',
+          module,
+          selectorKey: canonicalSelectorKey,
+          purpose,
+          status: 'running',
+          leaseToken,
+          attempts: 1,
+          startedAt: new Date(),
+        },
+      });
+    }
+
+    const startExport = Date.now();
+    let createdBackupKey: string | null = null;
+    let committedSuccess = false;
+
+    try {
+      let fpBefore: any = null;
+      if (this.fingerprintService) {
+        fpBefore = await this.fingerprintService.calculateModuleFingerprint(module, selector);
+        await this.prisma.backupRun
+          .updateMany({
+            where: { id: backupRun.id, leaseToken },
+            data: { fingerprintBefore: fpBefore.fingerprint },
+          })
+          .catch(() => {});
+      }
+
+      // 仅在 scheduled 时做 Checkpoint 对比跳过 (pre-restore 快照绝不可跳过)
+      if (purpose === 'scheduled' && fpBefore) {
+        const checkpoint = await this.prisma.backupModuleCheckpoint.findUnique({
+          where: { module_selectorKey: { module, selectorKey: canonicalSelectorKey } },
+        });
+
+        if (
+          checkpoint &&
+          checkpoint.fingerprint === fpBefore.fingerprint &&
+          checkpoint.lastSuccessfulBackupKey
+        ) {
+          // unchanged 分支持锁原子更新 Checkpoint 与 BackupRun
+          await this.prisma.$transaction(async (tx) => {
+            const now = new Date();
+            const lockCas = await tx.backupLock.updateMany({
+              where: {
+                lockKey: canonicalLockKey,
+                leaseToken,
+                leaseExpiresAt: { gt: now },
+              },
+              data: { leaseExpiresAt: new Date(now.getTime() + LEASE_TTL_MS) },
+            });
+            if (lockCas.count === 0) {
+              throw new Error('租约在指纹检测期间失效 (fencing check failed)');
+            }
+
+            await tx.backupModuleCheckpoint.update({
+              where: { id: checkpoint.id },
+              data: { lastObservedAt: now },
+            });
+
+            const runCas = await tx.backupRun.updateMany({
+              where: { id: backupRun.id, leaseToken },
+              data: {
+                status: 'skipped',
+                skipReason: 'unchanged',
+                fingerprintBefore: fpBefore.fingerprint,
+                fingerprintAfter: fpBefore.fingerprint,
+                finishedAt: now,
+              },
+            });
+            if (runCas.count === 0) {
+              throw new Error('BackupRun 租约丢失 (fencing check failed)');
+            }
+          });
+
+          committedSuccess = true;
+          return {
+            status: 'skipped',
+            module,
+            selector,
+            reason: 'unchanged',
+            finishedAt: new Date().toISOString(),
+          };
+        }
+      }
+
+      // 执行导出与上传
+      const backupMetadata = await this.exportService.createBackup(options.username, {
+        scope: 'module',
+        module,
+        selector,
+        purpose,
+        protected: options.protected,
+        signal: internalAbort.signal,
+      });
+      createdBackupKey = backupMetadata.key;
+
+      // 二次采样指纹 (Conservative Snapshot Consistency)
+      let fpAfter: any = fpBefore;
+      if (this.fingerprintService) {
+        fpAfter = await this.fingerprintService.calculateModuleFingerprint(module, selector);
+      }
+
+      const isFingerprintConsistent =
+        fpBefore && fpAfter && fpBefore.fingerprint === fpAfter.fingerprint;
+
+      // 事务内 CAS 校验租约有效性并提交终态
+      await this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        const lockCas = await tx.backupLock.updateMany({
+          where: {
+            lockKey: canonicalLockKey,
+            leaseToken,
+            leaseExpiresAt: { gt: now },
+          },
+          data: {
+            leaseExpiresAt: new Date(now.getTime() + LEASE_TTL_MS),
+          },
+        });
+        if (lockCas.count === 0) {
+          throw new Error('租约在导出期间已失效或被接管 (fencing check failed)');
+        }
+
+        const runCas = await tx.backupRun.updateMany({
+          where: { id: backupRun.id, leaseToken },
+          data: {
+            status: 'succeeded',
+            backupKey: backupMetadata.key,
+            checksum: backupMetadata.checksum,
+            objectSize: BigInt(backupMetadata.size),
+            fingerprintBefore: fpBefore?.fingerprint || null,
+            fingerprintAfter: fpAfter?.fingerprint || null,
+            durationMs: Date.now() - startExport,
+            verifiedAt: new Date(),
+            finishedAt: new Date(),
+          },
+        });
+        if (runCas.count === 0) {
+          throw new Error('BackupRun 租约所有权已丢失 (fencing check failed)');
+        }
+
+        // 保守一致性：仅当前后指纹完全相同时才推进 Checkpoint 基线
+        if (isFingerprintConsistent) {
+          await tx.backupModuleCheckpoint.upsert({
+            where: { module_selectorKey: { module, selectorKey: canonicalSelectorKey } },
+            create: {
+              module,
+              selectorKey: canonicalSelectorKey,
+              fingerprint: fpAfter.fingerprint,
+              fingerprintVersion: fpAfter.version,
+              lastSuccessfulBackupKey: backupMetadata.key,
+              lastSuccessfulAt: new Date(),
+              lastObservedAt: new Date(),
+            },
+            update: {
+              fingerprint: fpAfter.fingerprint,
+              fingerprintVersion: fpAfter.version,
+              lastSuccessfulBackupKey: backupMetadata.key,
+              lastSuccessfulAt: new Date(),
+              lastObservedAt: new Date(),
+            },
+          });
+        }
+      });
+
+      committedSuccess = true;
+      return {
+        status: 'created',
+        module,
+        selector,
+        backup: backupMetadata,
+        durationMs: Date.now() - startExport,
+        finishedAt: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      if (createdBackupKey && !committedSuccess) {
+        await this.objectStore.deleteObject(createdBackupKey).catch(() => {});
+      }
+
+      const isAborted =
+        options.signal?.aborted ||
+        internalAbort.signal.aborted ||
+        err.name === 'AbortError' ||
+        err.message?.includes('aborted');
+
+      await this.prisma.backupRun
+        .updateMany({
+          where: { id: backupRun.id, leaseToken },
+          data: {
+            status: 'failed',
+            failureCode: isAborted ? 'TIME_BUDGET_EXHAUSTED' : err.name || 'BACKUP_FAILED',
+            failureMessage: (err.message || String(err)).slice(0, 1000),
+            finishedAt: new Date(),
+          },
+        })
+        .catch(() => {});
+
+      if (isAborted) {
+        return {
+          status: 'failed',
+          module,
+          selector,
+          reason: 'time_budget_exhausted',
+          error: '执行预算耗尽，已安全中止',
+          finishedAt: new Date().toISOString(),
+        };
+      }
+
+      return {
+        status: 'failed',
+        module,
+        selector,
+        reason: 'export_error',
+        error: err.message || '模块备份导出异常',
+        finishedAt: new Date().toISOString(),
+      };
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (options.signal) options.signal.removeEventListener('abort', onExternalAbort);
+      if (!isExternalLock) {
+        await this.releaseLock(canonicalLockKey, leaseToken).catch(() => {});
+      }
+    }
+  }
+
+  async orchestrateFullBackup(options: OrchestrateFullBackupOptions): Promise<BackupMetadata> {
+    const purpose = options.purpose || 'manual';
+    const trigger = options.trigger || 'manual';
+
+    let leaseToken: string;
+    let isExternalLock = false;
+
+    if (options.heldLease) {
+      if (options.heldLease.lockKey !== 'lock:backup:global:full') {
+        throw new BadRequestException(
+          `全量 HeldLease lockKey 不匹配: 期望 lock:backup:global:full, 实际 ${options.heldLease.lockKey}`,
+        );
+      }
+      const lockRecord = await this.prisma.backupLock.findFirst({
+        where: {
+          lockKey: 'lock:backup:global:full',
+          leaseToken: options.heldLease.leaseToken,
+          leaseExpiresAt: { gt: new Date() },
+        },
+      });
+      if (!lockRecord) {
+        throw new ConflictException('全量 HeldLease 租约已失效或不存在');
+      }
+      leaseToken = options.heldLease.leaseToken;
+      isExternalLock = true;
+    } else {
+      const instanceId = randomUUID();
+      const lockRes = await this.acquireBackupLock('full', 'lock:backup:global:full', instanceId);
+      if (!lockRes.acquired) {
+        throw new ConflictException(`全量备份锁申请失败: ${(lockRes as any).reason}`);
+      }
+      leaseToken = lockRes.leaseToken;
+    }
+
+    const internalAbort = new AbortController();
+    const onExternalAbort = () => internalAbort.abort();
+    if (options.signal) {
+      if (options.signal.aborted) internalAbort.abort();
+      else options.signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    let heartbeatTimer: NodeJS.Timeout | null = null;
+    if (!isExternalLock) {
+      heartbeatTimer = this.startHeartbeat(
+        { lockKey: 'lock:backup:global:full', leaseToken },
+        internalAbort,
+      );
+    }
+
+    const backupRun = await this.prisma.backupRun.create({
+      data: {
+        trigger,
+        scope: 'full',
+        module: 'full',
+        selectorKey: 'global',
+        purpose,
+        status: 'running',
+        leaseToken,
+        attempts: 1,
+        startedAt: new Date(),
+      },
+    });
+
+    const startExport = Date.now();
+    let createdBackupKey: string | null = null;
+    let committedSuccess = false;
+
+    try {
+      const backup = await this.exportService.createBackup(options.username, {
+        scope: 'full',
+        purpose,
+        protected: options.protected,
+        signal: internalAbort.signal,
+      });
+      createdBackupKey = backup.key;
+
+      await this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        const lockCas = await tx.backupLock.updateMany({
+          where: {
+            lockKey: 'lock:backup:global:full',
+            leaseToken,
+            leaseExpiresAt: { gt: now },
+          },
+          data: {
+            leaseExpiresAt: new Date(now.getTime() + LEASE_TTL_MS),
+          },
+        });
+        if (lockCas.count === 0) {
+          throw new Error('全量备份租约在导出期间已失效或被接管 (fencing check failed)');
+        }
+
+        const runCas = await tx.backupRun.updateMany({
+          where: { id: backupRun.id, leaseToken },
+          data: {
+            status: 'succeeded',
+            backupKey: backup.key,
+            checksum: backup.checksum,
+            objectSize: BigInt(backup.size),
+            durationMs: Date.now() - startExport,
+            verifiedAt: new Date(),
+            finishedAt: new Date(),
+          },
+        });
+        if (runCas.count === 0) {
+          throw new Error('BackupRun 租约所有权已丢失 (fencing check failed)');
+        }
+      });
+
+      committedSuccess = true;
+      return backup;
+    } catch (err: any) {
+      if (createdBackupKey && !committedSuccess) {
+        await this.objectStore.deleteObject(createdBackupKey).catch(() => {});
+      }
+      await this.prisma.backupRun
+        .updateMany({
+          where: { id: backupRun.id, leaseToken },
+          data: {
+            status: 'failed',
+            failureCode: err.name || 'FULL_BACKUP_FAILED',
+            failureMessage: (err.message || String(err)).slice(0, 1000),
+            finishedAt: new Date(),
+          },
+        })
+        .catch(() => {});
+      throw err;
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (options.signal) options.signal.removeEventListener('abort', onExternalAbort);
+      if (!isExternalLock) {
+        await this.releaseLock('lock:backup:global:full', leaseToken).catch(() => {});
+      }
+    }
   }
 
   async scanArchiveCoverage(): Promise<{
@@ -1493,5 +2220,72 @@ export class BackupService {
 
   cleanRetention(username: string, dryRun?: boolean, confirmText?: string) {
     return this.maintenanceService.cleanRetention(username, dryRun, confirmText);
+  }
+
+  async listBackupRuns(query: BackupRunListQueryDto) {
+    const where: any = {};
+    if (query.module) where.module = query.module;
+    if (query.status) where.status = query.status;
+    if (query.trigger) where.trigger = query.trigger;
+    if (query.batchId) where.batchId = query.batchId;
+    if (query.selectorKey) where.selectorKey = query.selectorKey;
+
+    const limit = query.limit !== undefined ? Number(query.limit) : 20;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new BadRequestException('limit 必须为 1 到 100 之间的整数');
+    }
+
+    const offset = query.offset !== undefined ? Number(query.offset) : 0;
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new BadRequestException('offset 必须为大于或等于 0 的整数');
+    }
+
+    const [total, items] = await Promise.all([
+      this.prisma.backupRun.count({ where }),
+      this.prisma.backupRun.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      total,
+      limit,
+      offset,
+      items: items.map((run) => ({
+        ...run,
+        objectSize:
+          run.objectSize !== null && run.objectSize !== undefined ? String(run.objectSize) : null,
+        databaseBytesEstimated:
+          run.databaseBytesEstimated !== null && run.databaseBytesEstimated !== undefined
+            ? String(run.databaseBytesEstimated)
+            : null,
+        uncompressedBytes:
+          run.uncompressedBytes !== null && run.uncompressedBytes !== undefined
+            ? String(run.uncompressedBytes)
+            : null,
+        uploadedBytes:
+          run.uploadedBytes !== null && run.uploadedBytes !== undefined
+            ? String(run.uploadedBytes)
+            : null,
+        peakRssBytes:
+          run.peakRssBytes !== null && run.peakRssBytes !== undefined
+            ? String(run.peakRssBytes)
+            : null,
+      })),
+    };
+  }
+
+  async listBackupCheckpoints(query?: { module?: string; selectorKey?: string }) {
+    const where: any = {};
+    if (query?.module) where.module = query.module;
+    if (query?.selectorKey) where.selectorKey = query.selectorKey;
+
+    return this.prisma.backupModuleCheckpoint.findMany({
+      where,
+      orderBy: [{ module: 'asc' }, { selectorKey: 'asc' }],
+    });
   }
 }

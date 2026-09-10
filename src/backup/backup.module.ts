@@ -11,10 +11,12 @@ import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
 import { BackupPlanService } from './backup-plan.service';
 import { BackupModuleRestoreService } from './backup-module-restore.service';
+import { BackupFingerprintService } from './backup-fingerprint.service';
 
 @Module({
   providers: [
     BackupService,
+    BackupFingerprintService,
     BackupObjectStoreService,
     BackupVerificationService,
     BackupExportService,
@@ -27,6 +29,6 @@ import { BackupModuleRestoreService } from './backup-module-restore.service';
     BackupModuleRestoreService,
   ],
   controllers: [BackupController],
-  exports: [BackupService],
+  exports: [BackupService, BackupFingerprintService],
 })
 export class BackupModule {}

@@ -1,12 +1,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { BackupService } from '../backup/backup.service';
 
 @Injectable()
 export class SeasonLifecycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
+    private readonly backupService: BackupService,
   ) {}
 
   async getSeasons() {
@@ -99,6 +101,14 @@ export class SeasonLifecycleService {
       throw new BadRequestException(`赛季名称 "${trimmedName}" 已存在`);
     }
 
+    const activeSeasons = await this.prisma.season.findMany({
+      where: { status: 'active' },
+      select: { id: true },
+    });
+    for (const season of activeSeasons) {
+      await this.backupService.createArchiveSeasonBackup(username, season.id);
+    }
+
     const newSeason = await this.prisma.$transaction(async (tx) => {
       await tx.season.updateMany({
         where: { status: 'active' },
@@ -145,6 +155,10 @@ export class SeasonLifecycleService {
     });
     if (!season) {
       throw new BadRequestException('赛季不存在');
+    }
+
+    if (status === 'archived' && season.status !== 'archived') {
+      await this.backupService.createArchiveSeasonBackup(username, season.id);
     }
 
     const updatedSeason = await this.prisma.season.update({

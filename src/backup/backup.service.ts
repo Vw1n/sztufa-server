@@ -8,6 +8,8 @@ import { BackupVerificationService } from './backup-verification.service';
 import { BackupScopeService } from './backup-scope.service';
 import { BackupRetentionService } from './backup-retention.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateBackupOptions } from './backup.types';
+import { BackupModuleRestoreService } from './backup-module-restore.service';
 
 // 保持既有外部导入兼容性的符号 re-export
 export { MANDATORY_BACKUP_TABLES } from './backup-table-registry';
@@ -31,22 +33,59 @@ export class BackupService {
     private readonly scopeService: BackupScopeService,
     private readonly retentionService: BackupRetentionService,
     private readonly prisma: PrismaService,
+    private readonly moduleRestoreService: BackupModuleRestoreService,
   ) {}
 
-  private async getLatestBusinessChange(): Promise<Date | null> {
-    const results = await Promise.all([
-      this.prisma.team.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.player.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.match.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.news.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.season.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.prediction.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.seasonTeamProfile.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.adminFormDraft.aggregate({ _max: { updatedAt: true } }),
-      this.prisma.goal.aggregate({ _max: { createdAt: true } }),
-      this.prisma.matchEvent.aggregate({ _max: { createdAt: true } }),
-      this.prisma.seasonTeamPlayer.aggregate({ _max: { createdAt: true } }),
-    ]);
+  private async getLatestBusinessChange(options: CreateBackupOptions): Promise<Date | null> {
+    const scope = options.scope || 'full';
+    const module = scope === 'module' ? options.module : 'full';
+    const seasonId = options.selector?.seasonId || options.seasonId;
+    let queries: Promise<any>[];
+
+    if (module === 'season' && seasonId) {
+      queries = [
+        this.prisma.season.aggregate({ where: { id: seasonId }, _max: { updatedAt: true } }),
+        this.prisma.match.aggregate({ where: { seasonId }, _max: { updatedAt: true } }),
+        this.prisma.goal.aggregate({ where: { match: { seasonId } }, _max: { createdAt: true } }),
+        this.prisma.matchEvent.aggregate({
+          where: { match: { seasonId } },
+          _max: { createdAt: true },
+        }),
+        this.prisma.seasonTeamProfile.aggregate({ where: { seasonId }, _max: { updatedAt: true } }),
+        this.prisma.seasonTeamPlayer.aggregate({ where: { seasonId }, _max: { createdAt: true } }),
+        this.prisma.teamRegistration.aggregate({ where: { seasonId }, _max: { updatedAt: true } }),
+      ];
+    } else if (module === 'staff') {
+      queries = [
+        this.prisma.user.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.adminFormDraft.aggregate({ _max: { updatedAt: true } }),
+      ];
+    } else if (module === 'members') {
+      queries = [this.prisma.memberAccount.aggregate({ _max: { updatedAt: true } })];
+    } else if (module === 'content') {
+      queries = [this.prisma.news.aggregate({ _max: { updatedAt: true } })];
+    } else if (module === 'operations') {
+      queries = [
+        this.prisma.auditLog.aggregate({ _max: { createdAt: true } }),
+        this.prisma.historyImportBatch.aggregate({ _max: { createdAt: true } }),
+        this.prisma.pdfImportBatch.aggregate({ _max: { updatedAt: true } }),
+      ];
+    } else {
+      queries = [
+        this.prisma.team.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.player.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.match.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.news.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.season.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.prediction.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.seasonTeamProfile.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.adminFormDraft.aggregate({ _max: { updatedAt: true } }),
+        this.prisma.goal.aggregate({ _max: { createdAt: true } }),
+        this.prisma.matchEvent.aggregate({ _max: { createdAt: true } }),
+        this.prisma.seasonTeamPlayer.aggregate({ _max: { createdAt: true } }),
+      ];
+    }
+    const results = await Promise.all(queries);
     const timestamps = results.flatMap((result) => Object.values(result._max)).filter(Boolean);
     if (timestamps.length === 0) return null;
     return new Date(Math.max(...timestamps.map((value) => new Date(value as Date).getTime())));
@@ -60,6 +99,9 @@ export class BackupService {
     username: string,
     options?: Parameters<BackupExportService['createBackup']>[1],
   ) {
+    const scheduledOptions = options?.scope
+      ? options
+      : await this.resolveScheduledBackupOptions(options?.signal);
     const configuredHours = Number(process.env.SCHEDULED_BACKUP_MIN_INTERVAL_HOURS || 144);
     const minIntervalHours = Number.isFinite(configuredHours) ? Math.max(0, configuredHours) : 144;
 
@@ -69,8 +111,10 @@ export class BackupService {
       const latestScheduled = backups.find(
         (backup) =>
           backup.purpose === 'scheduled' &&
-          (backup.scope || 'full') === (options?.scope || 'full') &&
-          (backup.seasonId || undefined) === (options?.seasonId || undefined) &&
+          (backup.scope || 'full') === (scheduledOptions.scope || 'full') &&
+          (backup.module || undefined) === (scheduledOptions.module || undefined) &&
+          (backup.seasonId || undefined) ===
+            (scheduledOptions.selector?.seasonId || scheduledOptions.seasonId || undefined) &&
           !!backup.lastModified,
       );
 
@@ -78,14 +122,63 @@ export class BackupService {
         const latestBackupTime = new Date(latestScheduled.lastModified).getTime();
         if (latestBackupTime >= cutoff) return latestScheduled;
 
-        if (process.env.SCHEDULED_BACKUP_CHANGE_DETECTION_ENABLED !== 'false') {
-          const latestChange = await this.getLatestBusinessChange();
+        if (
+          scheduledOptions.scope === 'module' &&
+          process.env.SCHEDULED_BACKUP_CHANGE_DETECTION_ENABLED !== 'false'
+        ) {
+          const latestChange = await this.getLatestBusinessChange(scheduledOptions);
           if (!latestChange || latestChange.getTime() <= latestBackupTime) return latestScheduled;
         }
       }
     }
 
-    return this.exportService.createBackup(username, { ...options, purpose: 'scheduled' });
+    return this.exportService.createBackup(username, {
+      ...scheduledOptions,
+      purpose: 'scheduled',
+    });
+  }
+
+  async createArchiveSeasonBackup(username: string, seasonId: string) {
+    const backups = await this.objectStore.listBackups();
+    const existing = backups.find(
+      (backup) =>
+        backup.scope === 'module' &&
+        backup.module === 'season' &&
+        backup.seasonId === seasonId &&
+        backup.purpose === 'archive' &&
+        backup.protected,
+    );
+    if (existing) return existing;
+
+    return this.exportService.createBackup(username, {
+      scope: 'module',
+      module: 'season',
+      selector: { seasonId },
+      purpose: 'archive',
+      protected: true,
+    });
+  }
+
+  private async resolveScheduledBackupOptions(signal?: AbortSignal): Promise<CreateBackupOptions> {
+    const day = new Date().getUTCDay();
+    if (day === 0) return { scope: 'full', signal };
+
+    const modules = ['season', 'staff', 'members', 'content', 'operations', 'season'] as const;
+    const module = modules[day - 1];
+    if (module !== 'season') return { scope: 'module', module, selector: {}, signal };
+
+    const activeSeason = await this.prisma.season.findFirst({
+      where: { status: 'active' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!activeSeason) return { scope: 'full', signal };
+    return {
+      scope: 'module',
+      module: 'season',
+      selector: { seasonId: activeSeason.id },
+      signal,
+    };
   }
 
   listBackups(options?: { includeUploads?: boolean }) {
@@ -102,6 +195,14 @@ export class BackupService {
 
   restoreBackup(username: string, key: string, confirmText?: string) {
     return this.restoreService.restoreBackup(username, key, confirmText);
+  }
+
+  previewRestore(username: string, key: string) {
+    return this.moduleRestoreService.preview(username, key);
+  }
+
+  restoreModuleBackup(username: string, key: string, restoreToken: string, confirmText?: string) {
+    return this.moduleRestoreService.execute(username, key, restoreToken, confirmText);
   }
 
   initUpload(userId: string, username: string, filename: string, size: number, fileSha256: string) {

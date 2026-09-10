@@ -14,6 +14,7 @@ import { Readable } from 'stream';
 import { BackupMetadata } from './backup.types';
 import { BackupScope } from './backup-scope.service';
 import { BACKUP_MODULES, BackupModule } from './backup-module-registry';
+import { buildAttachmentContentDisposition } from './backup-filename';
 
 /**
  * R2 对象存储基础设施服务。
@@ -148,6 +149,8 @@ export class BackupObjectStoreService {
           purpose = 'pre-restore';
         } else if (filename.includes('_uploaded')) {
           purpose = 'uploaded';
+        } else if (filename.includes('_archive')) {
+          purpose = 'archive';
         } else if (filename.includes('_scheduled')) {
           purpose = 'scheduled';
         }
@@ -166,7 +169,12 @@ export class BackupObjectStoreService {
           seasonId,
           module,
           selector: module === 'season' && seasonId ? { seasonId } : undefined,
-          restoreSupported: scope === 'full',
+          restoreSupported:
+            scope === 'full' ||
+            (scope === 'module' &&
+              !!module &&
+              process.env.BACKUP_RESTORE_ENABLED === 'true' &&
+              process.env[`BACKUP_RESTORE_${module.toUpperCase()}_ENABLED`] === 'true'),
         };
       })
       .sort((a, b) => {
@@ -272,7 +280,7 @@ export class BackupObjectStoreService {
         Key: key,
         Body: body,
         ContentType: 'application/gzip',
-        ContentDisposition: `attachment; filename="${filename}"`,
+        ContentDisposition: buildAttachmentContentDisposition(filename),
       },
     });
 

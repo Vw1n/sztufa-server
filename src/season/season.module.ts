@@ -6,9 +6,10 @@ import { KnockoutGeneratorService } from './knockout-generator.service';
 import { SeasonDeletionService } from './season-deletion.service';
 import { SeasonController } from './season.controller';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { BackupModule } from '../backup/backup.module';
 
 @Module({
-  imports: [AuditLogModule],
+  imports: [AuditLogModule, BackupModule],
   providers: [
     SeasonService,
     SeasonLifecycleService,

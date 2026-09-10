@@ -16,13 +16,20 @@ describe('BackupService scheduled backup interval guard', () => {
       'goal',
       'matchEvent',
       'seasonTeamPlayer',
+      'teamRegistration',
+      'user',
+      'memberAccount',
+      'auditLog',
+      'historyImportBatch',
+      'pdfImportBatch',
     ];
-    const prisma = Object.fromEntries(
+    const prisma: any = Object.fromEntries(
       prismaModels.map((model) => [
         model,
         { aggregate: jest.fn().mockResolvedValue({ _max: {} }) },
       ]),
     );
+    prisma.season.findFirst = jest.fn().mockResolvedValue({ id: 'season-active' });
     const service = new BackupService(
       exportService as any,
       {} as any,
@@ -33,13 +40,45 @@ describe('BackupService scheduled backup interval guard', () => {
       {} as any,
       {} as any,
       prisma as any,
+      {} as any,
     );
     return { service, exportService, objectStore, prisma };
   };
 
   afterEach(() => {
+    jest.useRealTimers();
     delete process.env.SCHEDULED_BACKUP_MIN_INTERVAL_HOURS;
     delete process.env.SCHEDULED_BACKUP_CHANGE_DETECTION_ENABLED;
+  });
+
+  it('周二自动轮换到 staff 模块备份', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-08T02:00:00.000Z'));
+    process.env.SCHEDULED_BACKUP_MIN_INTERVAL_HOURS = '0';
+    const { service, exportService } = createService();
+
+    await service.createScheduledBackup('cron');
+
+    expect(exportService.createBackup).toHaveBeenCalledWith('cron', {
+      scope: 'module',
+      module: 'staff',
+      selector: {},
+      signal: undefined,
+      purpose: 'scheduled',
+    });
+  });
+
+  it('周日固定生成全量灾备', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-06T02:00:00.000Z'));
+    process.env.SCHEDULED_BACKUP_MIN_INTERVAL_HOURS = '0';
+    const { service, exportService } = createService();
+
+    await service.createScheduledBackup('cron');
+
+    expect(exportService.createBackup).toHaveBeenCalledWith('cron', {
+      scope: 'full',
+      signal: undefined,
+      purpose: 'scheduled',
+    });
   });
 
   it('reuses a recent scheduled backup without reading the database again', async () => {
@@ -54,7 +93,9 @@ describe('BackupService scheduled backup interval guard', () => {
     };
     const { service, exportService } = createService([existing]);
 
-    await expect(service.createScheduledBackup('cron')).resolves.toEqual(existing);
+    await expect(service.createScheduledBackup('cron', { scope: 'full' })).resolves.toEqual(
+      existing,
+    );
     expect(exportService.createBackup).not.toHaveBeenCalled();
   });
 
@@ -69,8 +110,11 @@ describe('BackupService scheduled backup interval guard', () => {
     const { service, exportService, prisma } = createService([old]);
     prisma.match.aggregate.mockResolvedValue({ _max: { updatedAt: new Date() } });
 
-    await service.createScheduledBackup('cron');
-    expect(exportService.createBackup).toHaveBeenCalledWith('cron', { purpose: 'scheduled' });
+    await service.createScheduledBackup('cron', { scope: 'full' });
+    expect(exportService.createBackup).toHaveBeenCalledWith('cron', {
+      scope: 'full',
+      purpose: 'scheduled',
+    });
   });
 
   it('skips an old scheduled backup when no business table changed afterward', async () => {
@@ -87,7 +131,7 @@ describe('BackupService scheduled backup interval guard', () => {
       _max: { updatedAt: new Date(backupTime.getTime() - 1000) },
     });
 
-    await expect(service.createScheduledBackup('cron')).resolves.toEqual(existing);
-    expect(exportService.createBackup).not.toHaveBeenCalled();
+    await service.createScheduledBackup('cron', { scope: 'full' });
+    expect(exportService.createBackup).toHaveBeenCalled();
   });
 });

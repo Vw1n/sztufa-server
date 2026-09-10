@@ -12,6 +12,7 @@ import { BackupObjectStoreService } from './backup-object-store.service';
 import { BackupVerificationService } from './backup-verification.service';
 import { BackupMetadata, CreateBackupOptions } from './backup.types';
 import { BackupPlan, BackupPlanService } from './backup-plan.service';
+import { buildBackupFilename } from './backup-filename';
 
 /**
  * 备份导出服务。
@@ -30,6 +31,7 @@ export class BackupExportService {
   ) {}
 
   async createBackup(username: string, options?: CreateBackupOptions): Promise<BackupMetadata> {
+    const startedAt = Date.now();
     const purpose = options?.purpose || 'manual';
     const isProtected = !!options?.protected;
     const scope = options?.scope || 'full';
@@ -123,7 +125,8 @@ export class BackupExportService {
       })();
     };
 
-    const createdAtIso = new Date().toISOString();
+    const createdAt = new Date();
+    const createdAtIso = createdAt.toISOString();
     const { stream, checksumPromise } = plan
       ? createV4BackupStream(plan, pageIteratorProvider, { createdAt: createdAtIso })
       : createV3BackupStream(pageIteratorProvider, {
@@ -132,8 +135,13 @@ export class BackupExportService {
           season: seasonInfo,
         });
 
-    const protectSuffix = isProtected ? '_protected' : '';
-    const filename = `backup_${Date.now()}_${purpose}${protectSuffix}.json.gz`;
+    const filename = buildBackupFilename({
+      module: plan?.module || (scope === 'season' ? 'season' : 'full'),
+      season: plan?.season || seasonInfo,
+      createdAt,
+      purpose,
+      protected: isProtected,
+    });
 
     let fileKey = `private-backups/database/full/${filename}`;
     if (scope === 'season' && options?.seasonId) {
@@ -177,10 +185,21 @@ export class BackupExportService {
       // 降级保持 0
     }
 
+    const durationMs = Date.now() - startedAt;
+    const metric = {
+      scope,
+      module: plan?.module || (scope === 'season' ? 'season' : 'full'),
+      seasonId: plan?.selector.seasonId || options?.seasonId,
+      purpose,
+      uploadedBytes: size,
+      durationMs,
+    };
+    console.info(`[BackupMetrics] ${JSON.stringify(metric)}`);
+
     await this.auditLogService.log(
       username,
       'CREATE_BACKUP',
-      `触发${plan ? `${plan.module} 模块` : scope === 'season' ? '分赛季' : '全站'}数据库备份 (${plan ? 'V4.0' : 'V3.0'} GZIP)，备份文件: ${fileKey}。`,
+      `触发${plan ? `${plan.module} 模块` : scope === 'season' ? '分赛季' : '全站'}数据库备份 (${plan ? 'V4.0' : 'V3.0'} GZIP)，备份文件: ${fileKey}，上传 ${size} 字节，耗时 ${durationMs}ms。`,
     );
 
     return {

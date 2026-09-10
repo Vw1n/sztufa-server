@@ -6,6 +6,14 @@ import { BackupModule } from './backup-module-registry';
  * 独立成文件以消除服务间的反向类型依赖（例如 retention → backup.service 的循环隐患）。
  */
 
+export interface BackupRunMetrics {
+  databaseBytesEstimated: string | null;
+  uncompressedBytes: string | null;
+  uploadedBytes: string | null;
+  databaseRowsRead: number | null;
+  peakRssBytes: string | null;
+}
+
 export interface BackupMetadata {
   key: string;
   filename: string;
@@ -22,6 +30,13 @@ export interface BackupMetadata {
   module?: BackupModule;
   selector?: Record<string, string>;
   restoreSupported?: boolean;
+  databaseBytesEstimated?: number;
+  uncompressedBytes?: number;
+  uploadedBytes?: number | null;
+  databaseRowsRead?: number;
+  tablesProcessed?: number;
+  peakRssBytes?: number;
+  runMetrics?: BackupRunMetrics | null;
 }
 
 export interface UploadInitResult {

@@ -53,6 +53,14 @@ export class BackupRunListQueryDto {
   selectorKey?: string;
 
   @ApiProperty({
+    description: '备份对象键过滤',
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: 'backupKey 必须为字符串' })
+  backupKey?: string;
+
+  @ApiProperty({
     description: '返回记录数量限制 (1-100)，默认 20',
     required: false,
     default: 20,

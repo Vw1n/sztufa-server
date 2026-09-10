@@ -251,6 +251,48 @@ export class BackupController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('runs/:runId/retry')
+  @ApiOperation({ summary: '人工重试单个失败的模块备份任务' })
+  async retryRun(@Req() req: any, @Param('runId') runId: string) {
+    const username = req.user?.username || 'system';
+    const result = await this.backupService.retryBackupRun(runId, username);
+    return { success: true, data: result };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'super_admin')
+  @Get('dashboard')
+  @ApiOperation({ summary: '获取备份概览与双轨流量预算监控看板' })
+  async getDashboard() {
+    const data = await this.backupService.getDashboard();
+    return { success: true, data };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'super_admin')
+  @Get('metrics/summary')
+  @ApiOperation({ summary: '获取当月或指定月份备份流量指标与双维度同口径基线比对' })
+  async getMetricsSummary(@Query('periodKey') periodKey?: string) {
+    const data = await this.backupService.getMetricsSummary(periodKey);
+    return { success: true, data };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'super_admin')
+  @Get('metrics/timeseries')
+  @ApiOperation({ summary: '获取历史月度备份流量与运行趋势' })
+  async getMetricsTimeseries(@Query('months') months?: string) {
+    const monthsCount = months ? parseInt(months, 10) : 6;
+    const data = await this.backupService.getMetricsTimeseries(monthsCount);
+    return { success: true, data };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'super_admin')
   @Get('checkpoints')
   @ApiOperation({ summary: '查询各模块最新备份基线 Checkpoint 清单' })

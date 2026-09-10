@@ -11,7 +11,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID, createHmac, createHash } from 'crypto';
-import { BackupExportService } from './backup-export.service';
+import { BackupExportService, BackupExportException } from './backup-export.service';
 import { BackupRestoreService } from './backup-restore.service';
 import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
@@ -20,7 +20,7 @@ import { BackupVerificationService } from './backup-verification.service';
 import { BackupScopeService } from './backup-scope.service';
 import { BackupRetentionService } from './backup-retention.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BackupMetadata, CreateBackupOptions, HeldLease } from './backup.types';
+import { BackupMetadata, CreateBackupOptions, HeldLease, BackupRunMetrics } from './backup.types';
 import { BackupModuleRestoreService } from './backup-module-restore.service';
 import { BackupModule, BACKUP_MODULE_REGISTRY, BACKUP_MODULES } from './backup-module-registry';
 import {
@@ -29,6 +29,7 @@ import {
   getCanonicalLockKey,
 } from './backup-fingerprint.service';
 import { BackupRunListQueryDto } from './dto/backup-run-list-query.dto';
+import { NeonTrafficService } from './neon-traffic.service';
 
 // 保持既有外部导入兼容性的符号 re-export
 export { MANDATORY_BACKUP_TABLES } from './backup-table-registry';
@@ -38,6 +39,7 @@ export type {
   UploadInitResult,
   CreateBackupOptions,
   HeldLease,
+  BackupRunMetrics,
 } from './backup.types';
 export { getCanonicalSelectorKey, getCanonicalLockKey } from './backup-fingerprint.service';
 
@@ -87,6 +89,9 @@ export interface OrchestrateModuleBackupOptions {
   readonly purpose?: 'manual' | 'scheduled' | 'archive' | 'pre-restore' | 'uploaded';
   readonly protected?: boolean;
   readonly trigger?: 'manual' | 'cron' | 'archive' | 'backfill' | 'retry';
+  readonly batchId?: string;
+  readonly attempts?: number;
+  readonly retryOfRunId?: string;
   readonly signal?: AbortSignal;
   readonly heldLease?: HeldLease;
 }
@@ -143,6 +148,8 @@ export class BackupService implements OnModuleInit {
     private readonly moduleRestoreService: BackupModuleRestoreService,
     @Optional()
     private readonly fingerprintService?: BackupFingerprintService,
+    @Optional()
+    private readonly neonTrafficService?: NeonTrafficService,
   ) {
     if (
       this.restoreService &&
@@ -1096,18 +1103,19 @@ export class BackupService implements OnModuleInit {
     }
 
     const taskKey =
-      purpose === 'archive' && selector?.seasonId
+      purpose === 'archive' && selector?.seasonId && trigger !== 'retry'
         ? `archive:season:${selector.seasonId}`
         : undefined;
 
     let backupRun: any;
-    let currentAttempts = 1;
+    let currentAttempts = options.attempts || 1;
     if (taskKey) {
       const existing = await this.prisma.backupRun.findUnique({ where: { taskKey } });
-      currentAttempts = (existing?.attempts || 0) + 1;
+      currentAttempts = options.attempts || (existing?.attempts || 0) + 1;
       backupRun = await this.prisma.backupRun.upsert({
         where: { taskKey },
         create: {
+          batchId: options.batchId || null,
           taskKey,
           trigger,
           scope: 'module',
@@ -1120,6 +1128,7 @@ export class BackupService implements OnModuleInit {
           startedAt: new Date(),
         },
         update: {
+          batchId: options.batchId || null,
           trigger,
           status: 'running',
           leaseToken,
@@ -1132,6 +1141,7 @@ export class BackupService implements OnModuleInit {
     } else {
       backupRun = await this.prisma.backupRun.create({
         data: {
+          batchId: options.batchId || null,
           trigger,
           scope: 'module',
           module,
@@ -1139,7 +1149,7 @@ export class BackupService implements OnModuleInit {
           purpose,
           status: 'running',
           leaseToken,
-          attempts: 1,
+          attempts: currentAttempts,
           startedAt: new Date(),
         },
       });
@@ -1265,6 +1275,29 @@ export class BackupService implements OnModuleInit {
             fingerprintBefore: fpBefore?.fingerprint || null,
             fingerprintAfter: fpAfter?.fingerprint || null,
             durationMs: Date.now() - startExport,
+            databaseBytesEstimated:
+              backupMetadata.databaseBytesEstimated !== null &&
+              backupMetadata.databaseBytesEstimated !== undefined
+                ? BigInt(backupMetadata.databaseBytesEstimated)
+                : null,
+            uncompressedBytes:
+              backupMetadata.uncompressedBytes !== null &&
+              backupMetadata.uncompressedBytes !== undefined
+                ? BigInt(backupMetadata.uncompressedBytes)
+                : null,
+            databaseRowsRead:
+              backupMetadata.databaseRowsRead !== null &&
+              backupMetadata.databaseRowsRead !== undefined
+                ? backupMetadata.databaseRowsRead
+                : null,
+            uploadedBytes:
+              backupMetadata.uploadedBytes !== null && backupMetadata.uploadedBytes !== undefined
+                ? BigInt(backupMetadata.uploadedBytes)
+                : null,
+            peakRssBytes:
+              backupMetadata.peakRssBytes !== null && backupMetadata.peakRssBytes !== undefined
+                ? BigInt(backupMetadata.peakRssBytes)
+                : null,
             verifiedAt: new Date(),
             finishedAt: new Date(),
           },
@@ -1317,6 +1350,8 @@ export class BackupService implements OnModuleInit {
         err.name === 'AbortError' ||
         err.message?.includes('aborted');
 
+      const partial = err instanceof BackupExportException ? err.partialMetrics : null;
+
       await this.prisma.backupRun
         .updateMany({
           where: { id: backupRun.id, leaseToken },
@@ -1324,6 +1359,25 @@ export class BackupService implements OnModuleInit {
             status: 'failed',
             failureCode: isAborted ? 'TIME_BUDGET_EXHAUSTED' : err.name || 'BACKUP_FAILED',
             failureMessage: (err.message || String(err)).slice(0, 1000),
+            databaseBytesEstimated:
+              partial?.databaseBytesEstimated !== null &&
+              partial?.databaseBytesEstimated !== undefined
+                ? BigInt(partial.databaseBytesEstimated)
+                : null,
+            uncompressedBytes:
+              partial?.uncompressedBytes !== null && partial?.uncompressedBytes !== undefined
+                ? BigInt(partial.uncompressedBytes)
+                : null,
+            databaseRowsRead:
+              partial?.databaseRowsRead !== null && partial?.databaseRowsRead !== undefined
+                ? partial.databaseRowsRead
+                : null,
+            uploadedBytes: null, // 上传失败或已删除，严禁记为 0，必须记为 null
+            peakRssBytes:
+              partial?.peakRssBytes !== null && partial?.peakRssBytes !== undefined
+                ? BigInt(partial.peakRssBytes)
+                : null,
+            durationMs: Date.now() - startExport,
             finishedAt: new Date(),
           },
         })
@@ -1457,6 +1511,26 @@ export class BackupService implements OnModuleInit {
             checksum: backup.checksum,
             objectSize: BigInt(backup.size),
             durationMs: Date.now() - startExport,
+            databaseBytesEstimated:
+              backup.databaseBytesEstimated !== null && backup.databaseBytesEstimated !== undefined
+                ? BigInt(backup.databaseBytesEstimated)
+                : null,
+            uncompressedBytes:
+              backup.uncompressedBytes !== null && backup.uncompressedBytes !== undefined
+                ? BigInt(backup.uncompressedBytes)
+                : null,
+            databaseRowsRead:
+              backup.databaseRowsRead !== null && backup.databaseRowsRead !== undefined
+                ? backup.databaseRowsRead
+                : null,
+            uploadedBytes:
+              backup.uploadedBytes !== null && backup.uploadedBytes !== undefined
+                ? BigInt(backup.uploadedBytes)
+                : null,
+            peakRssBytes:
+              backup.peakRssBytes !== null && backup.peakRssBytes !== undefined
+                ? BigInt(backup.peakRssBytes)
+                : null,
             verifiedAt: new Date(),
             finishedAt: new Date(),
           },
@@ -1472,6 +1546,9 @@ export class BackupService implements OnModuleInit {
       if (createdBackupKey && !committedSuccess) {
         await this.objectStore.deleteObject(createdBackupKey).catch(() => {});
       }
+
+      const partial = err instanceof BackupExportException ? err.partialMetrics : null;
+
       await this.prisma.backupRun
         .updateMany({
           where: { id: backupRun.id, leaseToken },
@@ -1479,6 +1556,25 @@ export class BackupService implements OnModuleInit {
             status: 'failed',
             failureCode: err.name || 'FULL_BACKUP_FAILED',
             failureMessage: (err.message || String(err)).slice(0, 1000),
+            databaseBytesEstimated:
+              partial?.databaseBytesEstimated !== null &&
+              partial?.databaseBytesEstimated !== undefined
+                ? BigInt(partial.databaseBytesEstimated)
+                : null,
+            uncompressedBytes:
+              partial?.uncompressedBytes !== null && partial?.uncompressedBytes !== undefined
+                ? BigInt(partial.uncompressedBytes)
+                : null,
+            databaseRowsRead:
+              partial?.databaseRowsRead !== null && partial?.databaseRowsRead !== undefined
+                ? partial.databaseRowsRead
+                : null,
+            uploadedBytes: null,
+            peakRssBytes:
+              partial?.peakRssBytes !== null && partial?.peakRssBytes !== undefined
+                ? BigInt(partial.peakRssBytes)
+                : null,
+            durationMs: Date.now() - startExport,
             finishedAt: new Date(),
           },
         })
@@ -2217,8 +2313,58 @@ export class BackupService implements OnModuleInit {
     };
   }
 
-  listBackups(options?: { includeUploads?: boolean }) {
-    return this.objectStore.listBackups(options);
+  async listBackups(options?: { includeUploads?: boolean }): Promise<BackupMetadata[]> {
+    const backups = await this.objectStore.listBackups(options);
+    if (!backups || backups.length === 0) return [];
+
+    const keys = backups.map((b) => b.key);
+    const runs = await this.prisma.backupRun.findMany({
+      where: {
+        backupKey: { in: keys },
+        status: 'succeeded',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const runMap = new Map<string, (typeof runs)[0]>();
+    for (const run of runs) {
+      if (run.backupKey && !runMap.has(run.backupKey)) {
+        runMap.set(run.backupKey, run);
+      }
+    }
+
+    return backups.map((b) => {
+      const run = runMap.get(b.key);
+      const runMetrics: BackupRunMetrics | null = run
+        ? {
+            databaseBytesEstimated:
+              run.databaseBytesEstimated !== null && run.databaseBytesEstimated !== undefined
+                ? String(run.databaseBytesEstimated)
+                : null,
+            uncompressedBytes:
+              run.uncompressedBytes !== null && run.uncompressedBytes !== undefined
+                ? String(run.uncompressedBytes)
+                : null,
+            uploadedBytes:
+              run.uploadedBytes !== null && run.uploadedBytes !== undefined
+                ? String(run.uploadedBytes)
+                : null,
+            databaseRowsRead:
+              run.databaseRowsRead !== null && run.databaseRowsRead !== undefined
+                ? run.databaseRowsRead
+                : null,
+            peakRssBytes:
+              run.peakRssBytes !== null && run.peakRssBytes !== undefined
+                ? String(run.peakRssBytes)
+                : null,
+          }
+        : null;
+
+      return {
+        ...b,
+        runMetrics,
+      };
+    });
   }
 
   getPresignedDownloadUrl(key: string) {
@@ -2264,6 +2410,7 @@ export class BackupService implements OnModuleInit {
     if (query.trigger) where.trigger = query.trigger;
     if (query.batchId) where.batchId = query.batchId;
     if (query.selectorKey) where.selectorKey = query.selectorKey;
+    if (query.backupKey) where.backupKey = query.backupKey;
 
     const limit = query.limit !== undefined ? Number(query.limit) : 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
@@ -2321,6 +2468,617 @@ export class BackupService implements OnModuleInit {
     return this.prisma.backupModuleCheckpoint.findMany({
       where,
       orderBy: [{ module: 'asc' }, { selectorKey: 'asc' }],
+    });
+  }
+
+  async getDashboard() {
+    const now = new Date();
+    const utcYear = now.getUTCFullYear();
+    const utcMonth = now.getUTCMonth();
+    const startOfMonth = new Date(Date.UTC(utcYear, utcMonth, 1, 0, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(utcYear, utcMonth + 1, 1, 0, 0, 0, 0));
+    const periodKey = `${utcYear}-${String(utcMonth + 1).padStart(2, '0')}`;
+
+    const currentMonthRuns = await this.prisma.backupRun.findMany({
+      where: {
+        createdAt: {
+          gte: startOfMonth,
+          lt: endOfMonth,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // 1. 应用出口预算统计 (聚合所有产生 databaseBytesEstimated 的运行，包含失败与重试)
+    let appUsedBytesBigInt = 0n;
+    for (const r of currentMonthRuns) {
+      if (r.databaseBytesEstimated !== null && r.databaseBytesEstimated !== undefined) {
+        appUsedBytesBigInt += BigInt(r.databaseBytesEstimated);
+      }
+    }
+    const appLimitBytes = 2 * 1024 * 1024 * 1024; // 2 GB
+    const appWarningBytes = 1.4 * 1024 * 1024 * 1024; // 1.4 GB (70%)
+    const appCriticalBytes = 1.6 * 1024 * 1024 * 1024; // 1.6 GB (80%)
+    const appUsedNumber = Number(appUsedBytesBigInt);
+
+    let appAlertLevel: 'normal' | 'warning' | 'critical' = 'normal';
+    if (appUsedNumber >= appCriticalBytes) {
+      appAlertLevel = 'critical';
+    } else if (appUsedNumber >= appWarningBytes) {
+      appAlertLevel = 'warning';
+    }
+    const appPercent = Math.min(100, Math.round((appUsedNumber / appLimitBytes) * 1000) / 10);
+
+    // 2. Neon 官方配额监控
+    let neonData = {
+      status: 'not_configured' as 'configured' | 'not_configured' | 'unavailable',
+      dataTransferBytes: null as number | null,
+      capturedAt: null as string | null,
+      billingPeriod: null as string | null,
+      stale: false,
+    };
+    if (this.neonTrafficService) {
+      try {
+        const fetched = await this.neonTrafficService.fetchMonthlyTraffic();
+        neonData = {
+          status: fetched.status === 'active' ? 'configured' : fetched.status,
+          dataTransferBytes: fetched.dataTransferBytes,
+          capturedAt: fetched.capturedAt,
+          billingPeriod: fetched.billingPeriod,
+          stale: fetched.stale,
+        };
+      } catch {
+        neonData = {
+          status: 'unavailable',
+          dataTransferBytes: null,
+          capturedAt: null,
+          billingPeriod: null,
+          stale: true,
+        };
+      }
+    }
+    const neonLimitBytes = 5 * 1024 * 1024 * 1024; // 5 GB
+    const neonWarningBytes = 3.5 * 1024 * 1024 * 1024; // 3.5 GB (70%)
+    const neonCriticalBytes = 4.0 * 1024 * 1024 * 1024; // 4.0 GB (80%)
+    let neonAlertLevel: 'normal' | 'warning' | 'critical' | 'unknown' = 'unknown';
+    if (neonData.status === 'configured' && neonData.dataTransferBytes !== null) {
+      if (neonData.dataTransferBytes >= neonCriticalBytes) {
+        neonAlertLevel = 'critical';
+      } else if (neonData.dataTransferBytes >= neonWarningBytes) {
+        neonAlertLevel = 'warning';
+      } else {
+        neonAlertLevel = 'normal';
+      }
+    }
+
+    // 3. 上传存储量 (仅累加成功备份)
+    let storageUsedBigInt = 0n;
+    for (const r of currentMonthRuns) {
+      if (r.status === 'succeeded' && r.uploadedBytes !== null && r.uploadedBytes !== undefined) {
+        storageUsedBigInt += BigInt(r.uploadedBytes);
+      }
+    }
+
+    // 4. 模块健康度矩阵
+    const moduleHealth = await Promise.all(
+      REQUIRED_MODULES.map(async (mod) => {
+        const [latestRun, latestSuccessRun, checkpoint] = await Promise.all([
+          this.prisma.backupRun.findFirst({
+            where: { module: mod },
+            orderBy: { createdAt: 'desc' },
+          }),
+          this.prisma.backupRun.findFirst({
+            where: { module: mod, status: 'succeeded' },
+            orderBy: { createdAt: 'desc' },
+          }),
+          this.prisma.backupModuleCheckpoint.findFirst({
+            where: { module: mod },
+            orderBy: { updatedAt: 'desc' },
+          }),
+        ]);
+
+        return {
+          module: mod as BackupModule,
+          lastRunStatus: latestRun?.status || null,
+          lastRunAt: latestRun?.createdAt ? latestRun.createdAt.toISOString() : null,
+          lastSuccessfulBackupKey:
+            latestSuccessRun?.backupKey || checkpoint?.lastSuccessfulBackupKey || null,
+          lastSuccessfulAt: latestSuccessRun?.finishedAt
+            ? latestSuccessRun.finishedAt.toISOString()
+            : checkpoint?.lastSuccessfulAt
+              ? checkpoint.lastSuccessfulAt.toISOString()
+              : null,
+          fingerprint:
+            checkpoint?.fingerprint ||
+            latestRun?.fingerprintAfter ||
+            latestRun?.fingerprintBefore ||
+            null,
+        };
+      }),
+    );
+
+    // 5. 下次计划执行时间 (下个月 1 日 18:00 UTC)
+    const candidateThisMonth = new Date(Date.UTC(utcYear, utcMonth, 1, 18, 0, 0, 0));
+    const nextScheduledDate =
+      now.getTime() < candidateThisMonth.getTime()
+        ? candidateThisMonth
+        : new Date(Date.UTC(utcYear, utcMonth + 1, 1, 18, 0, 0, 0));
+
+    // 6. 当月任务统计
+    const totalRuns = currentMonthRuns.length;
+    const succeededRuns = currentMonthRuns.filter((r) => r.status === 'succeeded').length;
+    const failedRuns = currentMonthRuns.filter((r) => r.status === 'failed').length;
+    const skippedRuns = currentMonthRuns.filter((r) => r.status === 'skipped').length;
+    const recentFailedRuns = currentMonthRuns
+      .filter((r) => r.status === 'failed')
+      .slice(0, 5)
+      .map((r) => ({
+        id: r.id,
+        module: r.module,
+        selectorKey: r.selectorKey,
+        trigger: r.trigger,
+        failureCode: r.failureCode,
+        failureMessage: r.failureMessage,
+        createdAt: r.createdAt.toISOString(),
+      }));
+
+    return {
+      applicationBudget: {
+        usedBytes: String(appUsedBytesBigInt),
+        limitBytes: String(appLimitBytes),
+        warningBytes: String(Math.floor(appWarningBytes)),
+        criticalBytes: String(Math.floor(appCriticalBytes)),
+        alertLevel: appAlertLevel,
+        percent: appPercent,
+      },
+      neonOfficial: {
+        status: neonData.status,
+        dataTransferBytes:
+          neonData.dataTransferBytes !== null ? String(neonData.dataTransferBytes) : null,
+        limitBytes: String(neonLimitBytes),
+        warningBytes: String(Math.floor(neonWarningBytes)),
+        criticalBytes: String(Math.floor(neonCriticalBytes)),
+        alertLevel: neonAlertLevel,
+        billingPeriod: neonData.billingPeriod,
+        capturedAt: neonData.capturedAt,
+        stale: neonData.stale,
+      },
+      storageUploaded: {
+        usedBytes: String(storageUsedBigInt),
+      },
+      moduleHealth,
+      nextScheduledAt: nextScheduledDate.toISOString(),
+      currentMonthStats: {
+        periodKey,
+        totalRuns,
+        succeededRuns,
+        failedRuns,
+        skippedRuns,
+        hasFailedRuns: failedRuns > 0,
+        recentFailedRuns,
+      },
+    };
+  }
+
+  async getMetricsSummary(periodKeyParam?: string) {
+    const now = new Date();
+    let year: number;
+    let month: number; // 0-indexed
+    let periodKey: string;
+
+    if (periodKeyParam && /^\d{4}-\d{2}$/.test(periodKeyParam)) {
+      const [y, m] = periodKeyParam.split('-');
+      year = parseInt(y, 10);
+      month = parseInt(m, 10) - 1;
+      periodKey = periodKeyParam;
+    } else {
+      year = now.getUTCFullYear();
+      month = now.getUTCMonth();
+      periodKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    }
+
+    const startOfMonth = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(year, month + 1, 1, 0, 0, 0, 0));
+
+    const [monthRuns, incompleteBatchCount] = await Promise.all([
+      this.prisma.backupRun.findMany({
+        where: {
+          createdAt: {
+            gte: startOfMonth,
+            lt: endOfMonth,
+          },
+        },
+      }),
+      this.prisma.backupBatch.count({
+        where: {
+          periodKey,
+          status: 'incomplete',
+        },
+      }),
+    ]);
+
+    let curDatabaseBytes = 0n;
+    let curUncompressedBytes = 0n;
+    let curUploadedBytes = 0n;
+    let targetModularRunsCount = 0;
+
+    for (const r of monthRuns) {
+      // 节省率当前值限定为目标模块运行，排除全量备份（基线本身）和 pre-restore 恢复前快照
+      if (r.scope !== 'module' || r.purpose === 'pre-restore') {
+        continue;
+      }
+      targetModularRunsCount++;
+
+      // 出口维度：累计成功和失败模块运行的真实读取估算
+      if (r.databaseBytesEstimated !== null && r.databaseBytesEstimated !== undefined) {
+        curDatabaseBytes += BigInt(r.databaseBytesEstimated);
+      }
+      if (r.uncompressedBytes !== null && r.uncompressedBytes !== undefined) {
+        curUncompressedBytes += BigInt(r.uncompressedBytes);
+      }
+      // 存储维度：只累计成功的模块上传
+      if (r.status === 'succeeded' && r.uploadedBytes !== null && r.uploadedBytes !== undefined) {
+        curUploadedBytes += BigInt(r.uploadedBytes);
+      }
+    }
+
+    // 寻找全量基线：优先当月手动全量备份，次选历史最新全量备份
+    let baselineRun = await this.prisma.backupRun.findFirst({
+      where: {
+        scope: 'full',
+        status: 'succeeded',
+        purpose: 'manual',
+        trigger: 'manual',
+        createdAt: { gte: startOfMonth, lt: endOfMonth },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    let baselineSource: 'monthly_manual_full' | 'historical_full' | 'none' = 'monthly_manual_full';
+
+    if (!baselineRun) {
+      baselineRun = await this.prisma.backupRun.findFirst({
+        where: {
+          scope: 'full',
+          status: 'succeeded',
+          purpose: { not: 'pre-restore' },
+          createdAt: { lt: startOfMonth },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      baselineSource = baselineRun ? 'historical_full' : 'none';
+    }
+
+    // 1. 出口流量同口径比对 (仅当基线 databaseBytesEstimated 存在且 > 0 时有效)
+    let databaseExportComparison: {
+      baselineAvailable: boolean;
+      baselineBytes: string | null;
+      currentBytes: string;
+      savedBytes: string | null;
+      percentSaved: number | null;
+      baselineSource: 'monthly_manual_full' | 'historical_full' | 'none';
+      baselineBackupKey: string | null;
+    };
+
+    if (
+      baselineRun &&
+      baselineRun.databaseBytesEstimated !== null &&
+      baselineRun.databaseBytesEstimated !== undefined &&
+      BigInt(baselineRun.databaseBytesEstimated) > 0n
+    ) {
+      const baseExport = BigInt(baselineRun.databaseBytesEstimated);
+      const diffExport = baseExport - curDatabaseBytes;
+      const pct = Math.round((Number(diffExport) / Number(baseExport)) * 1000) / 10;
+      databaseExportComparison = {
+        baselineAvailable: true,
+        baselineBytes: String(baseExport),
+        currentBytes: String(curDatabaseBytes),
+        savedBytes: String(diffExport),
+        percentSaved: pct,
+        baselineSource,
+        baselineBackupKey: baselineRun.backupKey,
+      };
+    } else {
+      databaseExportComparison = {
+        baselineAvailable: false,
+        baselineBytes: null,
+        currentBytes: String(curDatabaseBytes),
+        savedBytes: null,
+        percentSaved: null,
+        baselineSource: 'none',
+        baselineBackupKey: null,
+      };
+    }
+
+    // 2. 存储上传同口径比对 (基线优先 uploadedBytes，兜底 objectSize)
+    let storageUploadComparison: {
+      baselineAvailable: boolean;
+      baselineBytes: string | null;
+      currentBytes: string;
+      savedBytes: string | null;
+      percentSaved: number | null;
+      baselineSource: 'monthly_manual_full' | 'historical_full' | 'none';
+      baselineBackupKey: string | null;
+    };
+
+    if (baselineRun) {
+      const baseUpload =
+        baselineRun.uploadedBytes !== null && baselineRun.uploadedBytes !== undefined
+          ? BigInt(baselineRun.uploadedBytes)
+          : baselineRun.objectSize !== null && baselineRun.objectSize !== undefined
+            ? BigInt(baselineRun.objectSize)
+            : null;
+
+      if (baseUpload !== null && baseUpload > 0n) {
+        const diffUpload = baseUpload - curUploadedBytes;
+        const pct = Math.round((Number(diffUpload) / Number(baseUpload)) * 1000) / 10;
+        storageUploadComparison = {
+          baselineAvailable: true,
+          baselineBytes: String(baseUpload),
+          currentBytes: String(curUploadedBytes),
+          savedBytes: String(diffUpload),
+          percentSaved: pct,
+          baselineSource,
+          baselineBackupKey: baselineRun.backupKey,
+        };
+      } else {
+        storageUploadComparison = {
+          baselineAvailable: false,
+          baselineBytes: null,
+          currentBytes: String(curUploadedBytes),
+          savedBytes: null,
+          percentSaved: null,
+          baselineSource: 'none',
+          baselineBackupKey: null,
+        };
+      }
+    } else {
+      storageUploadComparison = {
+        baselineAvailable: false,
+        baselineBytes: null,
+        currentBytes: String(curUploadedBytes),
+        savedBytes: null,
+        percentSaved: null,
+        baselineSource: 'none',
+        baselineBackupKey: null,
+      };
+    }
+
+    return {
+      periodKey,
+      databaseExport: databaseExportComparison,
+      storageUpload: storageUploadComparison,
+      totals: {
+        databaseBytesEstimated: String(curDatabaseBytes),
+        uncompressedBytes: String(curUncompressedBytes),
+        uploadedBytes: String(curUploadedBytes),
+        runsCount: targetModularRunsCount,
+      },
+      hasIncompleteBatches: incompleteBatchCount > 0,
+    };
+  }
+
+  async getMetricsTimeseries(monthsCount = 6) {
+    const validCount = Math.max(1, Math.min(24, monthsCount));
+    const now = new Date();
+    const results: Array<{
+      periodKey: string;
+      databaseBytesEstimated: string;
+      uncompressedBytes: string;
+      uploadedBytes: string;
+      totalRuns: number;
+      succeededRuns: number;
+      failedRuns: number;
+    }> = [];
+
+    for (let i = validCount - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1, 0, 0, 0, 0));
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth();
+      const periodKey = `${y}-${String(m + 1).padStart(2, '0')}`;
+      const start = d;
+      const end = new Date(Date.UTC(y, m + 1, 1, 0, 0, 0, 0));
+
+      const runs = await this.prisma.backupRun.findMany({
+        where: {
+          createdAt: {
+            gte: start,
+            lt: end,
+          },
+        },
+      });
+
+      let databaseBytes = 0n;
+      let uncompressedBytes = 0n;
+      let uploadedBytes = 0n;
+      let succeededCount = 0;
+      let failedCount = 0;
+
+      for (const r of runs) {
+        if (r.databaseBytesEstimated !== null && r.databaseBytesEstimated !== undefined) {
+          databaseBytes += BigInt(r.databaseBytesEstimated);
+        }
+        if (r.uncompressedBytes !== null && r.uncompressedBytes !== undefined) {
+          uncompressedBytes += BigInt(r.uncompressedBytes);
+        }
+        if (r.status === 'succeeded') {
+          succeededCount++;
+          if (r.uploadedBytes !== null && r.uploadedBytes !== undefined) {
+            uploadedBytes += BigInt(r.uploadedBytes);
+          }
+        } else if (r.status === 'failed') {
+          failedCount++;
+        }
+      }
+
+      results.push({
+        periodKey,
+        databaseBytesEstimated: String(databaseBytes),
+        uncompressedBytes: String(uncompressedBytes),
+        uploadedBytes: String(uploadedBytes),
+        totalRuns: runs.length,
+        succeededRuns: succeededCount,
+        failedRuns: failedCount,
+      });
+    }
+
+    return results;
+  }
+
+  async retryBackupRun(
+    runId: string,
+    operatorUsername: string,
+  ): Promise<ScheduledModuleTaskResult> {
+    const lockKey = `lock:backup:retry:${runId}`;
+    const instanceId = randomUUID();
+    const lockRes = await this.acquireBackupLock('module', lockKey, instanceId);
+    if (!lockRes.acquired) {
+      throw new ConflictException('当前任务重试正在执行中 (retry_in_flight)');
+    }
+    const retryLeaseToken = lockRes.leaseToken;
+
+    try {
+      const originalRun = await this.prisma.backupRun.findUnique({
+        where: { id: runId },
+      });
+      if (!originalRun) {
+        throw new NotFoundException(`未找到备份运行记录: ${runId}`);
+      }
+      if (originalRun.status !== 'failed') {
+        throw new BadRequestException('仅支持重试失败状态 (failed) 的任务记录');
+      }
+      if (originalRun.scope !== 'module') {
+        throw new BadRequestException('目前仅支持模块备份任务重试');
+      }
+      if (!BACKUP_MODULES.includes(originalRun.module as BackupModule)) {
+        throw new BadRequestException(`非法的模块名称: ${originalRun.module}`);
+      }
+
+      // 白名单校验：仅支持 manual, scheduled, archive
+      if (!['manual', 'scheduled', 'archive'].includes(originalRun.purpose)) {
+        throw new BadRequestException(`不支持 ${originalRun.purpose} 类型的任务重试`);
+      }
+
+      let selector: Record<string, string> = {};
+      if (originalRun.module === 'season' && originalRun.selectorKey.startsWith('season:')) {
+        const seasonId = originalRun.selectorKey.slice('season:'.length);
+        selector = { seasonId };
+      }
+
+      const nextAttempts = (originalRun.attempts || 1) + 1;
+
+      const result = await this.orchestrateModuleBackup({
+        username: operatorUsername,
+        module: originalRun.module as BackupModule,
+        selector,
+        purpose: originalRun.purpose as any,
+        trigger: 'retry',
+        batchId: originalRun.batchId || undefined,
+        attempts: nextAttempts,
+        retryOfRunId: originalRun.id,
+      });
+
+      if (originalRun.batchId) {
+        await this.recomputeBatchStatus(originalRun.batchId).catch((err) => {
+          this.logger.warn(`批次 ${originalRun.batchId} 状态重算失败: ${err.message}`);
+        });
+      }
+
+      return result;
+    } finally {
+      await this.releaseLock(lockKey, retryLeaseToken).catch(() => {});
+    }
+  }
+
+  async recomputeBatchStatus(batchId: string): Promise<void> {
+    const runs = await this.prisma.backupRun.findMany({
+      where: { batchId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!runs || runs.length === 0) return;
+
+    // 按 module + selectorKey + purpose 分组，取最新 attempt
+    const latestRunsByTarget = new Map<string, (typeof runs)[0]>();
+    for (const run of runs) {
+      const groupKey = `${run.module}:${run.selectorKey}:${run.purpose}`;
+      latestRunsByTarget.set(groupKey, run);
+    }
+
+    let hasRunning = false;
+    let succeededCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    const items: ScheduledModuleTaskResult[] = [];
+
+    for (const run of latestRunsByTarget.values()) {
+      if (run.status === 'running' || run.status === 'pending') {
+        hasRunning = true;
+      } else if (run.status === 'succeeded') {
+        succeededCount++;
+        items.push({
+          status: 'created',
+          module: run.module as BackupModule,
+          selector:
+            run.module === 'season' && run.selectorKey.startsWith('season:')
+              ? { seasonId: run.selectorKey.slice('season:'.length) }
+              : {},
+          backup: {
+            key: run.backupKey || '',
+            filename: run.backupKey ? run.backupKey.split('/').pop() || '' : '',
+            size: run.objectSize ? Number(run.objectSize) : 0,
+            checksum: run.checksum || undefined,
+            module: run.module as BackupModule,
+          },
+          durationMs: run.durationMs || 0,
+          finishedAt: run.finishedAt ? run.finishedAt.toISOString() : new Date().toISOString(),
+        });
+      } else if (run.status === 'skipped') {
+        skippedCount++;
+        items.push({
+          status: 'skipped',
+          module: run.module as BackupModule,
+          selector:
+            run.module === 'season' && run.selectorKey.startsWith('season:')
+              ? { seasonId: run.selectorKey.slice('season:'.length) }
+              : {},
+          reason: (run.skipReason as any) || 'unchanged',
+          finishedAt: run.finishedAt ? run.finishedAt.toISOString() : new Date().toISOString(),
+        });
+      } else {
+        failedCount++;
+        items.push({
+          status: 'failed',
+          module: run.module as BackupModule,
+          selector:
+            run.module === 'season' && run.selectorKey.startsWith('season:')
+              ? { seasonId: run.selectorKey.slice('season:'.length) }
+              : {},
+          reason: (run.failureCode as any) || 'export_error',
+          error: run.failureMessage || '任务执行失败',
+          finishedAt: run.finishedAt ? run.finishedAt.toISOString() : new Date().toISOString(),
+        });
+      }
+    }
+
+    let batchStatus: 'running' | 'succeeded' | 'incomplete' | 'failed';
+    if (hasRunning) {
+      batchStatus = 'running';
+    } else if (failedCount === 0) {
+      batchStatus = 'succeeded';
+    } else if (succeededCount === 0 && skippedCount === 0) {
+      batchStatus = 'failed';
+    } else {
+      // 部分成功/跳过，同时存在失败
+      batchStatus = 'incomplete';
+    }
+
+    await this.prisma.backupBatch.update({
+      where: { id: batchId },
+      data: {
+        status: batchStatus,
+        items: items as any,
+        finishedAt: batchStatus === 'running' ? null : new Date(),
+      },
     });
   }
 }

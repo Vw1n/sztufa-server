@@ -101,19 +101,60 @@ export class SeasonLifecycleService {
       throw new BadRequestException(`赛季名称 "${trimmedName}" 已存在`);
     }
 
-    const activeSeasons = await this.prisma.season.findMany({
-      where: { status: 'active' },
-      select: { id: true },
-    });
-    for (const season of activeSeasons) {
-      await this.backupService.createArchiveSeasonBackup(username, season.id);
-    }
+    const now = new Date();
+    const transitionedSeasonIds: string[] = [];
 
     const newSeason = await this.prisma.$transaction(async (tx) => {
-      await tx.season.updateMany({
+      // 严格在事务内查询当前所有处于 active 的赛季，杜绝事务外并发新增/激活产生的孤儿归档
+      const targetActiveSeasons = await tx.season.findMany({
         where: { status: 'active' },
-        data: { status: 'archived' },
+        select: { id: true },
       });
+
+      for (const season of targetActiveSeasons) {
+        const updateRes = await tx.season.updateMany({
+          where: { id: season.id, status: 'active' },
+          data: { status: 'archived', archivedAt: now },
+        });
+
+        // 仅当实际成功从 active 转换为 archived 时才登记任务
+        if (updateRes.count === 1) {
+          transitionedSeasonIds.push(season.id);
+
+          const existingRun = await tx.backupRun.findUnique({
+            where: { taskKey: `archive:season:${season.id}` },
+          });
+
+          // 防并发重置：若当前已有 running 状态的任务，绝不重置其 attempts 与运行态
+          if (!existingRun || (existingRun.status !== 'running' && existingRun.status !== 'succeeded')) {
+            await tx.backupRun.upsert({
+              where: { taskKey: `archive:season:${season.id}` },
+              update: {
+                status: 'pending',
+                trigger: 'archive',
+                purpose: 'archive',
+                selectorKey: `season:${season.id}`,
+                attempts: 0,
+                nextAttemptAt: now,
+                failureCode: null,
+                failureMessage: null,
+                finishedAt: null,
+              },
+              create: {
+                taskKey: `archive:season:${season.id}`,
+                trigger: 'archive',
+                scope: 'module',
+                module: 'season',
+                selectorKey: `season:${season.id}`,
+                purpose: 'archive',
+                status: 'pending',
+                attempts: 0,
+                nextAttemptAt: now,
+              },
+            });
+          }
+        }
+      }
 
       const season = await tx.season.create({
         data: {
@@ -136,6 +177,10 @@ export class SeasonLifecycleService {
       return season;
     });
 
+    for (const seasonId of transitionedSeasonIds) {
+      await this.backupService.executePendingArchiveBackup(seasonId, username);
+    }
+
     await this.auditLogService.log(
       username,
       'ARCHIVE_SEASON',
@@ -157,14 +202,60 @@ export class SeasonLifecycleService {
       throw new BadRequestException('赛季不存在');
     }
 
-    if (status === 'archived' && season.status !== 'archived') {
-      await this.backupService.createArchiveSeasonBackup(username, season.id);
-    }
+    let shouldTriggerBackup = false;
+    const now = new Date();
 
-    const updatedSeason = await this.prisma.season.update({
-      where: { id },
-      data: { status },
+    const updatedSeason = await this.prisma.$transaction(async (tx) => {
+      if (status === 'archived') {
+        const updateResult = await tx.season.updateMany({
+          where: { id, status: 'active' },
+          data: { status: 'archived', archivedAt: now },
+        });
+        if (updateResult.count === 1) {
+          shouldTriggerBackup = true;
+          const existingRun = await tx.backupRun.findUnique({
+            where: { taskKey: `archive:season:${id}` },
+          });
+          if (!existingRun || (existingRun.status !== 'running' && existingRun.status !== 'succeeded')) {
+            await tx.backupRun.upsert({
+              where: { taskKey: `archive:season:${id}` },
+              update: {
+                status: 'pending',
+                trigger: 'archive',
+                purpose: 'archive',
+                selectorKey: `season:${id}`,
+                attempts: 0,
+                nextAttemptAt: now,
+                failureCode: null,
+                failureMessage: null,
+                finishedAt: null,
+              },
+              create: {
+                taskKey: `archive:season:${id}`,
+                trigger: 'archive',
+                scope: 'module',
+                module: 'season',
+                selectorKey: `season:${id}`,
+                purpose: 'archive',
+                status: 'pending',
+                attempts: 0,
+                nextAttemptAt: now,
+              },
+            });
+          }
+        }
+      } else {
+        await tx.season.update({
+          where: { id },
+          data: { status },
+        });
+      }
+      return tx.season.findUnique({ where: { id } });
     });
+
+    if (shouldTriggerBackup) {
+      await this.backupService.executePendingArchiveBackup(id, username);
+    }
 
     await this.auditLogService.log(
       username,

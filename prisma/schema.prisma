@@ -256,6 +256,7 @@ model Season {
   name              String                   @unique
   status            String                   @default("active") // active, archived
   type              String                   @default("LEAGUE") // LEAGUE, CUP
+  archivedAt        DateTime?                // 真实归档时间点
   matches           Match[]
   standingsCache    Json?
   statsCache        Json?
@@ -557,6 +558,53 @@ model BackupBatch {
   scheduledAt    DateTime?
   startedAt      DateTime  @default(now())
   finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// 备份运行历史与重试账本
+model BackupRun {
+  id                     String    @id @default(cuid())
+  batchId                String?
+  taskKey                String?   @unique // 业务任务唯一键 (如 "archive:season:cmr123")
+  trigger                String    // manual | cron | archive | backfill | retry
+  scope                  String    // full | module
+  module                 String    // season | staff | members | content | operations | full
+  selectorKey            String    // e.g. season:season_123 或 staff
+  purpose                String    // manual | archive | scheduled | pre-restore | uploaded
+  status                 String    // pending | running | succeeded | skipped | failed
+  skipReason             String?
+  failureCode            String?
+  failureMessage         String?
+  backupKey              String?
+  checksum               String?
+  objectSize             BigInt?
+  leaseToken             String?   // 本次执行关联的租约令牌，用于 CAS 防覆写
+  attempts               Int       @default(0)
+  nextAttemptAt          DateTime?
+  verifiedAt             DateTime?
+  databaseRowsRead       Int?
+  databaseBytesEstimated BigInt?
+  uncompressedBytes      BigInt?
+  uploadedBytes          BigInt?
+  durationMs             Int?
+  startedAt              DateTime  @default(now())
+  finishedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([selectorKey, purpose, status])
+  @@index([trigger, status])
+  @@index([createdAt])
+}
+
+// 跨实例互斥租约锁（当前并发锁）
+model BackupLock {
+  id             String    @id @default(cuid())
+  lockKey        String    @unique // e.g. "season:cmr123:archive"
+  leaseToken     String?   // 当前持有实例唯一令牌 (UUID)
+  leaseExpiresAt DateTime? // 租约失效时间点
+  holderInstance String?   // 实例标识
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }

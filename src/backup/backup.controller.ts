@@ -10,6 +10,7 @@ import {
   Param,
   UseGuards,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { BackupService } from './backup.service';
@@ -19,6 +20,10 @@ import { Roles } from '../auth/roles.decorator';
 import { BackupScope } from './backup-scope.service';
 import { BackupModule } from './backup-module-registry';
 import { BackupBatchListQueryDto } from './dto/backup-batch-list-query.dto';
+import {
+  ArchiveBackfillPreviewDto,
+  ArchiveBackfillExecuteDto,
+} from './dto/archive-backfill.dto';
 
 @Controller('api/v1/backups')
 @ApiTags('备份管理')
@@ -40,8 +45,17 @@ export class BackupController {
     @Body('seasonId') seasonId?: string,
     @Body('module') module?: BackupModule,
     @Body('selector') selector?: Record<string, string>,
+    @Body('purpose') purpose?: 'manual' | 'archive',
+    @Body('protected') isProtected?: boolean,
   ) {
     const username = req.user?.username || 'system';
+    const finalPurpose = purpose || 'manual';
+    const finalProtected = !!isProtected;
+    const finalSelector = selector ? { ...selector } : {};
+    if (seasonId && !finalSelector.seasonId) {
+      finalSelector.seasonId = seasonId;
+    }
+
     const abortController = new AbortController();
 
     const onAborted = () => abortController.abort();
@@ -55,11 +69,12 @@ export class BackupController {
 
     try {
       const backupMetadata = await this.backupService.createBackup(username, {
-        purpose: 'manual',
+        purpose: finalPurpose,
+        protected: finalProtected,
         scope,
         seasonId,
         module,
-        selector,
+        selector: finalSelector,
         signal: abortController.signal,
       });
       return { success: true, data: backupMetadata };
@@ -247,5 +262,63 @@ export class BackupController {
 
     const batchResult = await this.scheduledBackupInFlight;
     return { success: true, data: batchResult };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Get('archive-coverage')
+  @ApiOperation({ summary: '获取所有已归档赛季的保护备份覆盖率状态' })
+  async getArchiveCoverage() {
+    const coverage = await this.backupService.scanArchiveCoverage();
+    return { success: true, data: coverage };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('archive-backfill/preview')
+  @ApiOperation({ summary: '预检归档保护备份补建影响并签发单次防篡改 Token' })
+  async previewArchiveBackfill(
+    @Req() req: any,
+    @Body() dto: ArchiveBackfillPreviewDto,
+  ) {
+    const operatorId = req.user?.id || req.user?.username || 'admin';
+    const preview = await this.backupService.previewArchiveBackfill(operatorId, dto.seasonIds);
+    return { success: true, data: preview };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('archive-backfill/execute')
+  @ApiOperation({ summary: '使用 Preview Token 执行归档保护备份批量补建（受预算与并发锁保护）' })
+  async executeArchiveBackfill(
+    @Req() req: any,
+    @Body() dto: ArchiveBackfillExecuteDto,
+  ) {
+    const operatorId = req.user?.id || req.user?.username || 'admin';
+    const username = req.user?.username || 'system';
+    const result = await this.backupService.executeArchiveBackfill(
+      operatorId,
+      username,
+      dto.backfillToken,
+      dto.seasonIds,
+    );
+    return { success: true, data: result };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('archive-backfill/:seasonId/retry')
+  @ApiOperation({ summary: '人工重试单个失败的已归档赛季保护备份' })
+  async retryArchiveBackfill(
+    @Req() req: any,
+    @Param('seasonId') seasonId: string,
+  ) {
+    const username = req.user?.username || 'system';
+    const result = await this.backupService.retryArchiveSeasonBackfill(seasonId, username);
+    return { success: true, data: result };
   }
 }

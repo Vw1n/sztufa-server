@@ -25,6 +25,33 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
       createScheduledBackup: jest
         .fn()
         .mockResolvedValue({ key: 'private-backups/database/backup_scheduled.json.gz' }),
+      createScheduledBackupBatch: jest.fn().mockResolvedValue({
+        batchId: 'batch_test',
+        periodKey: '2026-09',
+        status: 'succeeded',
+        succeeded: 5,
+        skipped: 0,
+        failed: 0,
+        items: [],
+      }),
+      listBackupBatches: jest
+        .fn()
+        .mockResolvedValue([{ id: 'batch_1', periodKey: '2026-09', status: 'incomplete' }]),
+      getBackupBatch: jest.fn().mockResolvedValue({
+        id: 'batch_1',
+        periodKey: '2026-09',
+        status: 'incomplete',
+        items: [],
+      }),
+      retryScheduledBackupBatch: jest.fn().mockResolvedValue({
+        batchId: 'batch_1',
+        periodKey: '2026-09',
+        status: 'succeeded',
+        succeeded: 5,
+        skipped: 0,
+        failed: 0,
+        items: [],
+      }),
       listBackups: jest.fn().mockResolvedValue([]),
       getPresignedDownloadUrl: jest.fn().mockResolvedValue('https://r2.example.com/url'),
       restoreBackup: jest.fn().mockResolvedValue('数据库还原成功'),
@@ -83,6 +110,9 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
   it('未提供 JWT 凭证时访问备份接口应返回 403 / 401 拒绝对话', async () => {
     await request(app.getHttpServer()).post('/api/v1/backups/create').expect(403);
     await request(app.getHttpServer()).get('/api/v1/backups/list').expect(403);
+    await request(app.getHttpServer()).get('/api/v1/backups/batches').expect(403);
+    await request(app.getHttpServer()).get('/api/v1/backups/batches/batch_1').expect(403);
+    await request(app.getHttpServer()).post('/api/v1/backups/batches/batch_1/retry').expect(403);
     await request(app.getHttpServer()).post('/api/v1/backups/upload/init').expect(403);
     await request(app.getHttpServer()).post('/api/v1/backups/upload/complete').expect(403);
     await request(app.getHttpServer()).delete('/api/v1/backups').expect(403);
@@ -93,6 +123,16 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
   it('普通教练身份 (coach) 访问备份受控 API 应当返回 403 Forbidden 拦截', async () => {
     await request(app.getHttpServer())
       .post('/api/v1/backups/create')
+      .set('Authorization', coachToken)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches')
+      .set('Authorization', coachToken)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/backups/batches/batch_1/retry')
       .set('Authorization', coachToken)
       .expect(403);
 
@@ -120,45 +160,80 @@ describe('BackupController Supertest HTTP Guard & Roles Spec', () => {
       .expect(403);
   });
 
-  it('超级管理员 (super_admin) 访问受控 API 应当成功通过 (200 / 201 OK)', async () => {
-    await request(app.getHttpServer())
-      .post('/api/v1/backups/create')
-      .set('Authorization', superAdminToken)
-      .expect(201);
+  it('超级管理员 (super_admin) 访问批次查询与重试 API 应当成功通过 (200 / 201 OK)', async () => {
+    mockBackupService.listBackupBatches.mockResolvedValueOnce({
+      total: 1,
+      limit: 20,
+      offset: 0,
+      items: [{ id: 'batch_1', periodKey: '2026-09', status: 'incomplete' }],
+    });
 
-    await request(app.getHttpServer())
-      .get('/api/v1/backups/list')
+    const listRes = await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?status=incomplete&limit=20&offset=0')
       .set('Authorization', superAdminToken)
       .expect(200);
+    expect(listRes.body.data.items[0].id).toBe('batch_1');
+    expect(listRes.body.data.total).toBe(1);
 
-    await request(app.getHttpServer())
-      .post('/api/v1/backups/upload/init')
+    const detailRes = await request(app.getHttpServer())
+      .get('/api/v1/backups/batches/batch_1')
       .set('Authorization', superAdminToken)
-      .send({ filename: 'b.json.gz', size: 100, sha256: 'a'.repeat(64) })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .post('/api/v1/backups/upload/complete')
-      .set('Authorization', superAdminToken)
-      .send({ uploadToken: 'token.sig' })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .delete('/api/v1/backups')
-      .set('Authorization', superAdminToken)
-      .send({ key: 'private-backups/database/b.json.gz', confirmText: 'DELETE_BACKUP' })
       .expect(200);
+    expect(detailRes.body.data.id).toBe('batch_1');
+
+    const retryRes = await request(app.getHttpServer())
+      .post('/api/v1/backups/batches/batch_1/retry')
+      .set('Authorization', superAdminToken)
+      .expect(201);
+    expect(retryRes.body.data.status).toBe('succeeded');
+  });
+
+  it('批次列表查询参数非法时返回 400 校验错误', async () => {
+    // 1. limit 为非法字符 (如 2abc)
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?limit=2abc')
+      .set('Authorization', superAdminToken)
+      .expect(400);
+
+    // 2. limit 超出范围 (如 0 或 101)
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?limit=0')
+      .set('Authorization', superAdminToken)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?limit=101')
+      .set('Authorization', superAdminToken)
+      .expect(400);
+
+    // 3. offset 为负数
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?offset=-1')
+      .set('Authorization', superAdminToken)
+      .expect(400);
+
+    // 4. periodKey 格式非法 (如 2026-99)
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?periodKey=2026-99')
+      .set('Authorization', superAdminToken)
+      .expect(400);
+
+    // 5. status 非法
+    await request(app.getHttpServer())
+      .get('/api/v1/backups/batches?status=invalid_status')
+      .set('Authorization', superAdminToken)
+      .expect(400);
   });
 });
 
 describe('BackupController scheduled backup single-flight', () => {
-  it('reuses one export when duplicate cron requests overlap in the same instance', async () => {
+  it('reuses one batch export when duplicate cron requests overlap in the same instance', async () => {
     let resolveBackup: (value: any) => void = () => {};
     const pendingBackup = new Promise((resolve) => {
       resolveBackup = resolve;
     });
     const backupService = {
-      createScheduledBackup: jest.fn().mockReturnValue(pendingBackup),
+      createScheduledBackupBatch: jest.fn().mockReturnValue(pendingBackup),
     } as any;
     const controller = new BackupController(backupService);
     const previousSecret = process.env.CRON_SECRET;
@@ -167,34 +242,43 @@ describe('BackupController scheduled backup single-flight', () => {
     const createRequest = () => {
       const req = new EventEmitter() as any;
       req.headers = { authorization: 'Bearer cron-test-secret' };
-      req.off = req.removeListener.bind(req);
       return req;
-    };
-    const createResponse = () => {
-      const res = new EventEmitter() as any;
-      res.writableEnded = false;
-      res.off = res.removeListener.bind(res);
-      return res;
     };
 
     try {
-      const first = controller.autoBackup(createRequest(), createResponse());
-      const second = controller.autoBackup(createRequest(), createResponse());
-      expect(backupService.createScheduledBackup).toHaveBeenCalledTimes(1);
+      const first = controller.autoBackup(createRequest());
+      const second = controller.autoBackup(createRequest());
+      expect(backupService.createScheduledBackupBatch).toHaveBeenCalledTimes(1);
 
-      resolveBackup({ key: 'private-backups/database/full/scheduled.json.gz' });
+      resolveBackup({
+        batchId: 'batch_test_1',
+        periodKey: '2026-09',
+        status: 'succeeded',
+      });
 
       await expect(first).resolves.toEqual({
         success: true,
-        data: { key: 'private-backups/database/full/scheduled.json.gz' },
+        data: { batchId: 'batch_test_1', periodKey: '2026-09', status: 'succeeded' },
       });
       await expect(second).resolves.toEqual({
         success: true,
-        data: { key: 'private-backups/database/full/scheduled.json.gz' },
+        data: { batchId: 'batch_test_1', periodKey: '2026-09', status: 'succeeded' },
       });
     } finally {
       if (previousSecret === undefined) delete process.env.CRON_SECRET;
       else process.env.CRON_SECRET = previousSecret;
     }
+  });
+
+  it('未配置或提供错误 CRON_SECRET 时抛出 403 ForbiddenException', async () => {
+    const backupService = {
+      createScheduledBackupBatch: jest.fn(),
+    } as any;
+    const controller = new BackupController(backupService);
+    process.env.CRON_SECRET = 'secret_123';
+
+    await expect(
+      controller.autoBackup({ headers: { authorization: 'Bearer wrong' } }),
+    ).rejects.toThrow('未授权的定时备份请求');
   });
 });

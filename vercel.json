@@ -21,6 +21,12 @@
       }
     }
   ],
+  "crons": [
+    {
+      "path": "/api/v1/backups/auto-backup",
+      "schedule": "0 18 1 * *"
+    }
+  ],
   "routes": [
     {
       "src": "/(.*)",

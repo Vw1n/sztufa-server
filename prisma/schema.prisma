@@ -543,3 +543,20 @@ model AuthRateLimit {
 
   @@index([expiresAt])
 }
+
+// 月度模块化备份批次账本与跨实例执行租约
+model BackupBatch {
+  id             String    @id @default(cuid())
+  trigger        String    // cron | manual | retry
+  periodKey      String    @unique // e.g. 2026-09 in Asia/Shanghai
+  targetSeasonId String?   // 批次初次建立时冻结的目标活跃赛季 ID
+  status         String    // running | succeeded | incomplete | failed
+  leaseToken     String?   // 当前执行者唯一持有令牌 (UUID)
+  leaseExpiresAt DateTime? // 租约失效时间点 (startedAt + LEASE_TTL_MS)
+  items          Json?     // 模块结果清单：Array<ScheduledModuleTaskResult>
+  scheduledAt    DateTime?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}

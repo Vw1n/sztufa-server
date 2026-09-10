@@ -6,6 +6,8 @@ import {
   Body,
   Req,
   Res,
+  Query,
+  Param,
   UseGuards,
   ForbiddenException,
 } from '@nestjs/common';
@@ -16,11 +18,13 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { BackupScope } from './backup-scope.service';
 import { BackupModule } from './backup-module-registry';
+import { BackupBatchListQueryDto } from './dto/backup-batch-list-query.dto';
 
 @Controller('api/v1/backups')
 @ApiTags('备份管理')
 export class BackupController {
-  private scheduledBackupInFlight: ReturnType<BackupService['createScheduledBackup']> | null = null;
+  private scheduledBackupInFlight: ReturnType<BackupService['createScheduledBackupBatch']> | null =
+    null;
 
   constructor(private readonly backupService: BackupService) {}
 
@@ -192,9 +196,40 @@ export class BackupController {
     return { success: true, data: result };
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Get('batches')
+  @ApiOperation({ summary: '分页/条件查询月度备份批次列表' })
+  async listBatches(@Query() query: BackupBatchListQueryDto) {
+    const batches = await this.backupService.listBackupBatches(query);
+    return { success: true, data: batches };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Get('batches/:id')
+  @ApiOperation({ summary: '获取指定月度备份批次详情' })
+  async getBatch(@Param('id') id: string) {
+    const batch = await this.backupService.getBackupBatch(id);
+    return { success: true, data: batch };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('batches/:id/retry')
+  @ApiOperation({ summary: '人工触发未完成月度备份批次的断点重试' })
+  async retryBatch(@Req() req: any, @Param('id') id: string) {
+    const username = req.user?.username || 'system';
+    const batchResult = await this.backupService.retryScheduledBackupBatch(id, username);
+    return { success: true, data: batchResult };
+  }
+
   @Post('auto-backup')
   @ApiOperation({ summary: 'Vercel Cron 自动定时备份接口' })
-  async autoBackup(@Req() req: any, @Res({ passthrough: true }) res: any) {
+  async autoBackup(@Req() req: any) {
     const authHeader = req.headers['authorization'];
     const expectedToken = `Bearer ${process.env.CRON_SECRET}`;
 
@@ -202,32 +237,15 @@ export class BackupController {
       throw new ForbiddenException('未授权的定时备份请求');
     }
 
-    const abortController = new AbortController();
-    const onAborted = () => abortController.abort();
-    const onClose = () => {
-      if (!res.writableEnded) abortController.abort();
-    };
-
-    req.on('aborted', onAborted);
-    req.on('error', onAborted);
-    res.on('close', onClose);
-
-    try {
-      if (!this.scheduledBackupInFlight) {
-        this.scheduledBackupInFlight = this.backupService.createScheduledBackup(
-          'vercel-cron-system',
-          {
-            signal: abortController.signal,
-          },
-        );
-      }
-      const backupMetadata = await this.scheduledBackupInFlight;
-      return { success: true, data: backupMetadata };
-    } finally {
-      this.scheduledBackupInFlight = null;
-      req.off('aborted', onAborted);
-      req.off('error', onAborted);
-      res.off('close', onClose);
+    if (!this.scheduledBackupInFlight) {
+      this.scheduledBackupInFlight = this.backupService
+        .createScheduledBackupBatch('vercel-cron-system')
+        .finally(() => {
+          this.scheduledBackupInFlight = null;
+        });
     }
+
+    const batchResult = await this.scheduledBackupInFlight;
+    return { success: true, data: batchResult };
   }
 }

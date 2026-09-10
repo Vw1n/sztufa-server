@@ -25,7 +25,7 @@ export type LegacyBackupTableName = (typeof LEGACY_V3_REQUIRED_TABLES)[number];
 export const MANDATORY_BACKUP_TABLES = LEGACY_V3_REQUIRED_TABLES;
 export type MandatoryBackupTableName = LegacyBackupTableName;
 
-export const EXCLUDED_BACKUP_MODELS = ['CampusCardAsset', 'AuthRateLimit'] as const;
+export const EXCLUDED_BACKUP_MODELS = ['CampusCardAsset', 'AuthRateLimit', 'BackupBatch'] as const;
 export type ExcludedBackupModel = (typeof EXCLUDED_BACKUP_MODELS)[number];
 
 export const V4_PERSISTENT_MODELS = [

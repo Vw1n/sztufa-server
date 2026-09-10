@@ -33,7 +33,7 @@ export interface UploadInitResult {
 }
 
 export interface CreateBackupOptions {
-  purpose?: 'manual' | 'scheduled' | 'pre-restore' | 'uploaded';
+  purpose?: 'manual' | 'scheduled' | 'archive' | 'pre-restore' | 'uploaded';
   protected?: boolean;
   scope?: BackupScope | 'module';
   seasonId?: string;

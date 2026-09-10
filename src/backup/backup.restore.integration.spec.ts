@@ -9,6 +9,7 @@ import { BackupRestoreService } from './backup-restore.service';
 import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
 import { BackupPlanService } from './backup-plan.service';
+import { BackupModuleRestoreService } from './backup-module-restore.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
 import { Readable } from 'stream';
@@ -87,6 +88,13 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       exportService,
       mockAuditLog as any,
     );
+    const moduleRestoreService = new BackupModuleRestoreService(
+      testPrisma as unknown as PrismaService,
+      objectStore,
+      verificationService,
+      exportService,
+      mockAuditLog as any,
+    );
     const uploadService = new BackupUploadService(objectStore, verificationService, mockAuditLog);
     const maintenanceService = new BackupMaintenanceService(
       objectStore,
@@ -104,6 +112,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       scopeService,
       retentionService,
       testPrisma as unknown as PrismaService,
+      moduleRestoreService,
     );
 
     // 保存原始值并启用恢复功能（所有集成测试均需要）
@@ -410,6 +419,69 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       } finally {
         await secondClient.$disconnect();
       }
+    });
+  });
+
+  describe('PostgreSQL 真实模块备份 Preview 与恢复测试', () => {
+    it('应只覆盖 content 模块，且不影响赛季与管理员数据', async () => {
+      await seedAll18Tables(testPrisma);
+
+      let moduleBackupBuffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of this.params.Body) chunks.push(Buffer.from(chunk));
+        if (!moduleBackupBuffer.length) moduleBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-module-location' } as any;
+      });
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
+        if (command.constructor.name === 'GetObjectCommand') {
+          return { Body: Readable.from([moduleBackupBuffer]) } as any;
+        }
+        return {} as any;
+      });
+
+      const backup = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'content',
+        selector: {},
+      });
+      expect(backup.key).toContain('/modules/content/');
+
+      await testPrisma.news.update({ where: { id: 'n1' }, data: { title: '被篡改的资讯' } });
+      const seasonBefore = await testPrisma.season.findUnique({ where: { id: 's1' } });
+      const adminBefore = await testPrisma.user.findUnique({ where: { id: 'u1' } });
+
+      const originalModuleFlag = process.env.BACKUP_RESTORE_CONTENT_ENABLED;
+      process.env.BACKUP_RESTORE_CONTENT_ENABLED = 'true';
+      try {
+        const preview = await service.previewRestore('admin', backup.key);
+        expect(preview).toEqual(
+          expect.objectContaining({
+            module: 'content',
+            canExecute: true,
+            tableCounts: { News: 1 },
+          }),
+        );
+
+        const result = await service.restoreModuleBackup(
+          'admin',
+          backup.key,
+          preview.restoreToken,
+          'CONFIRM_MODULE_RESTORE',
+        );
+        expect(result).toContain('content');
+      } finally {
+        if (originalModuleFlag === undefined) delete process.env.BACKUP_RESTORE_CONTENT_ENABLED;
+        else process.env.BACKUP_RESTORE_CONTENT_ENABLED = originalModuleFlag;
+      }
+
+      expect(await testPrisma.news.findUnique({ where: { id: 'n1' } })).toEqual(
+        expect.objectContaining({ title: '揭幕战捷报' }),
+      );
+      expect(await testPrisma.season.findUnique({ where: { id: 's1' } })).toEqual(seasonBefore);
+      expect(await testPrisma.user.findUnique({ where: { id: 'u1' } })).toEqual(adminBefore);
     });
   });
 

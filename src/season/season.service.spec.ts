@@ -24,7 +24,13 @@ describe('SeasonService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    lifecycleService = new SeasonLifecycleService(prisma as any, auditLogService as any);
+    lifecycleService = new SeasonLifecycleService(
+      prisma as any,
+      auditLogService as any,
+      {
+        createArchiveSeasonBackup: jest.fn(),
+      } as any,
+    );
     groupService = new SeasonGroupService(prisma as any, auditLogService as any, {} as any);
     knockoutService = new KnockoutGeneratorService(prisma as any, auditLogService as any);
     deletionService = new SeasonDeletionService(prisma as any, auditLogService as any);

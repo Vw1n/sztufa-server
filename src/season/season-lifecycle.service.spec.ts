@@ -23,14 +23,17 @@ describe('SeasonLifecycleService', () => {
     const prisma: any = {
       season: {
         findUnique: jest.fn(async () => null),
+        findMany: jest.fn(async () => [{ id: 'season-old' }]),
       },
       $transaction: jest.fn(async (callback: (client: any) => unknown) => callback(tx)),
     };
     const auditLogService: any = { log: jest.fn(async () => undefined) };
+    const backupService: any = { createArchiveSeasonBackup: jest.fn(async () => undefined) };
     return {
-      service: new SeasonLifecycleService(prisma, auditLogService),
+      service: new SeasonLifecycleService(prisma, auditLogService, backupService),
       tx,
       auditLogService,
+      backupService,
     };
   };
 
@@ -51,7 +54,7 @@ describe('SeasonLifecycleService', () => {
   });
 
   it('archives the previous season without inheriting its teams into the new roster', async () => {
-    const { service, tx, auditLogService } = createService();
+    const { service, tx, auditLogService, backupService } = createService();
 
     await expect(service.archiveAndCreateNewSeason('2027校长杯', 'CUP', 'admin')).resolves.toEqual(
       expect.objectContaining({ id: 'season-new' }),
@@ -61,6 +64,7 @@ describe('SeasonLifecycleService', () => {
       where: { status: 'active' },
       data: { status: 'archived' },
     });
+    expect(backupService.createArchiveSeasonBackup).toHaveBeenCalledWith('admin', 'season-old');
     expect(tx.seasonTeamPlayer.createMany).not.toHaveBeenCalled();
     expect(auditLogService.log).toHaveBeenCalledWith(
       'admin',

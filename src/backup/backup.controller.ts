@@ -104,6 +104,38 @@ export class BackupController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin')
+  @Post('restore/preview')
+  @ApiOperation({ summary: '预检 V4 模块备份恢复影响并签发短时恢复令牌' })
+  async previewRestore(@Req() req: any, @Body('key') key: string) {
+    const username = req.user?.username || 'system';
+    const result = await this.backupService.previewRestore(username, key);
+    return { success: true, data: result };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Post('restore/module')
+  @ApiOperation({ summary: '使用 Preview 令牌执行 V4 模块恢复' })
+  async restoreModule(
+    @Req() req: any,
+    @Body('key') key: string,
+    @Body('restoreToken') restoreToken: string,
+    @Body('confirmText') confirmText?: string,
+  ) {
+    const username = req.user?.username || 'system';
+    const message = await this.backupService.restoreModuleBackup(
+      username,
+      key,
+      restoreToken,
+      confirmText,
+    );
+    return { success: true, message };
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
   @Post('upload/init')
   @ApiOperation({ summary: '初始化本地备份文件 R2 直传预签名 URL' })
   async initUpload(

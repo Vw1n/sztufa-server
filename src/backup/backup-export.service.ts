@@ -31,6 +31,7 @@ export class BackupExportService {
   ) {}
 
   async createBackup(username: string, options?: CreateBackupOptions): Promise<BackupMetadata> {
+    const startedAt = Date.now();
     const purpose = options?.purpose || 'manual';
     const isProtected = !!options?.protected;
     const scope = options?.scope || 'full';
@@ -184,10 +185,21 @@ export class BackupExportService {
       // 降级保持 0
     }
 
+    const durationMs = Date.now() - startedAt;
+    const metric = {
+      scope,
+      module: plan?.module || (scope === 'season' ? 'season' : 'full'),
+      seasonId: plan?.selector.seasonId || options?.seasonId,
+      purpose,
+      uploadedBytes: size,
+      durationMs,
+    };
+    console.info(`[BackupMetrics] ${JSON.stringify(metric)}`);
+
     await this.auditLogService.log(
       username,
       'CREATE_BACKUP',
-      `触发${plan ? `${plan.module} 模块` : scope === 'season' ? '分赛季' : '全站'}数据库备份 (${plan ? 'V4.0' : 'V3.0'} GZIP)，备份文件: ${fileKey}。`,
+      `触发${plan ? `${plan.module} 模块` : scope === 'season' ? '分赛季' : '全站'}数据库备份 (${plan ? 'V4.0' : 'V3.0'} GZIP)，备份文件: ${fileKey}，上传 ${size} 字节，耗时 ${durationMs}ms。`,
     );
 
     return {

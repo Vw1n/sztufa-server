@@ -12,6 +12,7 @@ import { BackupRestoreService } from './backup-restore.service';
 import { BackupUploadService } from './backup-upload.service';
 import { BackupMaintenanceService } from './backup-maintenance.service';
 import { BackupPlanService } from './backup-plan.service';
+import { BackupModuleRestoreService } from './backup-module-restore.service';
 import { parseAndValidateBackupStream } from './backup-serializer';
 import * as crypto from 'crypto';
 import * as zlib from 'zlib';
@@ -186,6 +187,7 @@ describe('BackupService (V3 & Security Spec)', () => {
         BackupRetentionService,
         BackupScopeService,
         BackupPlanService,
+        BackupModuleRestoreService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: AuditLogService, useValue: mockAuditLogService },
       ],

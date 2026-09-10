@@ -257,24 +257,10 @@ export class BackupService implements OnModuleInit {
 
     if (scope === 'season') {
       const seasonId = options?.seasonId || options?.selector?.seasonId;
-      const targetSeasonId =
-        seasonId ||
-        (
-          await this.prisma.season.findFirst({
-            where: { status: 'active' },
-            orderBy: { createdAt: 'desc' },
-            select: { id: true },
-          })
-        )?.id ||
-        (
-          await this.prisma.season.findFirst({
-            orderBy: { createdAt: 'desc' },
-            select: { id: true },
-          })
-        )?.id;
-      if (!targetSeasonId) {
-        throw new BadRequestException('未找到可用的赛季信息以执行赛季备份');
+      if (!seasonId || typeof seasonId !== 'string' || !seasonId.trim()) {
+        throw new BadRequestException('分赛季备份必须提供非空 seasonId');
       }
+      const targetSeasonId = seasonId.trim();
       const res = await this.orchestrateModuleBackup({
         username,
         module: 'season',
@@ -314,11 +300,14 @@ export class BackupService implements OnModuleInit {
     let normalizedOptions = options;
     if (normalizedOptions?.scope === 'season') {
       const seasonId = normalizedOptions.seasonId || normalizedOptions.selector?.seasonId;
+      if (!seasonId || typeof seasonId !== 'string' || !seasonId.trim()) {
+        throw new BadRequestException('分赛季备份必须提供非空 seasonId');
+      }
       normalizedOptions = {
         ...normalizedOptions,
         scope: 'module',
         module: 'season',
-        selector: { ...(normalizedOptions.selector || {}), ...(seasonId ? { seasonId } : {}) },
+        selector: { ...(normalizedOptions.selector || {}), seasonId: seasonId.trim() },
       };
     }
 

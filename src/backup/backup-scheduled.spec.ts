@@ -647,5 +647,14 @@ describe('BackupService 月度模块化备份与批次状态机测试', () => {
       );
       expect(prisma.backupModuleCheckpoint.upsert).toHaveBeenCalled();
     });
+
+    it('定时备份显式传入 scope=season 但缺少 seasonId 时必须抛出 BadRequestException (400)', async () => {
+      const { service } = createPrCService();
+      await expect(
+        service.createScheduledBackup('cron', {
+          scope: 'season',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

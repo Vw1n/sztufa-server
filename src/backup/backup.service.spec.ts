@@ -373,6 +373,14 @@ describe('BackupService (V3 & Security Spec)', () => {
       expect(result.module).toBe('season');
     });
 
+    it('显式 scope=season 缺少 seasonId 时必须抛出 BadRequestException (400)', async () => {
+      await expect(
+        service.createBackup('admin', {
+          scope: 'season',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('单次 Retention 请求中同一个 key 的完整校验 verifyBackupIntegrity 最多被调用 1 次', async () => {
       const mockList = [
         { key: 'private-backups/database/full/backup_newest.json.gz', lastModified: new Date() },

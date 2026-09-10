@@ -105,6 +105,11 @@ export class BackupExportService {
           ? getSeasonTableWhereClause(tableName as MandatoryBackupTableName, options.seasonId)
           : {});
 
+      const isSeasonPlayerExport =
+        (scope === 'season' || (scope === 'module' && options?.module === 'season')) &&
+        tableName === 'Player';
+      const targetSeasonId = options?.seasonId || options?.selector?.seasonId;
+
       return (async function* () {
         let lastId: string | null = null;
         let hasMore = true;
@@ -120,7 +125,7 @@ export class BackupExportService {
             take: pageSize,
           };
 
-          if (scope === 'season' && tableName === 'Player') {
+          if (isSeasonPlayerExport) {
             findOptions.include = {
               suspendedAtMatch: { select: { seasonId: true } },
             };
@@ -139,11 +144,11 @@ export class BackupExportService {
           }
 
           const processedPage = page.map((row: any) => {
-            if (scope === 'season' && tableName === 'Player') {
+            if (isSeasonPlayerExport) {
               const { suspendedAtMatch, ...exportRecord } = row;
               if (
                 exportRecord.suspendedAtMatchId &&
-                suspendedAtMatch?.seasonId !== options?.seasonId
+                suspendedAtMatch?.seasonId !== targetSeasonId
               ) {
                 exportRecord.suspendedAtMatchId = null;
               }

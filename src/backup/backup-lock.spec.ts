@@ -4,6 +4,7 @@ import { BackupService, LEASE_TTL_MS } from './backup.service';
 describe('BackupLock Gate Arbitration & TOCTOU Prevention Spec', () => {
   let service: BackupService;
   let prismaMock: any;
+  let exportService: any;
   let lockStorage: Map<
     string,
     {
@@ -104,16 +105,48 @@ describe('BackupLock Gate Arbitration & TOCTOU Prevention Spec', () => {
           return { count: 1 };
         }),
       },
+      backupRun: {
+        create: jest
+          .fn()
+          .mockImplementation((args: any) => Promise.resolve({ id: 'run-1', ...args.data })),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      backupModuleCheckpoint: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      season: {
+        findFirst: jest.fn().mockResolvedValue({ id: 's1' }),
+      },
+    };
+
+    exportService = {
+      createBackup: jest.fn().mockResolvedValue({
+        key: 'private-backups/database/modules/season/season_123.json.gz',
+        formatVersion: '4.0',
+        scope: 'module',
+        module: 'season',
+        size: 1024,
+        checksum: 'sha256-abc',
+      }),
+    };
+    const scopeService: any = {
+      validateSeason: jest.fn().mockResolvedValue({ id: 's1', name: 'Season 1' }),
+    };
+    const objectStore: any = {
+      deleteObject: jest.fn().mockResolvedValue(true),
     };
 
     service = new BackupService(
+      exportService,
       {} as any,
       {} as any,
       {} as any,
+      objectStore,
       {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
+      scopeService,
       {} as any,
       prismaMock,
       {} as any,
@@ -293,6 +326,49 @@ describe('BackupLock Gate Arbitration & TOCTOU Prevention Spec', () => {
       expect(abortController.signal.aborted).toBe(true);
 
       clearInterval(timer);
+    });
+  });
+
+  describe('5. Legacy scope=season 规范化为 module=season 并参与统一锁互斥', () => {
+    it('全量锁处于活跃状态时，调用 legacy scope=season 备份必须被 Gate 仲裁拦截 (active_full_lock)', async () => {
+      lockStorage.set('lock:backup:global:full', {
+        id: 'full-id',
+        lockKey: 'lock:backup:global:full',
+        leaseToken: 'full-lease-token',
+        leaseExpiresAt: new Date(Date.now() + 60000),
+        holderInstance: 'inst-full',
+      });
+
+      await expect(
+        service.createBackup('admin', { scope: 'season', seasonId: 's1' }),
+      ).rejects.toThrow(/global_full_in_flight/);
+    });
+
+    it('当持有 legacy scope=season 模块锁时，全量备份必须被拦截 (active_module_lock)', async () => {
+      lockStorage.set('lock:backup:season:s1', {
+        id: 'season-id',
+        lockKey: 'lock:backup:season:s1',
+        leaseToken: 'season-lease-token',
+        leaseExpiresAt: new Date(Date.now() + 60000),
+        holderInstance: 'inst-season',
+      });
+
+      await expect(service.createBackup('admin', { scope: 'full' })).rejects.toThrow(
+        /active_module_in_flight/,
+      );
+    });
+
+    it('调用 legacy scope=season 备份正常执行时，规范化为 module=season 并申请 lock:backup:season:s1', async () => {
+      const res = await service.createBackup('admin', { scope: 'season', seasonId: 's1' });
+      expect(res.key).toBe('private-backups/database/modules/season/season_123.json.gz');
+      expect(exportService.createBackup).toHaveBeenCalledWith(
+        'admin',
+        expect.objectContaining({
+          scope: 'module',
+          module: 'season',
+          selector: { seasonId: 's1' },
+        }),
+      );
     });
   });
 });

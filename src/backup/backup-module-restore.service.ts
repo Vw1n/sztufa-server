@@ -19,7 +19,7 @@ import { BACKUP_MODULE_REGISTRY, BACKUP_MODULES, BackupModule } from './backup-m
 import { getSeasonModuleWhereClause } from './backup-plan.service';
 import { PersistentBackupTableName, TABLE_METADATA_MAP } from './backup-table-registry';
 import { BackupService, LEASE_TTL_MS } from './backup.service';
-import { HeldLease, BackupMetadata } from './backup.types';
+import { HeldLease } from './backup.types';
 import { getCanonicalLockKey, getCanonicalSelectorKey } from './backup-fingerprint.service';
 
 const SEASON_INSERT_ORDER: PersistentBackupTableName[] = [
@@ -95,6 +95,10 @@ export class BackupModuleRestoreService {
   }
 
   async execute(username: string, key: string, restoreToken: string, confirmText?: string) {
+    if (!this.backupService) {
+      throw new ServiceUnavailableException('备份排他锁编排服务未就绪，禁止执行模块恢复');
+    }
+
     if (confirmText !== 'CONFIRM_MODULE_RESTORE') {
       throw new BadRequestException('模块恢复确认文本必须为 "CONFIRM_MODULE_RESTORE"');
     }
@@ -118,46 +122,33 @@ export class BackupModuleRestoreService {
         throw new ServiceUnavailableException(`${module} 模块恢复功能未启用`);
       }
 
-      if (this.backupService) {
-        const lockKey = getCanonicalLockKey(module, manifest.selector);
-        const lockRes = await this.backupService.acquireBackupLock(
-          'module',
-          lockKey,
-          this.instanceId,
-        );
-        if (!lockRes.acquired) {
-          throw new ConflictException(`目标资源已被占用 (${(lockRes as any).reason})`);
-        }
-        heldLease = { lockKey, leaseToken: lockRes.leaseToken, owner: 'restore' };
-        heartbeatTimer = this.backupService.startHeartbeat(heldLease, restoreAbort);
+      const lockKey = getCanonicalLockKey(module, manifest.selector);
+      const lockRes = await this.backupService.acquireBackupLock(
+        'module',
+        lockKey,
+        this.instanceId,
+      );
+      if (!lockRes.acquired) {
+        throw new ConflictException(`目标资源已被占用 (${(lockRes as any).reason})`);
       }
+      heldLease = { lockKey, leaseToken: lockRes.leaseToken, owner: 'restore' };
+      heartbeatTimer = this.backupService.startHeartbeat(heldLease, restoreAbort);
 
-      let snapshot: BackupMetadata;
-      if (this.backupService && heldLease) {
-        const snapRes = await this.backupService.orchestrateModuleBackup({
-          username,
-          module,
-          selector: manifest.selector,
-          purpose: 'pre-restore',
-          protected: true,
-          signal: restoreAbort.signal,
-          heldLease,
-        });
-        if (snapRes.status !== 'created') {
-          throw new ServiceUnavailableException(
-            `恢复前快照创建失败: ${(snapRes as any).error || (snapRes as any).reason}`,
-          );
-        }
-        snapshot = snapRes.backup;
-      } else {
-        snapshot = await this.exportService.createBackup(username, {
-          scope: 'module',
-          module,
-          selector: manifest.selector,
-          purpose: 'pre-restore',
-          protected: true,
-        });
+      const snapRes = await this.backupService.orchestrateModuleBackup({
+        username,
+        module,
+        selector: manifest.selector,
+        purpose: 'pre-restore',
+        protected: true,
+        signal: restoreAbort.signal,
+        heldLease,
+      });
+      if (snapRes.status !== 'created') {
+        throw new ServiceUnavailableException(
+          `恢复前快照创建失败: ${(snapRes as any).error || (snapRes as any).reason}`,
+        );
       }
+      const snapshot = snapRes.backup;
 
       await this.prisma.$transaction(
         async (tx) => {
@@ -179,26 +170,27 @@ export class BackupModuleRestoreService {
           }
 
           // 恢复提交前终态 Fencing 校验与当前模块 Checkpoint 物理删除
-          if (this.backupService && heldLease) {
-            const lockCas = await tx.backupLock.updateMany({
-              where: {
-                lockKey: heldLease.lockKey,
-                leaseToken: heldLease.leaseToken,
-                leaseExpiresAt: { gt: new Date() },
-              },
-              data: {
-                leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS),
-              },
-            });
-            if (lockCas.count === 0) {
-              throw new Error('恢复期间租约已失效或被接管 (fencing failed)，事务回滚');
-            }
-
-            const selectorKey = getCanonicalSelectorKey(module, manifest.selector);
-            await tx.backupModuleCheckpoint.deleteMany({
-              where: { module, selectorKey },
-            });
+          if (!heldLease) {
+            throw new Error('恢复期间外部租约丢失，禁止提交事务');
           }
+          const lockCas = await tx.backupLock.updateMany({
+            where: {
+              lockKey: heldLease.lockKey,
+              leaseToken: heldLease.leaseToken,
+              leaseExpiresAt: { gt: new Date() },
+            },
+            data: {
+              leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS),
+            },
+          });
+          if (lockCas.count === 0) {
+            throw new Error('恢复期间租约已失效或被接管 (fencing failed)，事务回滚');
+          }
+
+          const selectorKey = getCanonicalSelectorKey(module, manifest.selector);
+          await tx.backupModuleCheckpoint.deleteMany({
+            where: { module, selectorKey },
+          });
         },
         {
           maxWait: 20000,

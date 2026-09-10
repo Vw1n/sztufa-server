@@ -161,6 +161,38 @@ describe('BackupService (V3 & Security Spec)', () => {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
+    backupLock: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockImplementation((args: any) => {
+        if (typeof args?.where?.leaseToken === 'string') {
+          return Promise.resolve({
+            id: 'lock-1',
+            lockKey: args.where.lockKey,
+            leaseToken: args.where.leaseToken,
+            leaseExpiresAt: new Date(Date.now() + 60000),
+          });
+        }
+        return Promise.resolve(null);
+      }),
+      count: jest.fn().mockResolvedValue(0),
+      upsert: jest.fn().mockResolvedValue({}),
+      update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    backupRun: {
+      create: jest
+        .fn()
+        .mockImplementation((args: any) => Promise.resolve({ id: 'run-1', ...args.data })),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
+    backupModuleCheckpoint: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue({}),
+      update: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
   };
 
   const mockAuditLogService = {
@@ -305,7 +337,8 @@ describe('BackupService (V3 & Security Spec)', () => {
         purpose: 'manual',
       });
 
-      expect(result.scope).toBe('season');
+      expect(result.scope).toBe('module');
+      expect(result.module).toBe('season');
       expect(mockPrismaService.player.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           include: { suspendedAtMatch: { select: { seasonId: true } } },
@@ -336,7 +369,8 @@ describe('BackupService (V3 & Security Spec)', () => {
         purpose: 'manual',
       });
 
-      expect(result.scope).toBe('season');
+      expect(result.scope).toBe('module');
+      expect(result.module).toBe('season');
     });
 
     it('单次 Retention 请求中同一个 key 的完整校验 verifyBackupIntegrity 最多被调用 1 次', async () => {
@@ -691,6 +725,8 @@ describe('BackupService (V3 & Security Spec)', () => {
 
       jest.spyOn((service as any).exportService, 'createBackup').mockResolvedValue({
         key: 'pre-snap.json.gz',
+        size: 1024,
+        checksum: 'sha-mock',
       } as any);
 
       mockPrismaService.$executeRawUnsafe.mockRejectedValueOnce({
@@ -712,10 +748,13 @@ describe('BackupService (V3 & Security Spec)', () => {
     it('当快照前为 0 但在锁内权威复核发现并发新增报名时，必须在修改任何数据前拦截', async () => {
       const mockParseResult = buildMockParseResult();
       jest.spyOn(verificationService, 'parseAndValidate').mockResolvedValue(mockParseResult as any);
+      mockPrismaService.teamRegistration.count.mockReset();
       mockPrismaService.teamRegistration.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
 
       jest.spyOn((service as any).exportService, 'createBackup').mockResolvedValue({
         key: 'pre-snap.json.gz',
+        size: 1024,
+        checksum: 'sha-mock',
       } as any);
 
       mockPrismaService.$executeRawUnsafe.mockResolvedValue(1);
@@ -738,10 +777,13 @@ describe('BackupService (V3 & Security Spec)', () => {
     it('当无报名数据时，旧版 V3 恢复顺利完成，且绝不向新增 4 表发起 deleteMany()', async () => {
       const mockParseResult = buildMockParseResult();
       jest.spyOn(verificationService, 'parseAndValidate').mockResolvedValue(mockParseResult as any);
+      mockPrismaService.teamRegistration.count.mockReset();
       mockPrismaService.teamRegistration.count.mockResolvedValue(0);
 
       jest.spyOn((service as any).exportService, 'createBackup').mockResolvedValue({
         key: 'pre-snap.json.gz',
+        size: 1024,
+        checksum: 'sha-mock',
       } as any);
 
       mockPrismaService.teamRegistration.deleteMany.mockClear();

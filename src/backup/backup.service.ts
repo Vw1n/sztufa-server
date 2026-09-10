@@ -256,7 +256,42 @@ export class BackupService implements OnModuleInit {
     }
 
     if (scope === 'season') {
-      return this.exportService.createBackup(username, options);
+      const seasonId = options?.seasonId || options?.selector?.seasonId;
+      const targetSeasonId =
+        seasonId ||
+        (
+          await this.prisma.season.findFirst({
+            where: { status: 'active' },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true },
+          })
+        )?.id ||
+        (
+          await this.prisma.season.findFirst({
+            orderBy: { createdAt: 'desc' },
+            select: { id: true },
+          })
+        )?.id;
+      if (!targetSeasonId) {
+        throw new BadRequestException('未找到可用的赛季信息以执行赛季备份');
+      }
+      const res = await this.orchestrateModuleBackup({
+        username,
+        module: 'season',
+        selector: { ...(options?.selector || {}), seasonId: targetSeasonId },
+        purpose: options?.purpose,
+        protected: options?.protected,
+        signal: options?.signal,
+        heldLease: options?.heldLease,
+      });
+      if (res.status === 'created') {
+        return res.backup;
+      }
+      if (res.status === 'skipped') {
+        if (res.existingBackup) return res.existingBackup;
+        throw new ConflictException(`赛季备份已跳过: ${res.reason}`);
+      }
+      throw new Error(res.error || '赛季备份导出失败');
     }
 
     return this.orchestrateFullBackup({
@@ -276,10 +311,21 @@ export class BackupService implements OnModuleInit {
       throw new BadRequestException('定时备份禁止全量备份 (scope=full)');
     }
 
+    let normalizedOptions = options;
+    if (normalizedOptions?.scope === 'season') {
+      const seasonId = normalizedOptions.seasonId || normalizedOptions.selector?.seasonId;
+      normalizedOptions = {
+        ...normalizedOptions,
+        scope: 'module',
+        module: 'season',
+        selector: { ...(normalizedOptions.selector || {}), ...(seasonId ? { seasonId } : {}) },
+      };
+    }
+
     const scheduledOptions: CreateBackupOptions =
-      options?.scope === 'module' && options.module
-        ? options
-        : await this.resolveScheduledBackupOptions(options?.signal);
+      normalizedOptions?.scope === 'module' && normalizedOptions.module
+        ? normalizedOptions
+        : await this.resolveScheduledBackupOptions(normalizedOptions?.signal);
 
     const targetModule = scheduledOptions.module!;
     const selector = scheduledOptions.selector || {};

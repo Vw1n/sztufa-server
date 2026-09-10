@@ -609,5 +609,43 @@ describe('BackupService 月度模块化备份与批次状态机测试', () => {
       // Checkpoint 绝不能推进
       expect(prisma.backupModuleCheckpoint.upsert).not.toHaveBeenCalled();
     });
+
+    it('定时备份传入 legacy scope=season 时自动规范化为 module=season 并正常推进', async () => {
+      const { service, exportService, prisma, fingerprintService } = createPrCService();
+      const mockFp = {
+        module: 'season',
+        selectorKey: 'season:s1',
+        version: 1,
+        fingerprint: 'hash-season-1',
+        tableFingerprints: [],
+        durationMs: 10,
+      };
+      fingerprintService.calculateModuleFingerprint.mockResolvedValue(mockFp);
+
+      exportService.createBackup.mockResolvedValue({
+        key: 'private-backups/database/modules/season/season-s1.json.gz',
+        filename: 'season-s1.json.gz',
+        size: 2048,
+        checksum: 'mock-sha256-season',
+      });
+
+      const res = await service.createScheduledBackup('cron', {
+        scope: 'season',
+        seasonId: 's1',
+      });
+
+      expect(res.status).toBe('created');
+      expect(res.module).toBe('season');
+      expect(res.selector).toEqual({ seasonId: 's1' });
+      expect(exportService.createBackup).toHaveBeenCalledWith(
+        'cron',
+        expect.objectContaining({
+          scope: 'module',
+          module: 'season',
+          selector: { seasonId: 's1' },
+        }),
+      );
+      expect(prisma.backupModuleCheckpoint.upsert).toHaveBeenCalled();
+    });
   });
 });

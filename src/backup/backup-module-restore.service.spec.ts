@@ -201,4 +201,17 @@ describe('BackupModuleRestoreService', () => {
       'lease_token_123',
     );
   });
+
+  it('当 backupService 缺失时，execute 必须直接抛出 ServiceUnavailableException (fail-closed)', async () => {
+    const serviceWithoutBackupService = new BackupModuleRestoreService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    await expect(
+      serviceWithoutBackupService.execute('admin', 'key', 'token', 'CONFIRM_MODULE_RESTORE'),
+    ).rejects.toThrow('备份排他锁编排服务未就绪，禁止执行模块恢复');
+  });
 });

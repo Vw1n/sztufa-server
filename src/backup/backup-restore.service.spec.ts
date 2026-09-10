@@ -184,4 +184,17 @@ describe('BackupRestoreService', () => {
       'lease_token_full_123',
     );
   });
+
+  it('当 backupService 缺失时，restoreBackup 必须直接抛出 ServiceUnavailableException (fail-closed)', async () => {
+    const serviceWithoutBackupService = new BackupRestoreService(
+      {} as any,
+      { validateBackupKey: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    await expect(
+      serviceWithoutBackupService.restoreBackup('admin', 'key', 'CONFIRM_RESTORE'),
+    ).rejects.toThrow('备份排他锁编排服务未就绪，禁止执行恢复');
+  });
 });

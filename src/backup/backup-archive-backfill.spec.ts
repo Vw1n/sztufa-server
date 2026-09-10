@@ -240,6 +240,128 @@ describe('BackupService - PR-B Archive Backfill & Protection', () => {
       expect(result.status).toBe('failed');
       expect(result.error).toContain('孤儿认领前租约已失效或被接管');
     });
+    it('evaluates multiple orphan candidates from newest to oldest and claims the valid one even if the first is corrupt', async () => {
+      const now = Date.now();
+      const corruptKey = 'backups/v4/module/season/backup-season-s1-newest-corrupt.sql.gz';
+      const validKey = 'backups/v4/module/season/backup-season-s1-older-valid.sql.gz';
+
+      prisma.backupLock.create.mockResolvedValue({
+        lockKey: 'season:s1:archive',
+        leaseToken: 'lease-s1',
+      });
+      prisma.backupRun.findUnique.mockResolvedValue(null);
+      prisma.backupRun.upsert.mockResolvedValue({});
+      prisma.backupRun.updateMany.mockResolvedValue({ count: 1 });
+
+      objectStore.listBackups.mockResolvedValue([
+        {
+          key: corruptKey,
+          filename: 'backup-season-s1-newest-corrupt.sql.gz',
+          scope: 'module',
+          module: 'season',
+          seasonId: 's1',
+          purpose: 'archive',
+          protected: true,
+          size: 4000,
+          lastModified: new Date(now), // Newer
+        } as any,
+        {
+          key: validKey,
+          filename: 'backup-season-s1-older-valid.sql.gz',
+          scope: 'module',
+          module: 'season',
+          seasonId: 's1',
+          purpose: 'archive',
+          protected: true,
+          size: 5000,
+          lastModified: new Date(now - 3600 * 1000), // Older
+        } as any,
+      ]);
+
+      objectStore.headObject.mockImplementation((k: string) =>
+        Promise.resolve(k === corruptKey ? 4000 : 5000),
+      );
+
+      // corruptKey fails integrity, validKey succeeds
+      verificationService.inspectAndVerifyBackup.mockImplementation((k: string) => {
+        if (k === corruptKey) {
+          return Promise.resolve({ valid: false, error: 'CRC校验和不匹配' });
+        }
+        return Promise.resolve({
+          valid: true,
+          checksum: 'sha256-valid-orphan',
+          fileSha256: 'sha256-valid-orphan',
+          compressedSize: 5000,
+          decompressedSize: 20000,
+        });
+      });
+
+      // 1. Verify scanArchiveCoverage behavior
+      prisma.season.findMany.mockResolvedValue([
+        { id: 's1', name: '2024秋季', archivedAt: new Date(), status: 'archived' },
+      ]);
+      prisma.backupRun.findMany.mockResolvedValue([]);
+
+      const coverage = await service.scanArchiveCoverage();
+      expect(coverage.protected).toBe(1);
+      expect(coverage.corrupt).toBe(0);
+      expect(coverage.seasons[0].hasProtectedBackup).toBe(true);
+      expect(coverage.seasons[0].backupKey).toBe(validKey);
+
+      // 2. Verify executeArchiveSeasonBackupWithLock claiming behavior
+      const result = await service.executeArchiveSeasonBackupWithLock('admin', 's1', 'backfill');
+      expect(result.status).toBe('skipped');
+      expect(result.reason).toBe('already_protected');
+      expect(result.backupKey).toBe(validKey);
+    });
+
+    it('marks season as corrupt with detailed failure reasons when all orphan candidates are invalid', async () => {
+      const now = Date.now();
+      const corruptKey1 = 'backups/v4/module/season/backup-season-s1-c1.sql.gz';
+      const corruptKey2 = 'backups/v4/module/season/backup-season-s1-c2.sql.gz';
+
+      objectStore.listBackups.mockResolvedValue([
+        {
+          key: corruptKey1,
+          filename: 'c1.sql.gz',
+          scope: 'module',
+          module: 'season',
+          seasonId: 's1',
+          purpose: 'archive',
+          protected: true,
+          size: 1000,
+          lastModified: new Date(now),
+        } as any,
+        {
+          key: corruptKey2,
+          filename: 'c2.sql.gz',
+          scope: 'module',
+          module: 'season',
+          seasonId: 's1',
+          purpose: 'archive',
+          protected: true,
+          size: 2000,
+          lastModified: new Date(now - 1000),
+        } as any,
+      ]);
+
+      objectStore.headObject.mockResolvedValue(1000);
+      verificationService.inspectAndVerifyBackup.mockResolvedValue({
+        valid: false,
+        error: '流解析损坏',
+      });
+
+      prisma.season.findMany.mockResolvedValue([
+        { id: 's1', name: '2024秋季', archivedAt: new Date(), status: 'archived' },
+      ]);
+      prisma.backupRun.findMany.mockResolvedValue([]);
+
+      const coverage = await service.scanArchiveCoverage();
+      expect(coverage.protected).toBe(0);
+      expect(coverage.corrupt).toBe(1);
+      expect(coverage.seasons[0].isCorrupt).toBe(true);
+      expect(coverage.seasons[0].lastError).toContain('2 个候选保护备份均校验失败');
+    });
   });
 
   describe('Fencing Guard & Lost Lease Protection', () => {
@@ -448,6 +570,33 @@ describe('BackupService - PR-B Archive Backfill & Protection', () => {
       expect(result.skipped).toBe(1);
       expect(result.items[0].status).toBe('skipped');
       expect(result.items[0].reason).toBe('backing_off');
+    });
+
+    it('rejects single-season retryArchiveSeasonBackfill when season is in backoff cooldown', async () => {
+      prisma.season.findUnique.mockResolvedValue({
+        id: 's1',
+        name: '2024秋季',
+        status: 'archived',
+      });
+      prisma.backupRun.findFirst.mockResolvedValue({
+        status: 'failed',
+        nextAttemptAt: new Date(Date.now() + 300 * 1000), // 300 seconds in future
+      } as any);
+
+      await expect(
+        service.retryArchiveSeasonBackfill('s1', 'admin'),
+      ).rejects.toThrow('当前赛季归档备份处于退避重试冷却期');
+    });
+
+    it('skips execution in executeArchiveSeasonBackupWithLock when in backoff window', async () => {
+      prisma.backupRun.findFirst.mockResolvedValue({
+        status: 'failed',
+        nextAttemptAt: new Date(Date.now() + 60 * 1000),
+      } as any);
+
+      const result = await service.executeArchiveSeasonBackupWithLock('admin', 's1', 'backfill');
+      expect(result.status).toBe('skipped');
+      expect(result.reason).toBe('backing_off');
     });
   });
 

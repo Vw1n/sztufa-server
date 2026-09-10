@@ -848,16 +848,27 @@ export class BackupService {
           lastError = '受保护备份记录对应的云端对象不存在或无法读取';
         }
       } else if (candidateBackups.length > 0) {
-        const candidate = candidateBackups[0];
-        try {
-          const actualSize = await this.objectStore.headObject(candidate.key);
-          if (actualSize <= 0) {
-            isCorrupt = true;
-            lastError = '云端孤儿保护对象大小为 0 字节';
-          } else {
+        // 同一赛季可能存在多个受保护归档对象，按时间由新到旧排序逐个校验
+        const sortedCandidates = [...candidateBackups].sort((a, b) => {
+          const tA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+          const tB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+          return tB - tA;
+        });
+
+        const failureDetails: string[] = [];
+
+        for (const candidate of sortedCandidates) {
+          try {
+            const actualSize = await this.objectStore.headObject(candidate.key);
+            if (actualSize <= 0) {
+              failureDetails.push(`${candidate.filename}: 对象大小为 0 字节`);
+              continue;
+            }
             const inspectRes = await this.verificationService.inspectAndVerifyBackup(candidate.key);
             if (inspectRes.valid) {
               isProtected = true;
+              isCorrupt = false;
+              lastError = null;
               validKey = candidate.key;
               validSize = actualSize;
               verifiedAt = new Date();
@@ -886,14 +897,19 @@ export class BackupService {
                   finishedAt: new Date(),
                 },
               });
+              break; // 命中首个有效对象即停止后续重试
             } else {
-              isCorrupt = true;
-              lastError = inspectRes.error || '云端孤儿保护备份流/校验和校验失败';
+              failureDetails.push(`${candidate.filename}: ${inspectRes.error || '完整性流式校验失败'}`);
             }
+          } catch (err: any) {
+            failureDetails.push(`${candidate.filename}: ${err.message || '对象不可读取'}`);
           }
-        } catch (err: any) {
+        }
+
+        // 若所有候选对象均校验失败，才标记为损坏
+        if (!isProtected && failureDetails.length > 0) {
           isCorrupt = true;
-          lastError = `校验云端孤儿保护备份失败: ${err.message}`;
+          lastError = `云端 ${failureDetails.length} 个候选保护备份均校验失败: ${failureDetails.join('; ')}`;
         }
       }
 
@@ -1101,6 +1117,21 @@ export class BackupService {
       throw new BadRequestException('仅状态为已归档 (archived) 的赛季允许进行归档重试');
     }
 
+    const latestRun = await this.prisma.backupRun.findFirst({
+      where: { selectorKey: `season:${seasonId}`, purpose: 'archive' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (
+      latestRun?.status === 'failed' &&
+      latestRun.nextAttemptAt &&
+      latestRun.nextAttemptAt > new Date()
+    ) {
+      const waitSeconds = Math.ceil((latestRun.nextAttemptAt.getTime() - Date.now()) / 1000);
+      throw new BadRequestException(
+        `当前赛季归档备份处于退避重试冷却期，请在 ${waitSeconds} 秒后再试 (冷却截止: ${latestRun.nextAttemptAt.toISOString()})`,
+      );
+    }
+
     return this.executeArchiveSeasonBackupWithLock(username, seasonId, 'retry');
   }
 
@@ -1137,6 +1168,23 @@ export class BackupService {
     backupKey?: string;
     error?: string;
   }> {
+    // 退避期安全检查：若上一次失败且仍在 nextAttemptAt 冷却期内，跳过本次执行
+    const latestRunCheck = await this.prisma.backupRun.findFirst({
+      where: { selectorKey: `season:${seasonId}`, purpose: 'archive' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (
+      latestRunCheck?.status === 'failed' &&
+      latestRunCheck.nextAttemptAt &&
+      latestRunCheck.nextAttemptAt > new Date()
+    ) {
+      return {
+        seasonId,
+        status: 'skipped',
+        reason: 'backing_off',
+      };
+    }
+
     const lockKey = `season:${seasonId}:archive`;
     const instanceId = randomUUID();
     const lockRes = await this.acquireLock(lockKey, instanceId);
@@ -1219,17 +1267,23 @@ export class BackupService {
 
     try {
       const allBackups = await this.objectStore.listBackups();
-      const existing = allBackups.find(
-        (b) =>
-          b.scope === 'module' &&
-          b.module === 'season' &&
-          b.seasonId === seasonId &&
-          b.purpose === 'archive' &&
-          b.protected &&
-          b.size > 0,
-      );
+      const existingCandidates = allBackups
+        .filter(
+          (b) =>
+            b.scope === 'module' &&
+            b.module === 'season' &&
+            b.seasonId === seasonId &&
+            b.purpose === 'archive' &&
+            b.protected &&
+            b.size > 0,
+        )
+        .sort((a, b) => {
+          const tA = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+          const tB = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+          return tB - tA;
+        });
 
-      if (existing) {
+      for (const existing of existingCandidates) {
         const isHeadOk = (await this.objectStore.headObject(existing.key).catch(() => 0)) > 0;
         if (isHeadOk) {
           const inspectRes = await this.verificationService.inspectAndVerifyBackup(existing.key);

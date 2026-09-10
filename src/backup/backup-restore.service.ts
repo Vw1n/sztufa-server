@@ -147,6 +147,10 @@ export class BackupRestoreService {
               throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
             }
 
+            // 当前事务中的恢复写入必须保留备份内的历史 updatedAt；SET LOCAL
+            // 会在事务结束时自动失效，不影响普通业务 UPDATE 的时间戳触发器。
+            await tx.$executeRawUnsafe("SET LOCAL sztufa.preserve_updated_at = 'on'");
+
             if (isLegacyFormat) {
               try {
                 await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '5s'");

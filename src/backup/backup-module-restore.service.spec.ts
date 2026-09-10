@@ -33,6 +33,7 @@ describe('BackupModuleRestoreService', () => {
 
     const tx: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
       backupLock: {
         updateMany: jest.fn().mockResolvedValue({ count: options?.fencingCount ?? 1 }),
       },
@@ -133,6 +134,10 @@ describe('BackupModuleRestoreService', () => {
       'CONFIRM_MODULE_RESTORE',
     );
     expect(result).toBe('content 模块恢复成功');
+
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+      "SET LOCAL sztufa.preserve_updated_at = 'on'",
+    );
 
     // 1. 验证获取模块锁
     expect(backupService.acquireBackupLock).toHaveBeenCalledWith(

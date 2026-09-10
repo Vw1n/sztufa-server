@@ -44,7 +44,8 @@ RETURNS TRIGGER AS $$
 BEGIN
   -- 普通 UPDATE 未显式修改 updatedAt 时自动刷新；备份恢复显式写回
   -- 历史 updatedAt 时保留备份值，保证恢复后的数据深度一致。
-  IF NEW."updatedAt" IS NOT DISTINCT FROM OLD."updatedAt" THEN
+  IF current_setting('sztufa.preserve_updated_at', true) IS DISTINCT FROM 'on'
+     AND NEW."updatedAt" IS NOT DISTINCT FROM OLD."updatedAt" THEN
     NEW."updatedAt" = clock_timestamp();
   END IF;
   RETURN NEW;

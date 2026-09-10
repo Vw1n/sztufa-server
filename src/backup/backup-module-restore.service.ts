@@ -157,6 +157,9 @@ export class BackupModuleRestoreService {
           >`SELECT pg_try_advisory_xact_lock(88998899) AS locked`;
           if (!locked) throw new ConflictException('已有其他进程或节点正在执行数据库恢复操作');
 
+          // 当前事务中的恢复写入必须保留备份内的历史 updatedAt。
+          await tx.$executeRawUnsafe("SET LOCAL sztufa.preserve_updated_at = 'on'");
+
           if (module === 'season') {
             await this.restoreSeason(tx, parsed, manifest.selector.seasonId);
           } else {

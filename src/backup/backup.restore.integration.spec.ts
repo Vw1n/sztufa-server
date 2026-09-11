@@ -838,7 +838,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
           await originalMergeModule(tx, parsed, mod);
           // 关键：在恢复事务进行中，篡改底层数据库 backupLock 记录的 leaseToken，使后续 CAS Fencing 失败！
           await testPrisma.backupLock.updateMany({
-            where: { lockKey: 'lock:module:content:default' },
+            where: { lockKey: 'lock:backup:content' },
             data: { leaseToken: 'stolen_by_another_node_token' },
           });
         });

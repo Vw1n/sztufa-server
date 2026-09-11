@@ -832,7 +832,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       const originalMergeModule = (moduleRestoreService as any).mergeModule.bind(
         moduleRestoreService,
       );
-      jest
+      const mergeModuleSpy = jest
         .spyOn(moduleRestoreService as any, 'mergeModule')
         .mockImplementation(async (tx: any, parsed: any, mod: any) => {
           await originalMergeModule(tx, parsed, mod);
@@ -858,7 +858,10 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
         else process.env.BACKUP_RESTORE_CONTENT_ENABLED = originalContentFlag;
         if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
         else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
-        jest.restoreAllMocks();
+        mergeModuleSpy.mockRestore();
+        await testPrisma.backupLock.deleteMany({
+          where: { lockKey: 'lock:backup:content' },
+        });
       }
 
       // 验证 1：事务完全回滚，新闻标题依然是篡改后的状态，未被恢复覆写

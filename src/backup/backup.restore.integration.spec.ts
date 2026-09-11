@@ -490,6 +490,396 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       expect(await testPrisma.season.findUnique({ where: { id: 's1' } })).toEqual(seasonBefore);
       expect(await testPrisma.user.findUnique({ where: { id: 'u1' } })).toEqual(adminBefore);
     });
+
+    it('season 模块恢复：应只替换目标赛季数据，不影响其他赛季与共享球队/球员', async () => {
+      await seedAll18Tables(testPrisma);
+
+      // 插入第二赛季作为隔离对照
+      const season2 = await testPrisma.season.create({
+        data: {
+          id: 's2_isolated',
+          name: '2027甲级联赛',
+          status: 'active',
+          type: 'LEAGUE',
+        },
+      });
+      await testPrisma.match.create({
+        data: {
+          id: 'm2_isolated',
+          seasonId: season2.id,
+          homeTeamId: 't1',
+          awayTeamId: 't1',
+          matchDate: new Date('2027-05-01T10:00:00Z'),
+          status: 'scheduled',
+          stage: 'LEAGUE',
+        },
+      });
+
+      let seasonBackupBuffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of this.params.Body) chunks.push(Buffer.from(chunk));
+        if (!seasonBackupBuffer.length) seasonBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-season-location' } as any;
+      });
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
+        if (command.constructor.name === 'GetObjectCommand') {
+          return { Body: Readable.from([seasonBackupBuffer]) } as any;
+        }
+        return {} as any;
+      });
+
+      const backup = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'season',
+        selector: { seasonId: 's1' },
+      });
+
+      // 篡改 s1 比赛与进球
+      await testPrisma.goal.deleteMany({ where: { id: 'g1' } });
+      await testPrisma.match.update({ where: { id: 'm1' }, data: { homeScore: 99 } });
+
+      const originalSeasonFlag = process.env.BACKUP_RESTORE_SEASON_ENABLED;
+      const originalTokenSecret = process.env.BACKUP_RESTORE_TOKEN_SECRET;
+      process.env.BACKUP_RESTORE_SEASON_ENABLED = 'true';
+      process.env.BACKUP_RESTORE_TOKEN_SECRET = 'integration-module-restore-secret';
+      try {
+        const preview = await service.previewRestore('admin', backup.key);
+        expect(preview.canExecute).toBe(true);
+        expect(preview.module).toBe('season');
+
+        const result = await service.restoreModuleBackup(
+          'admin',
+          backup.key,
+          preview.restoreToken,
+          'CONFIRM_MODULE_RESTORE',
+        );
+        expect(result).toContain('season');
+      } finally {
+        if (originalSeasonFlag === undefined) delete process.env.BACKUP_RESTORE_SEASON_ENABLED;
+        else process.env.BACKUP_RESTORE_SEASON_ENABLED = originalSeasonFlag;
+        if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
+        else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
+      }
+
+      // 验证 s1 恢复
+      const restoredMatch1 = await testPrisma.match.findUnique({ where: { id: 'm1' } });
+      expect(restoredMatch1?.homeScore).toBe(1);
+      const restoredGoal = await testPrisma.goal.findUnique({ where: { id: 'g1' } });
+      expect(restoredGoal).not.toBeNull();
+
+      // 验证 s2 隔离对照数据未被破坏
+      const isolatedSeason = await testPrisma.season.findUnique({ where: { id: 's2_isolated' } });
+      expect(isolatedSeason).not.toBeNull();
+      const isolatedMatch = await testPrisma.match.findUnique({ where: { id: 'm2_isolated' } });
+      expect(isolatedMatch).not.toBeNull();
+
+      // 清理对照数据
+      await testPrisma.match.deleteMany({ where: { id: 'm2_isolated' } });
+      await testPrisma.season.deleteMany({ where: { id: 's2_isolated' } });
+    });
+
+    it('staff 模块恢复：按 ID upsert 恢复、更新 sessionVersion，并保护最后一个超级管理员', async () => {
+      await seedAll18Tables(testPrisma);
+
+      let staffBackupBuffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of this.params.Body) chunks.push(Buffer.from(chunk));
+        if (!staffBackupBuffer.length) staffBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-staff-location' } as any;
+      });
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
+        if (command.constructor.name === 'GetObjectCommand') {
+          return { Body: Readable.from([staffBackupBuffer]) } as any;
+        }
+        return {} as any;
+      });
+
+      const backup = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'staff',
+        selector: {},
+      });
+
+      // 篡改管理员用户名
+      await testPrisma.user.update({ where: { id: 'u1' }, data: { username: 'tampered_admin' } });
+
+      const originalStaffFlag = process.env.BACKUP_RESTORE_STAFF_ENABLED;
+      const originalTokenSecret = process.env.BACKUP_RESTORE_TOKEN_SECRET;
+      process.env.BACKUP_RESTORE_STAFF_ENABLED = 'true';
+      process.env.BACKUP_RESTORE_TOKEN_SECRET = 'integration-module-restore-secret';
+      try {
+        const preview = await service.previewRestore('admin', backup.key);
+        expect(preview.canExecute).toBe(true);
+
+        await service.restoreModuleBackup(
+          'admin',
+          backup.key,
+          preview.restoreToken,
+          'CONFIRM_MODULE_RESTORE',
+        );
+      } finally {
+        if (originalStaffFlag === undefined) delete process.env.BACKUP_RESTORE_STAFF_ENABLED;
+        else process.env.BACKUP_RESTORE_STAFF_ENABLED = originalStaffFlag;
+        if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
+        else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
+      }
+
+      const restoredAdmin = await testPrisma.user.findUnique({ where: { id: 'u1' } });
+      expect(restoredAdmin?.username).toBe('admin');
+      expect(restoredAdmin?.sessionVersion).toBeGreaterThan(0);
+    });
+
+    it('members 模块恢复：更新 sessionVersion 致旧会话失效，且 PENDING 校园卡重置为 CHANGES_REQUESTED', async () => {
+      await seedAll18Tables(testPrisma);
+
+      // 插入一条 PENDING 审核会员
+      await testPrisma.memberAccount.upsert({
+        where: { id: 'member_pending' },
+        create: {
+          id: 'member_pending',
+          username: 'student_applicant',
+          password: 'pwd',
+          verificationStatus: 'PENDING',
+        },
+        update: { verificationStatus: 'PENDING' },
+      });
+
+      let memberBackupBuffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of this.params.Body) chunks.push(Buffer.from(chunk));
+        if (!memberBackupBuffer.length) memberBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-member-location' } as any;
+      });
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
+        if (command.constructor.name === 'GetObjectCommand') {
+          return { Body: Readable.from([memberBackupBuffer]) } as any;
+        }
+        return {} as any;
+      });
+
+      const backup = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'members',
+        selector: {},
+      });
+
+      const originalMemberFlag = process.env.BACKUP_RESTORE_MEMBERS_ENABLED;
+      const originalTokenSecret = process.env.BACKUP_RESTORE_TOKEN_SECRET;
+      process.env.BACKUP_RESTORE_MEMBERS_ENABLED = 'true';
+      process.env.BACKUP_RESTORE_TOKEN_SECRET = 'integration-module-restore-secret';
+      try {
+        const preview = await service.previewRestore('admin', backup.key);
+        await service.restoreModuleBackup(
+          'admin',
+          backup.key,
+          preview.restoreToken,
+          'CONFIRM_MODULE_RESTORE',
+        );
+      } finally {
+        if (originalMemberFlag === undefined) delete process.env.BACKUP_RESTORE_MEMBERS_ENABLED;
+        else process.env.BACKUP_RESTORE_MEMBERS_ENABLED = originalMemberFlag;
+        if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
+        else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
+      }
+
+      const restoredPending = await testPrisma.memberAccount.findUnique({
+        where: { id: 'member_pending' },
+      });
+      expect(restoredPending?.verificationStatus).toBe('CHANGES_REQUESTED');
+      expect(restoredPending?.reviewComment).toContain('重新提交校园卡');
+      expect(restoredPending?.sessionVersion).toBeGreaterThan(0);
+
+      await testPrisma.memberAccount.deleteMany({ where: { id: 'member_pending' } });
+    });
+
+    it('operations 模块恢复：按 ID upsert 成功恢复，不删除备份中不存在的现有操作记录', async () => {
+      await seedAll18Tables(testPrisma);
+
+      let opsBackupBuffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of this.params.Body) chunks.push(Buffer.from(chunk));
+        if (!opsBackupBuffer.length) opsBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-ops-location' } as any;
+      });
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
+        if (command.constructor.name === 'GetObjectCommand') {
+          return { Body: Readable.from([opsBackupBuffer]) } as any;
+        }
+        return {} as any;
+      });
+
+      const backup = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'operations',
+        selector: {},
+      });
+
+      // 篡改原日志并插入一条备份后产生的全新审计日志
+      await testPrisma.auditLog.update({
+        where: { id: 'log1' },
+        data: { action: 'TAMPERED_ACTION' },
+      });
+      await testPrisma.auditLog.create({
+        data: {
+          id: 'log_new_later',
+          username: 'admin',
+          action: 'NEW_LATER_ACTION',
+          details: '备份后发生的新操作',
+          createdAt: new Date(),
+        },
+      });
+
+      const originalOpsFlag = process.env.BACKUP_RESTORE_OPERATIONS_ENABLED;
+      const originalTokenSecret = process.env.BACKUP_RESTORE_TOKEN_SECRET;
+      process.env.BACKUP_RESTORE_OPERATIONS_ENABLED = 'true';
+      process.env.BACKUP_RESTORE_TOKEN_SECRET = 'integration-module-restore-secret';
+      try {
+        const preview = await service.previewRestore('admin', backup.key);
+        await service.restoreModuleBackup(
+          'admin',
+          backup.key,
+          preview.restoreToken,
+          'CONFIRM_MODULE_RESTORE',
+        );
+      } finally {
+        if (originalOpsFlag === undefined) delete process.env.BACKUP_RESTORE_OPERATIONS_ENABLED;
+        else process.env.BACKUP_RESTORE_OPERATIONS_ENABLED = originalOpsFlag;
+        if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
+        else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
+      }
+
+      // log1 应恢复为原始 CREATE_MATCH
+      const restoredLog1 = await testPrisma.auditLog.findUnique({ where: { id: 'log1' } });
+      expect(restoredLog1?.action).toBe('CREATE_MATCH');
+
+      // 后来新增的 log_new_later 必须依然保留 (merge 语义)
+      const keptNewLog = await testPrisma.auditLog.findUnique({ where: { id: 'log_new_later' } });
+      expect(keptNewLog).not.toBeNull();
+
+      await testPrisma.auditLog.deleteMany({ where: { id: 'log_new_later' } });
+    });
+
+    it('租约 Fencing 机制与原子回滚：事务提交前租约被接管时触发 fencing failed 报错，业务写入回滚且 Checkpoint 得到保留', async () => {
+      await seedAll18Tables(testPrisma);
+
+      // 为 content 模块创建一条 Checkpoint 记录
+      await testPrisma.backupModuleCheckpoint.upsert({
+        where: {
+          module_selectorKey: {
+            module: 'content',
+            selectorKey: 'default',
+          },
+        },
+        create: {
+          module: 'content',
+          selectorKey: 'default',
+          fingerprint: 'fp_initial_content',
+          lastRunAt: new Date('2026-09-01T00:00:00Z'),
+        },
+        update: {
+          fingerprint: 'fp_initial_content',
+        },
+      });
+
+      let contentBackupBuffer = Buffer.alloc(0);
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const UploadMock = require('@aws-sdk/lib-storage').Upload;
+      jest.spyOn(UploadMock.prototype, 'done').mockImplementation(async function (this: any) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of this.params.Body) chunks.push(Buffer.from(chunk));
+        if (!contentBackupBuffer.length) contentBackupBuffer = Buffer.concat(chunks);
+        return { Location: 'mock-content-location' } as any;
+      });
+      jest.spyOn((objectStore as any).s3Client, 'send').mockImplementation(async (command: any) => {
+        if (command.constructor.name === 'GetObjectCommand') {
+          return { Body: Readable.from([contentBackupBuffer]) } as any;
+        }
+        return {} as any;
+      });
+
+      const backup = await service.createBackup('admin', {
+        scope: 'module',
+        module: 'content',
+        selector: {},
+      });
+
+      // 篡改原新闻内容
+      await testPrisma.news.update({
+        where: { id: 'n1' },
+        data: { title: 'TAMPERED_NEWS_TITLE' },
+      });
+
+      const originalContentFlag = process.env.BACKUP_RESTORE_CONTENT_ENABLED;
+      const originalTokenSecret = process.env.BACKUP_RESTORE_TOKEN_SECRET;
+      process.env.BACKUP_RESTORE_CONTENT_ENABLED = 'true';
+      process.env.BACKUP_RESTORE_TOKEN_SECRET = 'integration-module-restore-secret';
+
+      // 拦截 mergeModule 并在即将提交事务时篡改 backupLock 中的 leaseToken（模拟其他节点接管租约）
+      const originalMergeModule = (moduleRestoreService as any).mergeModule.bind(
+        moduleRestoreService,
+      );
+      jest
+        .spyOn(moduleRestoreService as any, 'mergeModule')
+        .mockImplementation(async (tx: any, parsed: any, mod: any) => {
+          await originalMergeModule(tx, parsed, mod);
+          // 关键：在恢复事务进行中，篡改底层数据库 backupLock 记录的 leaseToken，使后续 CAS Fencing 失败！
+          await testPrisma.backupLock.updateMany({
+            where: { lockKey: 'lock:module:content:default' },
+            data: { leaseToken: 'stolen_by_another_node_token' },
+          });
+        });
+
+      try {
+        const preview = await service.previewRestore('admin', backup.key);
+        await expect(
+          service.restoreModuleBackup(
+            'admin',
+            backup.key,
+            preview.restoreToken,
+            'CONFIRM_MODULE_RESTORE',
+          ),
+        ).rejects.toThrow('恢复期间租约已失效或被接管 (fencing failed)，事务回滚');
+      } finally {
+        if (originalContentFlag === undefined) delete process.env.BACKUP_RESTORE_CONTENT_ENABLED;
+        else process.env.BACKUP_RESTORE_CONTENT_ENABLED = originalContentFlag;
+        if (originalTokenSecret === undefined) delete process.env.BACKUP_RESTORE_TOKEN_SECRET;
+        else process.env.BACKUP_RESTORE_TOKEN_SECRET = originalTokenSecret;
+        jest.restoreAllMocks();
+      }
+
+      // 验证 1：事务完全回滚，新闻标题依然是篡改后的状态，未被恢复覆写
+      const newsAfterFailedRestore = await testPrisma.news.findUnique({ where: { id: 'n1' } });
+      expect(newsAfterFailedRestore?.title).toBe('TAMPERED_NEWS_TITLE');
+
+      // 验证 2：Checkpoint 得到保留，未被事务中的 deleteMany 物理删除
+      const checkpoint = await testPrisma.backupModuleCheckpoint.findUnique({
+        where: {
+          module_selectorKey: {
+            module: 'content',
+            selectorKey: 'default',
+          },
+        },
+      });
+      expect(checkpoint).not.toBeNull();
+      expect(checkpoint?.fingerprint).toBe('fp_initial_content');
+
+      // 清理 Checkpoint
+      await testPrisma.backupModuleCheckpoint.deleteMany({
+        where: { module: 'content', selectorKey: 'default' },
+      });
+    });
   });
 
   describe('PostgreSQL 真实数据库全量 18 表导出、篡改、恢复与深度数据一致性测试', () => {

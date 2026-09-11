@@ -67,6 +67,76 @@ describe('BackupService 月度模块化备份与批次状态机测试', () => {
     return { service, exportService, objectStore, prisma };
   };
 
+  const createPrCService = () => {
+    const exportService = {
+      createBackup: jest.fn().mockResolvedValue({
+        key: 'private-backups/database/modules/staff/backup.json.gz',
+        filename: 'backup.json.gz',
+        size: 1024,
+        checksum: 'mock-sha256',
+      }),
+    };
+    const objectStore = {
+      listBackups: jest.fn().mockResolvedValue([]),
+      deleteObject: jest.fn().mockResolvedValue(undefined),
+      headObject: jest.fn().mockResolvedValue(1024),
+    };
+
+    const prisma: any = {
+      $transaction: jest.fn().mockImplementation(async (cb: any) => cb(prisma)),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'gate-id' }]),
+      backupLock: {
+        create: jest.fn().mockResolvedValue({ leaseToken: 'mock-lease' }),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
+        upsert: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      backupRun: {
+        create: jest
+          .fn()
+          .mockImplementation((args: any) => Promise.resolve({ id: 'run-1', ...args.data })),
+        upsert: jest.fn().mockResolvedValue({ id: 'run-1' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      backupModuleCheckpoint: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+      season: {
+        findFirst: jest.fn().mockResolvedValue({ id: 's1' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 's-archived', status: 'archived' }),
+      },
+      auditLog: {
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+
+    const fingerprintService = {
+      calculateModuleFingerprint: jest.fn(),
+    };
+
+    const service = new BackupService(
+      exportService as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      objectStore as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      prisma as any,
+      {} as any,
+      fingerprintService as any,
+    );
+
+    return { service, exportService, objectStore, prisma, fingerprintService };
+  };
+
   afterEach(() => {
     jest.useRealTimers();
     delete process.env.SCHEDULED_BACKUP_MIN_INTERVAL_HOURS;
@@ -401,68 +471,6 @@ describe('BackupService 月度模块化备份与批次状态机测试', () => {
   });
 
   describe('7. PR-C 指纹变化检测、快照一致性与 Fencing 闭环', () => {
-    const createPrCService = () => {
-      const exportService = {
-        createBackup: jest.fn().mockResolvedValue({
-          key: 'private-backups/database/modules/staff/backup.json.gz',
-          filename: 'backup.json.gz',
-          size: 1024,
-          checksum: 'mock-sha256',
-        }),
-      };
-      const objectStore = {
-        listBackups: jest.fn().mockResolvedValue([]),
-        deleteObject: jest.fn().mockResolvedValue(undefined),
-      };
-
-      const prisma: any = {
-        $transaction: jest.fn().mockImplementation(async (cb: any) => cb(prisma)),
-        $queryRaw: jest.fn().mockResolvedValue([{ id: 'gate-id' }]),
-        backupLock: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          findFirst: jest.fn().mockResolvedValue(null),
-          count: jest.fn().mockResolvedValue(0),
-          upsert: jest.fn().mockResolvedValue({}),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        backupRun: {
-          create: jest
-            .fn()
-            .mockImplementation((args: any) => Promise.resolve({ id: 'run-1', ...args.data })),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          findUnique: jest.fn().mockResolvedValue(null),
-        },
-        backupModuleCheckpoint: {
-          findUnique: jest.fn().mockResolvedValue(null),
-          update: jest.fn().mockResolvedValue({}),
-          upsert: jest.fn().mockResolvedValue({}),
-        },
-        season: {
-          findFirst: jest.fn().mockResolvedValue({ id: 's1' }),
-        },
-      };
-
-      const fingerprintService = {
-        calculateModuleFingerprint: jest.fn(),
-      };
-
-      const service = new BackupService(
-        exportService as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        objectStore as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        prisma as any,
-        {} as any,
-        fingerprintService as any,
-      );
-
-      return { service, exportService, objectStore, prisma, fingerprintService };
-    };
-
     it('指纹未变时，在持锁事务中 CAS 校验租约、更新 Checkpoint 与 BackupRun 为 skipped，不触发导出', async () => {
       const { service, exportService, prisma, fingerprintService } = createPrCService();
       const mockFp = {
@@ -655,6 +663,140 @@ describe('BackupService 月度模块化备份与批次状态机测试', () => {
           scope: 'season',
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('7. Neon 官方 4GB 配额超限守卫与归档重备控制', () => {
+    it('isNeonOfficialQuotaExceeded 决策逻辑验证：正常超限、未超限与各种降级分支', async () => {
+      const { service } = createPrCService();
+      const mockNeonTraffic: any = {
+        fetchMonthlyTraffic: jest.fn(),
+        isCurrentBillingPeriod: jest.fn(),
+      };
+      (service as any).neonTrafficService = mockNeonTraffic;
+
+      // 1. 正常超限 (4.2GB, active, not stale, valid billing period)
+      mockNeonTraffic.fetchMonthlyTraffic.mockResolvedValue({
+        status: 'active',
+        stale: false,
+        dataTransferBytes: 4.2 * 1024 * 1024 * 1024,
+      });
+      mockNeonTraffic.isCurrentBillingPeriod.mockReturnValue(true);
+
+      const res1 = await service.isNeonOfficialQuotaExceeded();
+      expect(res1.exceeded).toBe(true);
+      expect(res1.degraded).toBe(false);
+      expect(res1.reason).toBe('traffic_quota_exceeded');
+
+      // 2. 正常未超限 (2.5GB)
+      mockNeonTraffic.fetchMonthlyTraffic.mockResolvedValue({
+        status: 'active',
+        stale: false,
+        dataTransferBytes: 2.5 * 1024 * 1024 * 1024,
+      });
+      const res2 = await service.isNeonOfficialQuotaExceeded();
+      expect(res2.exceeded).toBe(false);
+      expect(res2.degraded).toBe(false);
+
+      // 3. 官方数据不可用 (unavailable) -> fail-open 降级
+      mockNeonTraffic.fetchMonthlyTraffic.mockResolvedValue({
+        status: 'unavailable',
+        stale: true,
+        dataTransferBytes: null,
+      });
+      const res3 = await service.isNeonOfficialQuotaExceeded();
+      expect(res3.exceeded).toBe(false);
+      expect(res3.degraded).toBe(true);
+      expect(res3.reason).toBe('unavailable');
+
+      // 4. 数据过期 (stale) -> fail-open 降级
+      mockNeonTraffic.fetchMonthlyTraffic.mockResolvedValue({
+        status: 'active',
+        stale: true,
+        dataTransferBytes: 4.5 * 1024 * 1024 * 1024,
+      });
+      const res4 = await service.isNeonOfficialQuotaExceeded();
+      expect(res4.exceeded).toBe(false);
+      expect(res4.degraded).toBe(true);
+      expect(res4.reason).toBe('stale');
+
+      // 5. 账期跨月不匹配 -> fail-open 降级
+      mockNeonTraffic.fetchMonthlyTraffic.mockResolvedValue({
+        status: 'active',
+        stale: false,
+        dataTransferBytes: 4.5 * 1024 * 1024 * 1024,
+      });
+      mockNeonTraffic.isCurrentBillingPeriod.mockReturnValue(false);
+      const res5 = await service.isNeonOfficialQuotaExceeded();
+      expect(res5.exceeded).toBe(false);
+      expect(res5.degraded).toBe(true);
+      expect(res5.reason).toBe('billing_period_mismatch');
+    });
+
+    it('归档赛季已有保护备份且配额超限时：暂停非必要重备份，写入 traffic_quota_exceeded 与审计告警', async () => {
+      const { service, exportService, prisma } = createPrCService();
+      prisma.auditLog = { create: jest.fn().mockResolvedValue({}) };
+
+      jest.spyOn(service, 'isNeonOfficialQuotaExceeded').mockResolvedValue({
+        exceeded: true,
+        degraded: false,
+        reason: 'traffic_quota_exceeded',
+      });
+      jest.spyOn(service, 'hasValidProtectedBackupForSeason').mockResolvedValue(true);
+
+      const res = await service.executeArchiveSeasonBackupWithLock(
+        'admin',
+        's-archived',
+        'archive',
+      );
+
+      expect(res.status).toBe('skipped');
+      expect(res.reason).toBe('traffic_quota_exceeded');
+      expect(exportService.createBackup).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'AUDIT_TRAFFIC_QUOTA_EXCEEDED',
+            details: expect.stringContaining('s-archived'),
+          }),
+        }),
+      );
+    });
+
+    it('归档赛季缺失保护备份但配额超限时：判定为核心必要补缺，记录紧急审计告警并继续执行备份', async () => {
+      const { service, exportService, prisma } = createPrCService();
+      prisma.auditLog = { create: jest.fn().mockResolvedValue({}) };
+
+      jest.spyOn(service, 'isNeonOfficialQuotaExceeded').mockResolvedValue({
+        exceeded: true,
+        degraded: false,
+        reason: 'traffic_quota_exceeded',
+      });
+      jest.spyOn(service, 'hasValidProtectedBackupForSeason').mockResolvedValue(false);
+
+      exportService.createBackup.mockResolvedValue({
+        key: 'private-backups/database/modules/season/s-archived.json.gz',
+        filename: 's-archived.json.gz',
+        size: 2048,
+        checksum: 'mock-checksum',
+      });
+
+      const res = await service.executeArchiveSeasonBackupWithLock(
+        'admin',
+        's-archived',
+        'archive',
+      );
+
+      expect(res.status).toBe('succeeded');
+      expect(exportService.createBackup).toHaveBeenCalled();
+      expect(prisma.auditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'EMERGENCY_ARCHIVE_BACKFILL_UNDER_QUOTA',
+            details: expect.stringContaining('s-archived'),
+          }),
+        }),
+      );
     });
   });
 });

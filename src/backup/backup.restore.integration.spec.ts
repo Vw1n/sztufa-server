@@ -18,6 +18,7 @@ import { Readable } from 'stream';
 describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
   let testPrisma: PrismaClient;
   let service: BackupService;
+  let moduleRestoreService: BackupModuleRestoreService;
   let objectStore: BackupObjectStoreService;
   let mockAuditLog: any;
   let originalBackupRestoreEnabled: string | undefined;
@@ -89,7 +90,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
       exportService,
       mockAuditLog as any,
     );
-    const moduleRestoreService = new BackupModuleRestoreService(
+    moduleRestoreService = new BackupModuleRestoreService(
       testPrisma as unknown as PrismaService,
       objectStore,
       verificationService,
@@ -510,6 +511,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
           homeTeamId: 't1',
           awayTeamId: 't1',
           matchDate: new Date('2027-05-01T10:00:00Z'),
+          location: '隔离测试场地',
           status: 'scheduled',
           stage: 'LEAGUE',
         },
@@ -786,7 +788,7 @@ describe('Backup & Restore Real PostgreSQL Integration Spec', () => {
           module: 'content',
           selectorKey: 'default',
           fingerprint: 'fp_initial_content',
-          lastRunAt: new Date('2026-09-01T00:00:00Z'),
+          lastObservedAt: new Date('2026-09-01T00:00:00Z'),
         },
         update: {
           fingerprint: 'fp_initial_content',

@@ -4,6 +4,8 @@ export interface NeonTrafficResult {
   status: 'active' | 'not_configured' | 'unavailable';
   capturedAt: string | null;
   billingPeriod: string | null;
+  billingStart: string | null;
+  billingEnd: string | null;
   dataTransferBytes: number | null;
   allowanceBytes: number;
   allowanceUsedPercent: number | null;
@@ -33,6 +35,8 @@ export class NeonTrafficService {
         status: 'not_configured',
         capturedAt: null,
         billingPeriod: null,
+        billingStart: null,
+        billingEnd: null,
         dataTransferBytes: null,
         allowanceBytes: NEON_FREE_ALLOWANCE_BYTES,
         allowanceUsedPercent: null,
@@ -125,6 +129,8 @@ export class NeonTrafficService {
         status: 'active',
         capturedAt: new Date().toISOString(),
         billingPeriod,
+        billingStart,
+        billingEnd,
         dataTransferBytes,
         allowanceBytes: NEON_FREE_ALLOWANCE_BYTES,
         allowanceUsedPercent,
@@ -141,6 +147,34 @@ export class NeonTrafficService {
     }
   }
 
+  isCurrentBillingPeriod(result: NeonTrafficResult, now = new Date()): boolean {
+    if (result.status !== 'active') return false;
+
+    // 若包含明确的起止时间戳
+    if (result.billingStart && result.billingEnd) {
+      const start = new Date(result.billingStart);
+      const end = new Date(result.billingEnd);
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        const nowMs = now.getTime();
+        // 账期通常天然跨月，只要当前时间落在 [billingStart, billingEnd) 即可
+        return nowMs >= start.getTime() && nowMs < end.getTime();
+      }
+    }
+
+    // 若缺失起止时间戳，根据采集时间是否在当月 UTC 作兜底校验
+    if (result.capturedAt) {
+      const captured = new Date(result.capturedAt);
+      if (!isNaN(captured.getTime())) {
+        return (
+          now.getUTCFullYear() === captured.getUTCFullYear() &&
+          now.getUTCMonth() === captured.getUTCMonth()
+        );
+      }
+    }
+
+    return false;
+  }
+
   private buildFallbackResult(reason: string): NeonTrafficResult {
     if (this.cache) {
       return {
@@ -153,6 +187,8 @@ export class NeonTrafficService {
       status: 'unavailable',
       capturedAt: null,
       billingPeriod: null,
+      billingStart: null,
+      billingEnd: null,
       dataTransferBytes: null,
       allowanceBytes: NEON_FREE_ALLOWANCE_BYTES,
       allowanceUsedPercent: null,

@@ -69,7 +69,8 @@ export type ScheduledModuleTaskResult =
         | 'duplicate_in_flight'
         | 'global_full_in_flight'
         | 'active_module_in_flight'
-        | 'already_protected';
+        | 'already_protected'
+        | 'traffic_quota_exceeded';
       existingBackup?: BackupMetadata;
       finishedAt: string;
     }
@@ -1227,6 +1228,42 @@ export class BackupService implements OnModuleInit {
           };
         }
       }
+      // 针对归档赛季的配额守卫检查：达到 4GB 红色预警时暂停非必要重备份，缺失保护备份的必要补缺仍继续执行
+      if (purpose === 'archive' && trigger !== 'manual' && selector?.seasonId) {
+        const quotaCheck = await this.isNeonOfficialQuotaExceeded();
+        if (quotaCheck.exceeded) {
+          const hasProtected = await this.hasValidProtectedBackupForSeason(selector.seasonId);
+          if (hasProtected) {
+            await this.recordAuditLog(
+              options.username,
+              'AUDIT_TRAFFIC_QUOTA_EXCEEDED',
+              `Neon 官方流量已达 4GB 红色阈值，暂停赛季 ${selector.seasonId} 的非必要归档重备份`,
+            );
+            await this.prisma.backupRun.updateMany({
+              where: { id: backupRun.id, leaseToken },
+              data: {
+                status: 'skipped',
+                skipReason: 'traffic_quota_exceeded',
+                finishedAt: new Date(),
+              },
+            });
+            committedSuccess = true;
+            return {
+              status: 'skipped',
+              module,
+              selector,
+              reason: 'traffic_quota_exceeded',
+              finishedAt: new Date().toISOString(),
+            };
+          } else {
+            await this.recordAuditLog(
+              options.username,
+              'EMERGENCY_ARCHIVE_BACKFILL_UNDER_QUOTA',
+              `Neon 官方流量已达 4GB 红色阈值，但赛季 ${selector.seasonId} 缺失受保护备份，执行紧急必要补缺`,
+            );
+          }
+        }
+      }
 
       // 执行导出与上传
       const backupMetadata = await this.exportService.createBackup(options.username, {
@@ -2020,6 +2057,78 @@ export class BackupService implements OnModuleInit {
     return this.executeArchiveSeasonBackupWithLock(username, seasonId, 'archive');
   }
 
+  async hasValidProtectedBackupForSeason(seasonId: string): Promise<boolean> {
+    const allBackups = await this.objectStore.listBackups();
+    const existingCandidates = allBackups.filter(
+      (b) =>
+        b.scope === 'module' &&
+        b.module === 'season' &&
+        b.seasonId === seasonId &&
+        b.purpose === 'archive' &&
+        b.protected &&
+        b.size > 0,
+    );
+    for (const candidate of existingCandidates) {
+      const headSize = await this.objectStore.headObject(candidate.key).catch(() => 0);
+      if (headSize > 0) {
+        const inspectRes = await this.verificationService
+          .inspectAndVerifyBackup(candidate.key)
+          .catch(() => null);
+        if (inspectRes?.valid) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async isNeonOfficialQuotaExceeded(): Promise<{
+    exceeded: boolean;
+    degraded: boolean;
+    reason?: string;
+  }> {
+    if (!this.neonTrafficService) {
+      return { exceeded: false, degraded: true, reason: 'neon_service_missing' };
+    }
+    try {
+      const traffic = await this.neonTrafficService.fetchMonthlyTraffic(false);
+      if (traffic.status !== 'active') {
+        return { exceeded: false, degraded: true, reason: traffic.status };
+      }
+      if (traffic.stale) {
+        return { exceeded: false, degraded: true, reason: 'stale' };
+      }
+      if (!this.neonTrafficService.isCurrentBillingPeriod(traffic)) {
+        return { exceeded: false, degraded: true, reason: 'billing_period_mismatch' };
+      }
+      if (traffic.dataTransferBytes === null) {
+        return { exceeded: false, degraded: true, reason: 'data_transfer_bytes_null' };
+      }
+      const exceeded = traffic.dataTransferBytes >= 4.0 * 1024 * 1024 * 1024;
+      return {
+        exceeded,
+        degraded: false,
+        reason: exceeded ? 'traffic_quota_exceeded' : undefined,
+      };
+    } catch {
+      return { exceeded: false, degraded: true, reason: 'neon_fetch_error' };
+    }
+  }
+
+  private async recordAuditLog(username: string, action: string, details: string) {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          username,
+          action,
+          details,
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`写入审计日志失败 [${action}]: ${err.message}`);
+    }
+  }
+
   async executeArchiveSeasonBackupWithLock(
     username: string,
     seasonId: string,
@@ -2193,6 +2302,38 @@ export class BackupService implements OnModuleInit {
               backupKey: existing.key,
             };
           }
+        }
+      }
+
+      const quotaCheck = await this.isNeonOfficialQuotaExceeded();
+      if (quotaCheck.exceeded) {
+        const hasProtected = await this.hasValidProtectedBackupForSeason(seasonId);
+        if (hasProtected) {
+          await this.recordAuditLog(
+            username,
+            'AUDIT_TRAFFIC_QUOTA_EXCEEDED',
+            `Neon 官方流量已达 4GB 红色阈值，暂停赛季 ${seasonId} 的非必要归档重备份`,
+          );
+          await this.prisma.backupRun.updateMany({
+            where: { taskKey, leaseToken },
+            data: {
+              status: 'skipped',
+              skipReason: 'traffic_quota_exceeded',
+              finishedAt: new Date(),
+            },
+          });
+          await this.releaseLock(lockKey, leaseToken).catch(() => {});
+          return {
+            seasonId,
+            status: 'skipped',
+            reason: 'traffic_quota_exceeded',
+          };
+        } else {
+          await this.recordAuditLog(
+            username,
+            'EMERGENCY_ARCHIVE_BACKFILL_UNDER_QUOTA',
+            `Neon 官方流量已达 4GB 红色阈值，但赛季 ${seasonId} 缺失受保护备份，执行紧急必要补缺`,
+          );
         }
       }
 

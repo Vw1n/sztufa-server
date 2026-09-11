@@ -49,3 +49,8 @@ Thumbs.db
 *.crt
 .vercel
 .env*
+
+# Backup restore drill reports
+scripts/drill-reports/*.md
+scripts/drill-reports/*.json
+!scripts/drill-reports/.gitkeep

@@ -59,7 +59,7 @@ jobs:
         run: npm run lint:check
 
       - name: 运行测试
-        run: npm test -- --runInBand
+        run: DEBUG_TEST_LOGS=1 npm test -- --runInBand
 
       - name: 验证空库 Prisma Migration 部署
         run: npx prisma migrate deploy

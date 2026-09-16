@@ -1,0 +1,35 @@
+name: 周度依赖漏洞全量审计
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # 每周一 08:00 UTC（北京时间 16:00）
+  workflow_dispatch: {}   # 支持手动触发
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: 全量 npm audit（含 dev 依赖）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装锁定依赖
+        run: npm ci
+
+      - name: 全量高危漏洞审计
+        run: npm audit --audit-level=high
+
+      - name: 输出审计摘要到 Job Summary
+        if: always()
+        run: |
+          echo "## npm audit 结果" >> $GITHUB_STEP_SUMMARY
+          npm audit --audit-level=high --json >> $GITHUB_STEP_SUMMARY || true

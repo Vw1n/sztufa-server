@@ -20,6 +20,7 @@ import sharp from 'sharp';
 import * as crypto from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { assertPublicAssetUrl } from '../common/r2-url-guard';
 
 export interface PromotedAsset {
   originalUrl: string;
@@ -211,6 +212,18 @@ export class UploadService {
 
   extractKeyFromUrl(urlOrKey: string): string {
     if (!urlOrKey) return '';
+    const urlLikePrefix = urlOrKey.slice(0, 2).replace(/\\/g, '/');
+    if (urlLikePrefix === '//') {
+      throw new UnprocessableEntityException('图片 URL 格式非法');
+    }
+    // 纯 key 形式（不以协议开头）直接返回，保持原行为
+    // 匹配 "scheme:" 格式（如 http:、https:、javascript:、data:）
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(urlOrKey)) {
+      return urlOrKey;
+    }
+
+    assertPublicAssetUrl(urlOrKey);
+
     const baseUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
     if (baseUrl && urlOrKey.startsWith(`${baseUrl}/`)) {
       return urlOrKey.substring(baseUrl.length + 1);

@@ -2,6 +2,23 @@ import { CanActivate, ExecutionContext, HttpException, Injectable } from '@nestj
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { consumeRollingLogin } from '../common/rolling-login-limit';
+import { parsePositiveInt } from '../common/parse-positive-int';
+
+const LOGIN_IP_LIMIT = parsePositiveInt(
+  process.env.AUTH_LOGIN_IP_LIMIT,
+  100,
+  'AUTH_LOGIN_IP_LIMIT',
+);
+const NON_LOGIN_IP_LIMIT = parsePositiveInt(
+  process.env.AUTH_NON_LOGIN_IP_LIMIT,
+  30,
+  'AUTH_NON_LOGIN_IP_LIMIT',
+);
+const LOGIN_ACCOUNT_LIMIT = parsePositiveInt(
+  process.env.AUTH_LOGIN_ACCOUNT_LIMIT,
+  10,
+  'AUTH_LOGIN_ACCOUNT_LIMIT',
+);
 
 @Injectable()
 export class AuthRateGuard implements CanActivate {
@@ -17,9 +34,11 @@ export class AuthRateGuard implements CanActivate {
     const windowMs = 10 * 60 * 1000;
     const slot = Math.floor(Date.now() / windowMs);
     // req.ip 只在部署方配置可信代理后才接受转发 IP，不能直接信任任意 X-Forwarded-For。
-    const keys: [string, number][] = [[`ip:${req.ip}`, login ? 100 : 30]];
+    const keys: [string, number][] = [
+      [`ip:${req.ip}`, login ? LOGIN_IP_LIMIT : NON_LOGIN_IP_LIMIT],
+    ];
     if (login && typeof req.body?.username === 'string') {
-      keys.push([`account:${req.body.username.trim().slice(0, 128)}`, 10]);
+      keys.push([`account:${req.body.username.trim().slice(0, 128)}`, LOGIN_ACCOUNT_LIMIT]);
     }
     for (const [key, limit] of keys) {
       const id = createHash('sha256').update(`${path}:${slot}:${key}`).digest('hex');

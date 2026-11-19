@@ -212,6 +212,9 @@ export class TeamService {
       if (isSuperAdmin && !player.name && !player.studentId && !player.jerseyNumber) {
         continue;
       }
+      if (!player.name) {
+        throw new BadRequestException('新增球员姓名不能为空，请填写姓名或删除空白行');
+      }
 
       if (!isSuperAdmin && targetSeason) {
         const existingPlayer = await tx.seasonTeamPlayer.findFirst({
@@ -408,7 +411,7 @@ export class TeamService {
       },
       update: { ...teamData, isRegistered: true },
     });
-    const updatedTeam = { ...team, ...updatedProfile };
+    const updatedTeam = { ...team, ...updatedProfile, id: teamId };
 
     if (targetSeason?.status === 'active') {
       await tx.team.update({
@@ -455,6 +458,12 @@ export class TeamService {
         studentId: (playerDto.studentId || '').trim(),
         jerseyNumber: (playerDto.jerseyNumber || '').trim(),
       };
+
+      if (!normalizedDto.id && !normalizedDto.name) {
+        if (!normalizedDto.studentId && !normalizedDto.jerseyNumber && !normalizedDto.photo)
+          continue;
+        throw new BadRequestException('新增球员姓名不能为空，请填写姓名或删除空白行');
+      }
 
       const existingById = normalizedDto.id
         ? await tx.player.findUnique({ where: { id: normalizedDto.id } })
@@ -540,7 +549,21 @@ export class TeamService {
       });
     }
 
-    return updatedTeam;
+    const roster = await tx.seasonTeamPlayer.findMany({
+      where: { seasonId: effectiveSeasonId, teamId, player: { deletedAt: null } },
+      include: { player: true },
+    });
+    return {
+      ...updatedTeam,
+      players: roster.map((entry: any) => ({
+        ...entry.player,
+        name: entry.playerName,
+        studentId: entry.studentId,
+        jerseyNumber: entry.jerseyNumber,
+        photo: entry.playerPhoto,
+        teamId,
+      })),
+    };
   }
 
   async updateWithPlayers(
@@ -554,7 +577,7 @@ export class TeamService {
       throw new ForbiddenException('您没有权限修改其他球队的信息');
     }
     if (txParam) {
-      return this.updateWithPlayersCore(txParam, teamId, dto, username, userCtx);
+      return this.updateWithPlayersCore(txParam, teamId, dto, username, userCtx, txParam);
     }
     const prepared = await this.assetPipeline.prepareTeamAssets(dto, username, userCtx, teamId);
     let result: any;

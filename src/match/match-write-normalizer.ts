@@ -1,3 +1,17 @@
+import { BadRequestException } from '@nestjs/common';
+
+const normalizeScore = (raw: unknown, label: string): number => {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  if (
+    (typeof raw !== 'number' && typeof raw !== 'string') ||
+    !/^\d+$/.test(String(raw).trim()) ||
+    !Number.isSafeInteger(Number(raw))
+  ) {
+    throw new BadRequestException(`${label}得分必须是非负整数`);
+  }
+  return Number(raw);
+};
+
 export interface NormalizedMatchInput {
   homeTeamId: string;
   awayTeamId: string;
@@ -28,18 +42,8 @@ export function normalizeMatchPayload(input: any): NormalizedMatchInput {
   const homeScoreRaw = input?.homeScore ?? input?.homeTeamScore;
   const awayScoreRaw = input?.awayScore ?? input?.awayTeamScore;
 
-  const homeScore =
-    typeof homeScoreRaw === 'number' && !isNaN(homeScoreRaw)
-      ? homeScoreRaw
-      : typeof homeScoreRaw === 'string' && !isNaN(parseInt(homeScoreRaw, 10))
-        ? parseInt(homeScoreRaw, 10)
-        : 0;
-  const awayScore =
-    typeof awayScoreRaw === 'number' && !isNaN(awayScoreRaw)
-      ? awayScoreRaw
-      : typeof awayScoreRaw === 'string' && !isNaN(parseInt(awayScoreRaw, 10))
-        ? parseInt(awayScoreRaw, 10)
-        : 0;
+  const homeScore = normalizeScore(homeScoreRaw, '主队');
+  const awayScore = normalizeScore(awayScoreRaw, '客队');
 
   const homePenaltyScore =
     typeof input?.homePenaltyScore === 'number' && !isNaN(input.homePenaltyScore)

@@ -340,7 +340,12 @@ describe('TeamService.updateWithPlayers', () => {
     const tx: any = {
       team: { update: jest.fn(), findUnique: jest.fn() },
       player: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
-      seasonTeamPlayer: { findFirst: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
+      seasonTeamPlayer: {
+        findFirst: jest.fn(),
+        findMany: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
       seasonTeamProfile: { upsert: jest.fn() },
       auditLog: { create: jest.fn() },
     };
@@ -367,6 +372,31 @@ describe('TeamService.updateWithPlayers', () => {
     );
     return { service, prisma, tx, assetPipeline };
   };
+
+  it('超管空白新增行不会生成未命名球员，部分填写且无姓名则拒绝', async () => {
+    const { service, prisma, tx } = createService();
+    prisma.team.findUnique.mockResolvedValue({ id: 'team-1', deletedAt: null });
+    prisma.season.findUnique.mockResolvedValue({ id: 'season-1', name: '测试赛季' });
+    tx.seasonTeamProfile.upsert.mockResolvedValue({ id: 'profile-1' });
+    const result = await service.updateWithPlayers(
+      'team-1',
+      { seasonId: 'season-1', players: [{ name: ' ', studentId: '', jerseyNumber: '' }] },
+      'admin',
+      { role: 'super_admin' },
+    );
+    expect(result.id).toBe('team-1');
+    expect(result.players).toEqual([]);
+    expect(tx.player.create).not.toHaveBeenCalled();
+    expect(tx.seasonTeamPlayer.upsert).not.toHaveBeenCalled();
+    await expect(
+      service.updateWithPlayers(
+        'team-1',
+        { seasonId: 'season-1', players: [{ name: '', studentId: '20260001', jerseyNumber: '0' }] },
+        'admin',
+        { role: 'super_admin' },
+      ),
+    ).rejects.toThrow('新增球员姓名不能为空');
+  });
 
   it('updates only the selected season snapshot when player details change', async () => {
     const { service, prisma, tx } = createService();
@@ -403,7 +433,16 @@ describe('TeamService.updateWithPlayers', () => {
     tx.auditLog.create.mockResolvedValue({});
     tx.team.findUnique.mockResolvedValue({ id: 'team-1', players: [{ id: 'player-1' }] });
 
-    await service.updateWithPlayers(
+    tx.seasonTeamPlayer.findMany.mockResolvedValue([
+      {
+        player: { id: 'player-1', name: '旧名' },
+        playerName: 'Player',
+        studentId: 'new-id',
+        jerseyNumber: '10',
+        playerPhoto: null,
+      },
+    ]);
+    const result = await service.updateWithPlayers(
       'team-1',
       {
         seasonId: 'season-1',
@@ -412,6 +451,16 @@ describe('TeamService.updateWithPlayers', () => {
       'coach',
       { role: 'coach', teamId: 'team-1' },
     );
+
+    expect(result.id).toBe('team-1');
+    expect(result.players).toEqual([
+      expect.objectContaining({
+        id: 'player-1',
+        name: 'Player',
+        studentId: 'new-id',
+        jerseyNumber: '10',
+      }),
+    ]);
 
     expect(tx.player.update).toHaveBeenCalledWith(
       expect.objectContaining({

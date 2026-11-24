@@ -2,6 +2,7 @@ import { Readable, Transform } from 'stream';
 import * as zlib from 'zlib';
 import * as crypto from 'crypto';
 import { BadRequestException } from '@nestjs/common';
+import { parserStream } from 'stream-json';
 import { BackupStagingStore } from './backup-staging-store';
 import {
   MANDATORY_BACKUP_TABLES,
@@ -10,11 +11,6 @@ import {
 } from './backup-table-registry';
 import { BackupScope } from './backup-scope.service';
 import { BackupManifestV3, ParseStreamResult } from './backup-format';
-
-// CommonJS require 兼容 stream-json
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const StreamJsonParser = require('stream-json/Parser');
 
 function isValidIsoDate(str: any): boolean {
   if (typeof str !== 'string') return false;
@@ -150,7 +146,7 @@ export async function parseAndValidateBackupStream(
   }
   lastStream = lastStream.pipe(decompressedMeter);
 
-  const jsonParser = new StreamJsonParser({
+  const jsonParser = parserStream({
     packKeys: false,
     packStrings: false,
     packNumbers: false,

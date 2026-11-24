@@ -38,19 +38,19 @@
     "baseline:compare": "ts-node scripts/compare-data-baseline.ts"
   },
   "overrides": {
-    "js-yaml": "4.3.1"
+    "js-yaml": "4.3.2"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1076.0",
     "@aws-sdk/lib-storage": "^3.1101.0",
     "@aws-sdk/s3-request-presigner": "^3.1097.0",
     "@napi-rs/canvas": "0.1.80",
-    "@nestjs/common": "^11.1.28",
+    "@nestjs/common": "^11.2.11",
     "@nestjs/config": "^4.0.4",
-    "@nestjs/core": "^11.1.28",
+    "@nestjs/core": "^11.2.11",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/passport": "^11.0.5",
-    "@nestjs/platform-express": "^11.1.28",
+    "@nestjs/platform-express": "^11.2.11",
     "@nestjs/swagger": "^11.4.6",
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^5.7.0",
@@ -60,15 +60,15 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "dotenv": "^16.3.1",
-    "express": "^5.1.0",
+    "express": "^5.3.0",
     "helmet": "^8.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdfjs-dist": "4.10.38",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sharp": "^0.35.2",
-    "stream-json": "^1.8.0"
+    "sharp": "^0.35.5",
+    "stream-json": "^3.9.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
@@ -79,7 +79,6 @@
     "@types/jest": "^30.0.0",
     "@types/multer": "^2.1.0",
     "@types/node": "^22.0.0",
-    "@types/stream-json": "^1.7.8",
     "@types/supertest": "^2.0.16",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
@@ -112,8 +111,20 @@
       "backup-memory\\.spec\\.ts$"
     ],
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.ts$": "ts-jest",
+      "[/\\\\]node_modules[/\\\\]stream-(json|chain)[/\\\\].+\\.js$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true,
+            "isolatedModules": true
+          }
+        }
+      ]
     },
+    "transformIgnorePatterns": [
+      "[/\\\\]node_modules[/\\\\](?!stream-(json|chain)[/\\\\])"
+    ],
     "collectCoverageFrom": [
       "src/**/*.(t|j)s"
     ],

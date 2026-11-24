@@ -111,11 +111,21 @@
       "backup-memory\\.spec\\.ts$"
     ],
     "transform": {
-      "^.+\\.ts$": "ts-jest",
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "CommonJS",
+            "moduleResolution": "Node"
+          }
+        }
+      ],
       "[/\\\\]node_modules[/\\\\]stream-(json|chain)[/\\\\].+\\.js$": [
         "ts-jest",
         {
           "tsconfig": {
+            "module": "CommonJS",
+            "moduleResolution": "Node",
             "allowJs": true,
             "isolatedModules": true
           }

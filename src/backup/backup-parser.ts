@@ -2,7 +2,6 @@ import { Readable, Transform } from 'stream';
 import * as zlib from 'zlib';
 import * as crypto from 'crypto';
 import { BadRequestException } from '@nestjs/common';
-import { parserStream } from 'stream-json';
 import { BackupStagingStore } from './backup-staging-store';
 import {
   MANDATORY_BACKUP_TABLES,
@@ -48,6 +47,8 @@ export async function parseAndValidateBackupStream(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _filename?: string,
 ): Promise<ParseStreamResult> {
+  // 保留原生动态导入，兼容不支持 require(ESM) 的函数加载器。
+  const { parserStream } = await import('stream-json');
   const maxCompressedBytes = parseInt(process.env.BACKUP_MAX_COMPRESSED_BYTES || '104857600', 10);
   const maxDecompressedBytes = parseInt(
     process.env.BACKUP_MAX_UNCOMPRESSED_BYTES || '209715200',
